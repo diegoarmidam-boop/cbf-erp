@@ -31,9 +31,12 @@ Fuera de alcance de V1: Cosecha, Empaque, Embarques, Contabilidad, Auditoría (U
 ```bash
 npm install
 cp backend/.env.example backend/.env   # configurar credenciales de MySQL local
+cp web/.env.example web/.env           # VITE_API_URL, por defecto http://localhost:4000
 npm run build:shared                    # compila @cbf/shared antes de usarlo (dev:backend y seed ya lo hacen solos)
 npm run prisma:migrate
-npm run seed
+npm run seed                            # imprime la contraseña inicial del usuario "director" — cámbiala
 npm run dev:backend
 npm run dev:web
 ```
+
+Con eso, la web queda en `http://localhost:5173` y el API en `http://localhost:4000`.
