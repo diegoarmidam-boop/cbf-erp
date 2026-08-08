@@ -28,6 +28,7 @@ const MODELOS_AUDITADOS = new Set([
   "BonoConfig",
   "BonoOtorgado",
   "CompromisoEspecial",
+  "FaltaInjustificada",
   "Equipo",
   "CombustibleCarga",
   "MantenimientoConcepto",
@@ -54,7 +55,7 @@ const ACCIONES_ESCRITURA = new Set(["create", "update", "delete", "upsert"]);
 
 const basePrisma = new PrismaClient();
 
-export const prisma = basePrisma.$extends({
+const extendedPrisma = basePrisma.$extends({
   query: {
     $allModels: {
       async $allOperations({ model, operation, args, query }) {
@@ -98,3 +99,6 @@ export const prisma = basePrisma.$extends({
     },
   },
 });
+
+export const prisma = extendedPrisma;
+export type TransactionClient = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];

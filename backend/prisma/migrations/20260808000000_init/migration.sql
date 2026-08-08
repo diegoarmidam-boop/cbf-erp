@@ -300,6 +300,7 @@ CREATE TABLE `Prestamo` (
     `periodicidad` ENUM('semanal', 'quincenal', 'mensual') NOT NULL,
     `montoPorDescuento` DECIMAL(10, 2) NOT NULL,
     `fechaPrimerDescuento` DATE NOT NULL,
+    `proximoDescuento` DATE NOT NULL,
     `saldoPendiente` DECIMAL(10, 2) NOT NULL,
     `activo` BOOLEAN NOT NULL DEFAULT true,
 
@@ -348,6 +349,19 @@ CREATE TABLE `CompromisoEspecial` (
     `cumplido` BOOLEAN NULL,
 
     INDEX `CompromisoEspecial_personalId_fecha_idx`(`personalId`, `fecha`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `FaltaInjustificada` (
+    `id` VARCHAR(191) NOT NULL,
+    `personalId` VARCHAR(191) NOT NULL,
+    `fecha` DATE NOT NULL,
+    `notas` VARCHAR(191) NULL,
+    `registradoPorId` VARCHAR(191) NOT NULL,
+    `fechaRegistro` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+
+    UNIQUE INDEX `FaltaInjustificada_personalId_fecha_key`(`personalId`, `fecha`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -775,6 +789,9 @@ ALTER TABLE `BonoDiaEspecial` ADD CONSTRAINT `BonoDiaEspecial_bonoId_fkey` FOREI
 
 -- AddForeignKey
 ALTER TABLE `CompromisoEspecial` ADD CONSTRAINT `CompromisoEspecial_personalId_fkey` FOREIGN KEY (`personalId`) REFERENCES `Personal`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `FaltaInjustificada` ADD CONSTRAINT `FaltaInjustificada_personalId_fkey` FOREIGN KEY (`personalId`) REFERENCES `Personal`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE `BonoOtorgado` ADD CONSTRAINT `BonoOtorgado_bonoConfigId_fkey` FOREIGN KEY (`bonoConfigId`) REFERENCES `BonoConfig`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;

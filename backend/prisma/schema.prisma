@@ -329,6 +329,7 @@ model Personal {
   prestamos             Prestamo[]
   bonosOtorgados        BonoOtorgado[]
   compromisosEspeciales CompromisoEspecial[]
+  faltasInjustificadas  FaltaInjustificada[]
   equipoUsoDiario       EquipoUsoDiario[]
 
   @@index([tipo, activo])
@@ -485,6 +486,7 @@ model Prestamo {
   periodicidad         Periodicidad // solo semanal|quincenal aplican aquí
   montoPorDescuento    Decimal      @db.Decimal(10, 2)
   fechaPrimerDescuento DateTime     @db.Date
+  proximoDescuento     DateTime     @db.Date // avanza cada vez que se aplica un descuento; empieza igual a fechaPrimerDescuento
   saldoPendiente       Decimal      @db.Decimal(10, 2)
   activo               Boolean      @default(true)
 
@@ -540,6 +542,24 @@ model CompromisoEspecial {
   cumplido    Boolean?
 
   @@index([personalId, fecha])
+}
+
+// Solo aplica a personal fijo: "se asume presente salvo que pidan
+// vacaciones/descanso" (9.11), así que una falta es un hecho que alguien
+// debe registrar explícitamente — distinto de "sin registro todavía" (gris
+// en la tira de asistencia), que es la ausencia de esta fila, no una fila.
+// Por ahora solo se registra para consulta; el sistema queda preparado para
+// activar el descuento automático más adelante, sin activarlo todavía.
+model FaltaInjustificada {
+  id              String   @id @default(uuid())
+  personalId      String
+  personal        Personal @relation(fields: [personalId], references: [id])
+  fecha           DateTime @db.Date
+  notas           String?
+  registradoPorId String
+  fechaRegistro   DateTime @default(now())
+
+  @@unique([personalId, fecha])
 }
 
 enum EstadoBono {

@@ -3,6 +3,15 @@
 // fechas de captura de campo, sin depender de una librería externa.
 export type FechaISO = string;
 
+// 0=domingo .. 6=sábado, mismo índice que Date#getDay().
+export const NOMBRES_DIAS = ["domingo", "lunes", "martes", "miercoles", "jueves", "viernes", "sabado"] as const;
+
+export function diaIndexDesdeNombre(nombre: string): number {
+  const idx = NOMBRES_DIAS.indexOf(nombre.toLowerCase() as (typeof NOMBRES_DIAS)[number]);
+  if (idx === -1) throw new Error(`Día inválido: "${nombre}". Debe ser uno de: ${NOMBRES_DIAS.join(", ")}.`);
+  return idx;
+}
+
 function toDate(fechaISO: FechaISO): Date {
   return new Date(fechaISO + "T12:00:00");
 }

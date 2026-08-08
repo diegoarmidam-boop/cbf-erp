@@ -1,10 +1,5 @@
 import type { Prisma } from "@prisma/client";
-import { prisma } from "./db.js";
-
-// El cliente extendido (auditoría, ver db.ts) tiene un tipo de transacción
-// propio distinto de Prisma.TransactionClient — se infiere del propio
-// `prisma.$transaction` para que quede correctamente tipado.
-type TransactionClient = Parameters<Parameters<(typeof prisma)["$transaction"]>[0]>[0];
+import { prisma, type TransactionClient } from "./db.js";
 
 // Mecanismo genérico "Propone / Autoriza" (bloque 4), reutilizado por cada
 // módulo en vez de reimplementarlo caso por caso: actividad nueva, alta de
@@ -71,6 +66,10 @@ export async function rechazarSolicitud(id: string, resueltoPorId: string, motiv
     throw new SolicitudYaResueltaError(actual.estado);
   }
   return prisma.solicitudPendiente.findUniqueOrThrow({ where: { id } });
+}
+
+export function obtenerSolicitud(id: string) {
+  return prisma.solicitudPendiente.findUnique({ where: { id } });
 }
 
 export function solicitudesPendientes(tipo?: string) {
