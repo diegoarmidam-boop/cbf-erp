@@ -1,0 +1,1019 @@
+// Esquema V1 — CBF ERP
+// Cubre: núcleo (auth/permisos/auditoría/propone-autoriza), Unidades de Producción,
+// RH, Nómina, Almacén, Compras, Equipos y Maquinaria, Aplicaciones, Fertilizantes, Riego.
+// Fuera de alcance V1 (no modelado aquí): Cosecha, Empaque, Embarques, Contabilidad,
+// Auditoría (UI), Panel Ejecutivo — ver docs/spec-snapshot.md secciones 9.8 en adelante.
+//
+// Decisión de diseño: IDs como UUID (String) en todas las tablas, no autoincrement.
+// Motivo: el móvil de campo es offline-first (patrón outbox) y debe poder generar
+// un registro localmente, con su ID definitivo, sin depender de una respuesta del
+// servidor — necesario desde el día 1 para Nómina (Captura del día) y más adelante
+// para Aplicaciones/Fertilizantes/Riego. Mantener un solo esquema de ID en todo el
+// sistema evita una migración dolorosa cuando esas tablas lo necesiten.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// NÚCLEO — auth, permisos, auditoría, propone/autoriza
+// (Bloques 4 y 6 del documento vivo)
+// ============================================================
+
+enum Rol {
+  director_general
+  encargado_sistemas
+  gerente_tecnico_produccion
+  asistente_tecnico_produccion
+  supervisor_huerta
+  ayudante_supervisor
+  regador
+  gerente_mantenimiento
+  mecanico
+  supervisor_cosecha
+  supervisor_empaque
+  encargado_cosecha_empaque
+  gerente_logistica
+  recursos_humanos
+  encargado_nominas
+  gerente_administrativo
+  contador
+  asistente_administrativo
+  encargado_compras
+  encargado_bodega
+  bodeguista
+  auditor
+}
+
+// Fuente única de permisos por rol × módulo — alimenta sidebar (PC),
+// bottom nav y grilla "Más" (móvil). Ningún menú se mantiene a mano (bloque 4).
+model PermisoModulo {
+  id       String  @id @default(uuid())
+  rol      Rol
+  modulo   String // slug del módulo, ej. "nomina", "almacen"
+  ver      Boolean @default(false)
+  capturar Boolean @default(false)
+  editar   Boolean @default(false)
+  autoriza Boolean @default(false)
+
+  @@unique([rol, modulo])
+}
+
+model Usuario {
+  id            String    @id @default(uuid())
+  nombre        String
+  username      String    @unique
+  passwordHash  String
+  rol           Rol
+  personalId    String?   @unique
+  personal      Personal? @relation(fields: [personalId], references: [id])
+  huertaId      String? // alcance: null = global/multi-rancho; set = restringido a una Huerta
+  huerta        Huerta?   @relation(fields: [huertaId], references: [id])
+  activo        Boolean   @default(true)
+  creadoPorId   String?
+  fechaCreacion DateTime  @default(now())
+
+  auditoriaEntradas     AuditoriaLog[]
+  solicitudesPropuestas SolicitudPendiente[] @relation("propuestoPor")
+  solicitudesResueltas  SolicitudPendiente[] @relation("resueltoPor")
+
+  @@index([rol])
+}
+
+// Bitácora genérica de auditoría — capa transversal, no espera al módulo de
+// Auditoría (9.17) para existir. Todo módulo que capture/edite debe escribir aquí.
+model AuditoriaLog {
+  id            String   @id @default(uuid())
+  tabla         String
+  registroId    String
+  accion        String // "crear" | "editar" | "eliminar"
+  valorAnterior Json?
+  valorNuevo    Json?
+  usuarioId     String
+  usuario       Usuario  @relation(fields: [usuarioId], references: [id])
+  fecha         DateTime @default(now())
+
+  @@index([tabla, registroId])
+  @@index([usuarioId])
+}
+
+enum EstadoSolicitud {
+  pendiente
+  autorizada
+  rechazada
+}
+
+// Mecanismo genérico "Propone / Autoriza" (bloque 4) — reutilizado por:
+// actividad nueva/cambio de tarifa, alta de Personal, producto nuevo,
+// compra manual, producto para aplicar a planta. El elemento propuesto
+// queda bloqueado (no usable) hasta autorizarse.
+model SolicitudPendiente {
+  id              String          @id @default(uuid())
+  tipo            String // ej. "personal_alta", "producto_alta", "actividad_alta", "orden_compra_manual"
+  entidadTabla    String // tabla afectada, para poder activarla al autorizar
+  entidadId       String? // si el registro ya existe en estado "no usable"
+  payload         Json // datos propuestos, usados para crear el registro al autorizar si aún no existe
+  estado          EstadoSolicitud @default(pendiente)
+  motivoRechazo   String?
+  propuestoPorId  String
+  propuestoPor    Usuario         @relation("propuestoPor", fields: [propuestoPorId], references: [id])
+  fechaPropuesta  DateTime        @default(now())
+  resueltoPorId   String?
+  resueltoPor     Usuario?        @relation("resueltoPor", fields: [resueltoPorId], references: [id])
+  fechaResolucion DateTime?
+
+  @@index([tipo, estado])
+}
+
+// ============================================================
+// UNIDADES DE PRODUCCIÓN (9.1)
+// ============================================================
+
+model Huerta {
+  id               String  @id @default(uuid())
+  nombre           String  @unique
+  hectareasTotales Decimal @db.Decimal(10, 4)
+  activo           Boolean @default(true)
+
+  cuadros                 Cuadro[]
+  seccionesRiego          SeccionRiego[]
+  usuarios                Usuario[]
+  personal                Personal[]
+  registrosNomina         RegistroNomina[]
+  gruposPago              GrupoPago[]
+  diasCerrados            DiaCerrado[]
+  almacenLocal            AlmacenLocal[]
+  aplicaciones            Aplicacion[]
+  fertilizacionesGranular FertilizacionGranular[]
+  fertirriegos            FertirriegoProgramacion[]
+  equipoUsoDiario         EquipoUsoDiario[]
+  analisisLaboratorio     AnalisisLaboratorio[]
+  ciclos                  Ciclo[]
+}
+
+enum EstatusCuadro {
+  activo
+  en_descanso
+  fuera_produccion
+}
+
+model Cuadro {
+  id                   String        @id @default(uuid())
+  huertaId             String
+  huerta               Huerta        @relation(fields: [huertaId], references: [id])
+  nombre               String
+  estatus              EstatusCuadro @default(activo)
+  camposPersonalizados Json?
+
+  versiones                    CuadroVersion[]
+  cicloVariedades              CicloVariedad[]
+  seccionRiegoCuadros          SeccionRiegoCuadro[]
+  registrosNomina              RegistroNomina[]
+  aplicacionCuadros            AplicacionCuadro[]
+  fertilizacionGranularCuadros FertilizacionGranularCuadro[]
+
+  @@unique([huertaId, nombre])
+}
+
+// Historial de configuración por fecha — un Cuadro puede cambiar de superficie
+// (recalles, ajuste de calles) o dejar de sembrarse; se necesita saber qué
+// versión estaba vigente en cada periodo.
+model CuadroVersion {
+  id           String    @id @default(uuid())
+  cuadroId     String
+  cuadro       Cuadro    @relation(fields: [cuadroId], references: [id])
+  vigenteDesde DateTime  @db.Date
+  vigenteHasta DateTime? @db.Date // null = vigente actualmente
+  hectareas    Decimal   @db.Decimal(10, 4)
+  tipoSuelo    String?
+  fechaSiembra DateTime? @db.Date
+  distSurcosM  Decimal?  @db.Decimal(6, 3) // Marco de Plantación: distancia entre surcos (m)
+  distPlantasM Decimal?  @db.Decimal(6, 3) // Marco de Plantación: distancia entre plantas (m)
+  variedad     String?
+
+  @@index([cuadroId, vigenteDesde])
+}
+
+enum TipoCiclo {
+  cultivo
+  descanso
+  prueba
+}
+
+enum EtapaCiclo {
+  preparacion_suelo
+  desarrollo
+  cosecha_empaque
+  post_cosecha
+}
+
+// El Ciclo vive a nivel Huerta (no por Cuadro) — cuando el primer Cuadro entra
+// a Cosecha, toda la Huerta se sincroniza a esa etapa (corrección de fondo 4-ago).
+model Ciclo {
+  id          String     @id @default(uuid())
+  huertaId    String
+  huerta      Huerta     @relation(fields: [huertaId], references: [id])
+  tipo        TipoCiclo
+  etapaActual EtapaCiclo @default(preparacion_suelo)
+  fechaInicio DateTime   @db.Date
+  fechaFin    DateTime?  @db.Date
+  activo      Boolean    @default(true)
+
+  variedades CicloVariedad[]
+
+  @@index([huertaId, activo])
+}
+
+// Composición varietal por cuadro dentro del ciclo. La mayoría de cuadros llevan
+// una sola fila; cuadros de prueba pueden tener hasta 10 (validado por aplicación,
+// no por constraint de BD).
+model CicloVariedad {
+  id         String   @id @default(uuid())
+  cicloId    String
+  ciclo      Ciclo    @relation(fields: [cicloId], references: [id])
+  cuadroId   String
+  cuadro     Cuadro   @relation(fields: [cuadroId], references: [id])
+  variedad   String
+  hectareas  Decimal? @db.Decimal(10, 4)
+  porcentaje Decimal? @db.Decimal(5, 2)
+
+  @@index([cicloId])
+  @@index([cuadroId])
+}
+
+// Agrupa Cuadros de una Huerta por válvula compartida — independiente de Ciclo/etapa.
+model SeccionRiego {
+  id       String @id @default(uuid())
+  huertaId String
+  huerta   Huerta @relation(fields: [huertaId], references: [id])
+  nombre   String
+
+  cuadros              SeccionRiegoCuadro[]
+  fertirriegoSecciones FertirriegoSeccion[]
+  registrosRiego       RiegoRegistroDiario[]
+
+  @@unique([huertaId, nombre])
+}
+
+model SeccionRiegoCuadro {
+  seccionId String
+  seccion   SeccionRiego @relation(fields: [seccionId], references: [id])
+  cuadroId  String
+  cuadro    Cuadro       @relation(fields: [cuadroId], references: [id])
+
+  @@id([seccionId, cuadroId])
+}
+
+// ============================================================
+// RECURSOS HUMANOS (9.12)
+// ============================================================
+
+enum Periodicidad {
+  semanal
+  quincenal
+  mensual
+}
+
+enum MetodoAsignacionCosto {
+  directo_huerta
+  prorrateo_hectareas
+}
+
+model Puesto {
+  id                    String                @id @default(uuid())
+  nombre                String                @unique
+  periodicidad          Periodicidad
+  rangoSalarialMin      Decimal?              @db.Decimal(10, 2)
+  rangoSalarialMax      Decimal?              @db.Decimal(10, 2)
+  metodoAsignacionCosto MetodoAsignacionCosto
+
+  personal Personal[]
+}
+
+enum TipoPersonal {
+  fijo
+  destajo
+}
+
+model Personal {
+  id                 String       @id @default(uuid())
+  nombreCompleto     String
+  tipo               TipoPersonal
+  fechaNacimiento    DateTime?    @db.Date
+  identificacion     String?
+  domicilio          String?
+  telefono           String?
+  telefonoEmergencia String?
+  fechaIngreso       DateTime     @db.Date
+  puestoId           String?
+  puesto             Puesto?      @relation(fields: [puestoId], references: [id])
+  sueldo             Decimal?     @db.Decimal(10, 2) // solo aplica a tipo=fijo
+  rfc                String?
+  imssOSeguro        String?
+  huertaId           String? // huerta "base" (relevante sobre todo para fijos: supervisor, regador)
+  huerta             Huerta?      @relation(fields: [huertaId], references: [id])
+  activo             Boolean      @default(true)
+  fechaBaja          DateTime?    @db.Date
+  motivoBaja         String?
+  dadoBajaPorId      String?
+
+  usuario               Usuario?
+  documentos            PersonalDocumento[]
+  grupoMiembros         GrupoMiembro[]
+  registrosNomina       RegistroNomina[]
+  prestamos             Prestamo[]
+  bonosOtorgados        BonoOtorgado[]
+  compromisosEspeciales CompromisoEspecial[]
+  equipoUsoDiario       EquipoUsoDiario[]
+
+  @@index([tipo, activo])
+}
+
+enum TipoDocumentoPersonal {
+  identificacion
+  contrato
+  comprobante_domicilio
+  otro
+}
+
+enum OrigenDocumento {
+  foto_celular
+  escaneo
+}
+
+model PersonalDocumento {
+  id            String                @id @default(uuid())
+  personalId    String
+  personal      Personal              @relation(fields: [personalId], references: [id])
+  tipoDocumento TipoDocumentoPersonal
+  archivoUrl    String
+  origen        OrigenDocumento
+  fechaSubida   DateTime              @default(now())
+}
+
+// Administrada por RH, visible para encargados de huerta.
+model DoNotHire {
+  id                String   @id @default(uuid())
+  nombreReferencia  String
+  motivo            String
+  condicionesSalida String?
+  registradoPorId   String
+  fecha             DateTime @default(now())
+}
+
+// ============================================================
+// NÓMINA (9.11, incluye Asistencia)
+// ============================================================
+
+enum EsquemaPago {
+  individual_hora
+  individual_caja
+  grupal_remolque
+  depende_empacadores
+}
+
+// Catálogo de Actividades — compartido con Aplicaciones/Fertilizantes (9.4).
+// Arranca con las 12 confirmadas del Apéndice A; el resto se agrega vía
+// "+" conforme se autorice (Gerente Administrativo).
+model Actividad {
+  id                String      @id @default(uuid())
+  nombre            String      @unique
+  unidad            String // hora | dia | surco | planta | remolque | caja | cuadro | kg | ha
+  tarifa            Decimal     @db.Decimal(10, 2)
+  usarTarifaGeneral Boolean     @default(false) // si true, ignora `tarifa` y usa ConfigNomina.tarifaGeneralHora
+  esquemaPago       EsquemaPago
+  requiereCuadro    Boolean     @default(false) // solo grupal_remolque lo requiere obligatoriamente hoy
+  etapaRestringida  EtapaCiclo? // null = libre en cualquier etapa del ciclo
+  activo            Boolean     @default(true)
+
+  registrosNomina RegistroNomina[]
+}
+
+// Configuración global de Nómina (singleton por clave).
+model ConfigNomina {
+  clave String @id
+  valor String
+}
+
+// Cuadrillas — con nombre persistente (reutilizadas semana a semana) o
+// armadas el mismo día sin nombre fijo (persistente=false).
+model GrupoPago {
+  id          String  @id @default(uuid())
+  huertaId    String
+  huerta      Huerta  @relation(fields: [huertaId], references: [id])
+  nombre      String?
+  persistente Boolean @default(true)
+
+  miembros        GrupoMiembro[]
+  registrosNomina RegistroNomina[]
+}
+
+// Quién estaba en el grupo cada día — necesario para dividir el pago del
+// remolque entre exactamente quienes subieron ese día.
+model GrupoMiembro {
+  id         String    @id @default(uuid())
+  grupoId    String
+  grupo      GrupoPago @relation(fields: [grupoId], references: [id])
+  personalId String
+  personal   Personal  @relation(fields: [personalId], references: [id])
+  fechaDesde DateTime  @db.Date
+  fechaHasta DateTime? @db.Date
+
+  @@index([grupoId, fechaDesde])
+}
+
+enum OrigenRegistroNomina {
+  manual
+  automatico_aplicacion
+  automatico_fertilizacion
+  automatico_cosecha
+  automatico_empaque
+}
+
+// Registro fuente de mano de obra — cada fila es una persona (o grupo) +
+// actividad + cantidad en un día/huerta. Alimenta el caso de uso ancla:
+// las capturas automáticas (Aplicaciones/Fertilizantes) escriben aquí con
+// `origen` distinto de "manual" y una referencia al registro que lo generó.
+model RegistroNomina {
+  id                 String               @id @default(uuid())
+  fecha              DateTime             @db.Date
+  huertaId           String
+  huerta             Huerta               @relation(fields: [huertaId], references: [id])
+  cuadroId           String?
+  cuadro             Cuadro?              @relation(fields: [cuadroId], references: [id])
+  personalId         String?
+  personal           Personal?            @relation(fields: [personalId], references: [id])
+  grupoId            String?
+  grupo              GrupoPago?           @relation(fields: [grupoId], references: [id])
+  actividadId        String
+  actividad          Actividad            @relation(fields: [actividadId], references: [id])
+  cantidad           Decimal              @db.Decimal(10, 3)
+  tarifaAplicada     Decimal              @db.Decimal(10, 2) // congelada al momento de captura
+  origen             OrigenRegistroNomina @default(manual)
+  referenciaOrigenId String?
+  capturadoPorId     String
+  fechaCaptura       DateTime             @default(now())
+
+  @@index([huertaId, fecha])
+  @@index([personalId, fecha])
+  @@index([grupoId, fecha])
+}
+
+// Cierre diario por Huerta — bloquea ediciones posteriores. Distinto del
+// cierre de periodo contable (mensual/anual, solo Contabilidad).
+model DiaCerrado {
+  huertaId     String
+  huerta       Huerta   @relation(fields: [huertaId], references: [id])
+  fecha        DateTime @db.Date
+  cerradoPorId String
+  fechaCierre  DateTime @default(now())
+
+  @@id([huertaId, fecha])
+}
+
+model Prestamo {
+  id                   String       @id @default(uuid())
+  personalId           String
+  personal             Personal     @relation(fields: [personalId], references: [id])
+  montoTotal           Decimal      @db.Decimal(10, 2)
+  motivo               String
+  periodicidad         Periodicidad // solo semanal|quincenal aplican aquí
+  montoPorDescuento    Decimal      @db.Decimal(10, 2)
+  fechaPrimerDescuento DateTime     @db.Date
+  saldoPendiente       Decimal      @db.Decimal(10, 2)
+  activo               Boolean      @default(true)
+
+  descuentos PrestamoDescuento[]
+
+  @@index([personalId, activo])
+}
+
+model PrestamoDescuento {
+  id            String   @id @default(uuid())
+  prestamoId    String
+  prestamo      Prestamo @relation(fields: [prestamoId], references: [id])
+  periodoFin    DateTime @db.Date // fin del periodo semanal de nómina en que se aplicó
+  monto         Decimal  @db.Decimal(10, 2)
+  fechaAplicado DateTime @default(now())
+  aplicadoPorId String
+}
+
+enum TipoBono {
+  asistencia_perfecta
+  permanencia_racha
+  dia_doble
+}
+
+// 3 plantillas configurables sin tocar código.
+model BonoConfig {
+  id         String   @id @default(uuid())
+  tipo       TipoBono
+  nombre     String
+  parametros Json // monto fijo, multiplicador, días requeridos, etc. según tipo
+  activo     Boolean  @default(true)
+
+  diasEspeciales BonoDiaEspecial[]
+  otorgados      BonoOtorgado[]
+}
+
+// Fechas específicas para bonos tipo "día doble" (ej. domingos, festivos definidos por RH).
+model BonoDiaEspecial {
+  id     String     @id @default(uuid())
+  bonoId String
+  bono   BonoConfig @relation(fields: [bonoId], references: [id])
+  fecha  DateTime   @db.Date
+}
+
+// Si se ofrece un día extra y la persona acepta pero no se presenta, rompe
+// la racha de asistencia perfecta aunque haya cumplido sus días normales.
+model CompromisoEspecial {
+  id          String   @id @default(uuid())
+  personalId  String
+  personal    Personal @relation(fields: [personalId], references: [id])
+  fecha       DateTime @db.Date
+  descripcion String
+  cumplido    Boolean?
+
+  @@index([personalId, fecha])
+}
+
+enum EstadoBono {
+  pendiente_autorizar
+  autorizado
+  rechazado
+}
+
+model BonoOtorgado {
+  id              String     @id @default(uuid())
+  bonoConfigId    String
+  bonoConfig      BonoConfig @relation(fields: [bonoConfigId], references: [id])
+  personalId      String
+  personal        Personal   @relation(fields: [personalId], references: [id])
+  periodoInicio   DateTime   @db.Date
+  periodoFin      DateTime   @db.Date
+  montoCalculado  Decimal    @db.Decimal(10, 2)
+  estado          EstadoBono @default(pendiente_autorizar)
+  autorizadoPorId String?
+
+  @@index([personalId, periodoFin])
+}
+
+// ============================================================
+// EQUIPOS Y MAQUINARIA (9.13, incluye Combustibles y Mantenimiento)
+// ============================================================
+
+enum TipoEquipo {
+  tractor
+  camioneta
+  remolque
+  implemento
+}
+
+model Equipo {
+  id     String     @id @default(uuid())
+  tipo   TipoEquipo
+  folio  String     @unique // AF-xxx (tractor/camioneta/remolque) o IA-xxx (implemento)
+  marca  String?
+  modelo String?
+  anio   Int?
+  placas String?
+  activo Boolean    @default(true)
+
+  cargasCombustible       CombustibleCarga[]
+  mantenimientoConceptos  MantenimientoConcepto[]
+  mantenimientoEventos    MantenimientoEvento[]
+  usoDiario               EquipoUsoDiario[]
+  aplicaciones            Aplicacion[]
+  fertilizacionesGranular FertilizacionGranular[]
+}
+
+enum TipoCombustible {
+  diesel_garrafa // tractores — sale del Almacén como insumo
+  gasolina_externa // camionetas — gasolinera externa, no consume Almacén
+  diesel_externo // camionetas a diésel que cargan directo en gasolinera
+}
+
+model CombustibleCarga {
+  id             String          @id @default(uuid())
+  equipoId       String
+  equipo         Equipo          @relation(fields: [equipoId], references: [id])
+  fecha          DateTime        @db.Date
+  tipo           TipoCombustible
+  odometro       Decimal?        @db.Decimal(10, 1) // camionetas
+  horometro      Decimal?        @db.Decimal(10, 1) // tractores
+  litros         Decimal         @db.Decimal(10, 2)
+  precioUnitario Decimal?        @db.Decimal(10, 2) // camionetas
+  capturadoPorId String
+
+  @@index([equipoId, fecha])
+}
+
+model MantenimientoConcepto {
+  id          String  @id @default(uuid())
+  equipoId    String
+  equipo      Equipo  @relation(fields: [equipoId], references: [id])
+  nombre      String // ej. "Filtro de diésel"
+  umbralHoras Decimal @db.Decimal(10, 1)
+
+  eventos MantenimientoEvento[]
+}
+
+enum TipoMantenimiento {
+  preventivo
+  correctivo
+}
+
+model MantenimientoEvento {
+  id              String                 @id @default(uuid())
+  equipoId        String
+  equipo          Equipo                 @relation(fields: [equipoId], references: [id])
+  tipo            TipoMantenimiento
+  conceptoId      String?
+  concepto        MantenimientoConcepto? @relation(fields: [conceptoId], references: [id])
+  descripcion     String
+  mecanicoInterno Boolean
+  costo           Decimal?               @db.Decimal(10, 2)
+  fecha           DateTime               @db.Date
+
+  @@index([equipoId, fecha])
+}
+
+model EquipoUsoDiario {
+  id         String   @id @default(uuid())
+  equipoId   String
+  equipo     Equipo   @relation(fields: [equipoId], references: [id])
+  fecha      DateTime @db.Date
+  operadorId String
+  operador   Personal @relation(fields: [operadorId], references: [id])
+  horas      Decimal  @db.Decimal(6, 2)
+  huertaId   String
+  huerta     Huerta   @relation(fields: [huertaId], references: [id])
+
+  @@index([equipoId, fecha])
+}
+
+// ============================================================
+// ALMACÉN (9.15, incluye Almacén Local por Unidad de Producción)
+// ============================================================
+
+model Producto {
+  id                String    @id @default(uuid())
+  categoria         String // agroquimico | fertilizante | refaccion | general | ...
+  ingredienteActivo String?
+  nombreComercial   String
+  presentacion      String
+  unidad            String
+  requiereLote      Boolean   @default(false) // agroquímicos/fertilizantes: true; Almacén General: false
+  autorizado        Boolean   @default(false) // agroquímico/fertilizante deben autorizarse antes de comprarse/aplicarse
+  autorizadoPorId   String?
+  fechaAutorizacion DateTime?
+
+  lotes                   ProductoLote[]
+  movimientosCentral      AlmacenCentralMovimiento[]
+  almacenLocal            AlmacenLocal[]
+  ordenesCompra           OrdenCompra[]
+  aplicaciones            Aplicacion[]
+  fertilizacionesGranular FertilizacionGranular[]
+  fertirriegos            FertirriegoProgramacion[]
+
+  @@index([categoria])
+}
+
+model ProductoLote {
+  id             String    @id @default(uuid())
+  productoId     String
+  producto       Producto  @relation(fields: [productoId], references: [id])
+  lote           String
+  fechaCaducidad DateTime? @db.Date
+  cantidadActual Decimal   @db.Decimal(12, 3)
+
+  movimientos AlmacenCentralMovimiento[]
+
+  @@index([productoId])
+}
+
+enum TipoMovimientoAlmacenCentral {
+  entrada_compra
+  salida_comprometida
+  salida_real
+  prestamo_rancho
+  merma
+  baja_caducidad
+  abono_sobrante
+  ajuste_manual
+}
+
+// FIFO obligatorio por ingrediente activo. Salidas quedan "comprometidas" al
+// planear una Aplicación/Fertilización, y se vuelven "salida_real" al
+// entregarse físicamente a la Huerta (ver Aplicaciones/Fertilizantes).
+model AlmacenCentralMovimiento {
+  id              String                       @id @default(uuid())
+  productoId      String
+  producto        Producto                     @relation(fields: [productoId], references: [id])
+  loteId          String?
+  lote            ProductoLote?                @relation(fields: [loteId], references: [id])
+  tipo            TipoMovimientoAlmacenCentral
+  cantidad        Decimal                      @db.Decimal(12, 3)
+  huertaDestinoId String?
+  referenciaId    String? // aplicacionId / fertilizacionId / ordenCompraId, según el tipo
+  fecha           DateTime                     @default(now())
+  capturadoPorId  String
+  motivoAjuste    String? // requerido para merma/ajuste_manual (doble-check de Gerencia)
+
+  @@index([productoId, fecha])
+  @@index([huertaDestinoId])
+}
+
+// Saldo simple por Huerta y producto — sin lotes/caducidad ("le mandaron 100 L,
+// lleva reportados 60 L, le quedan 40 L").
+model AlmacenLocal {
+  id                         String   @id @default(uuid())
+  huertaId                   String
+  huerta                     Huerta   @relation(fields: [huertaId], references: [id])
+  productoId                 String
+  producto                   Producto @relation(fields: [productoId], references: [id])
+  cantidadRecibidaAcumulada  Decimal  @default(0) @db.Decimal(12, 3)
+  cantidadReportadaAcumulada Decimal  @default(0) @db.Decimal(12, 3)
+
+  movimientos AlmacenLocalMovimiento[]
+
+  @@unique([huertaId, productoId])
+}
+
+enum TipoMovimientoAlmacenLocal {
+  entrega
+  consumo_reportado
+  ajuste_manual
+}
+
+model AlmacenLocalMovimiento {
+  id             String                     @id @default(uuid())
+  almacenLocalId String
+  almacenLocal   AlmacenLocal               @relation(fields: [almacenLocalId], references: [id])
+  tipo           TipoMovimientoAlmacenLocal
+  cantidad       Decimal                    @db.Decimal(12, 3)
+  referenciaId   String? // aplicacionRealizadaId / fertilizacionRealizadaId / riegoRegistroId
+  fecha          DateTime                   @default(now())
+  capturadoPorId String
+
+  @@index([almacenLocalId, fecha])
+}
+
+// ============================================================
+// COMPRAS (9.14, incluye Proveedores)
+// ============================================================
+
+model Proveedor {
+  id                 String    @id @default(uuid())
+  nombre             String
+  creditoMonto       Decimal?  @db.Decimal(12, 2)
+  creditoVencimiento DateTime? @db.Date
+  datosFacturacion   Json?
+  activo             Boolean   @default(true)
+
+  ordenesCompra OrdenCompra[]
+}
+
+enum OrigenOrdenCompra {
+  automatica
+  manual
+}
+
+enum EstadoOrdenCompra {
+  pendiente_autorizar // solo manuales
+  pendiente_cotizar
+  generada // "en camino"
+  recibida
+}
+
+model OrdenCompra {
+  id                     String            @id @default(uuid())
+  origen                 OrigenOrdenCompra
+  productoId             String
+  producto               Producto          @relation(fields: [productoId], references: [id])
+  cantidadSolicitada     Decimal           @db.Decimal(12, 3)
+  estado                 EstadoOrdenCompra
+  proveedorId            String?
+  proveedor              Proveedor?        @relation(fields: [proveedorId], references: [id])
+  precioUnitario         Decimal?          @db.Decimal(10, 2)
+  fechaEsperada          DateTime?         @db.Date
+  referenciaAplicacionId String? // liga a Aplicacion/FertilizacionGranular/Fertirriego que la generó
+  autorizadoPorId        String?
+  creadoPorId            String
+  fechaCreacion          DateTime          @default(now())
+
+  recepciones OrdenCompraRecepcion[]
+
+  @@index([estado])
+}
+
+model OrdenCompraRecepcion {
+  id               String      @id @default(uuid())
+  ordenId          String
+  orden            OrdenCompra @relation(fields: [ordenId], references: [id])
+  cantidadRecibida Decimal     @db.Decimal(12, 3)
+  lote             String?
+  fechaCaducidad   DateTime?   @db.Date
+  fechaRecepcion   DateTime    @default(now())
+  recibidoPorId    String
+}
+
+// ============================================================
+// APLICACIONES — agroquímicos (9.7)
+// ============================================================
+
+enum RecursoTipo {
+  gente
+  implemento
+}
+
+enum ConcentracionUnidad {
+  ml_l
+  g_l
+  kg_l
+}
+
+enum EstadoAplicacion {
+  programada
+  entregada
+  realizada
+  vencida
+  cancelada
+}
+
+model Aplicacion {
+  id                     String              @id @default(uuid())
+  huertaId               String
+  huerta                 Huerta              @relation(fields: [huertaId], references: [id])
+  productoId             String
+  producto               Producto            @relation(fields: [productoId], references: [id])
+  recursoTipo            RecursoTipo
+  equipoId               String?
+  equipo                 Equipo?             @relation(fields: [equipoId], references: [id])
+  concentracionValor     Decimal             @db.Decimal(10, 4)
+  concentracionUnidad    ConcentracionUnidad
+  litrosMezclaPorHa      Decimal             @db.Decimal(10, 4)
+  fechaInicio            DateTime            @db.Date
+  fechaFin               DateTime            @db.Date
+  cantidadTotalCalculada Decimal             @db.Decimal(12, 4)
+  estado                 EstadoAplicacion    @default(programada)
+  creadoPorId            String
+  fechaCreacion          DateTime            @default(now())
+
+  cuadros    AplicacionCuadro[]
+  realizadas AplicacionRealizada[]
+}
+
+model AplicacionCuadro {
+  aplicacionId String
+  aplicacion   Aplicacion @relation(fields: [aplicacionId], references: [id])
+  cuadroId     String
+  cuadro       Cuadro     @relation(fields: [cuadroId], references: [id])
+
+  @@id([aplicacionId, cuadroId])
+}
+
+// Solo puede existir después de que Almacén entregó el producto a la Huerta.
+// Genera mano de obra en Nómina (origen=automatico_aplicacion) y descuenta
+// el Almacén Local automáticamente.
+model AplicacionRealizada {
+  id              String     @id @default(uuid())
+  aplicacionId    String
+  aplicacion      Aplicacion @relation(fields: [aplicacionId], references: [id])
+  personalId      String?
+  grupoId         String?
+  horas           Decimal    @db.Decimal(6, 2)
+  fechaReal       DateTime   @db.Date
+  registradoPorId String
+
+  @@index([aplicacionId])
+}
+
+// ============================================================
+// FERTILIZANTES — Granular y Fertirriego (9.5)
+// ============================================================
+
+enum ModoDosisGranular {
+  kg_ha
+  g_planta
+}
+
+// Mismo patrón de dos pasos que Aplicaciones (Programar → Registrar realizada).
+model FertilizacionGranular {
+  id                     String            @id @default(uuid())
+  huertaId               String
+  huerta                 Huerta            @relation(fields: [huertaId], references: [id])
+  productoId             String
+  producto               Producto          @relation(fields: [productoId], references: [id])
+  recursoTipo            RecursoTipo
+  equipoId               String?
+  equipo                 Equipo?           @relation(fields: [equipoId], references: [id])
+  modoDosis              ModoDosisGranular
+  dosisValor             Decimal           @db.Decimal(10, 4)
+  fechaInicio            DateTime          @db.Date
+  fechaFin               DateTime          @db.Date
+  cantidadTotalCalculada Decimal           @db.Decimal(12, 4)
+  estado                 EstadoAplicacion  @default(programada)
+  creadoPorId            String
+  fechaCreacion          DateTime          @default(now())
+
+  cuadros    FertilizacionGranularCuadro[]
+  realizadas FertilizacionGranularRealizada[]
+}
+
+model FertilizacionGranularCuadro {
+  fertilizacionId String
+  fertilizacion   FertilizacionGranular @relation(fields: [fertilizacionId], references: [id])
+  cuadroId        String
+  cuadro          Cuadro                @relation(fields: [cuadroId], references: [id])
+
+  @@id([fertilizacionId, cuadroId])
+}
+
+model FertilizacionGranularRealizada {
+  id              String                @id @default(uuid())
+  fertilizacionId String
+  fertilizacion   FertilizacionGranular @relation(fields: [fertilizacionId], references: [id])
+  personalId      String?
+  grupoId         String?
+  horas           Decimal               @db.Decimal(6, 2)
+  fechaReal       DateTime              @db.Date
+  registradoPorId String
+
+  @@index([fertilizacionId])
+}
+
+enum FrecuenciaFertirriego {
+  diario
+  cada_2_dias
+  cada_3_dias
+  patron_2_1
+}
+
+// Se programa aquí (por Sección de Riego, no por Cuadro); se ejecuta día a
+// día desde Riego (9.6). No genera mano de obra.
+model FertirriegoProgramacion {
+  id                     String                @id @default(uuid())
+  huertaId               String
+  huerta                 Huerta                @relation(fields: [huertaId], references: [id])
+  productoId             String
+  producto               Producto              @relation(fields: [productoId], references: [id])
+  dosisValor             Decimal               @db.Decimal(10, 4)
+  dosisUnidad            ConcentracionUnidad
+  litrosAguaPorHa        Decimal               @db.Decimal(10, 4)
+  frecuencia             FrecuenciaFertirriego
+  fechaInicio            DateTime              @db.Date
+  fechaFin               DateTime              @db.Date
+  cantidadTotalCalculada Decimal               @db.Decimal(12, 4)
+  estado                 EstadoAplicacion      @default(programada)
+  creadoPorId            String
+  fechaCreacion          DateTime              @default(now())
+
+  secciones FertirriegoSeccion[]
+}
+
+model FertirriegoSeccion {
+  fertirriegoId String
+  fertirriego   FertirriegoProgramacion @relation(fields: [fertirriegoId], references: [id])
+  seccionId     String
+  seccion       SeccionRiego            @relation(fields: [seccionId], references: [id])
+
+  @@id([fertirriegoId, seccionId])
+}
+
+// LOTE=Huerta, SECTOR=Variedad (equivalencia de terminología del laboratorio).
+model AnalisisLaboratorio {
+  id         String   @id @default(uuid())
+  huertaId   String
+  huerta     Huerta   @relation(fields: [huertaId], references: [id])
+  variedad   String
+  tipo       String // pasta_saturada | foliar | savia_cardis
+  fecha      DateTime @db.Date
+  resultados Json
+
+  @@index([huertaId, variedad, fecha])
+}
+
+// ============================================================
+// RIEGO — ejecución diaria (9.6)
+// ============================================================
+
+// Por Sección de Riego, por día: horas regadas + confirmación de fertirriego
+// (si hay uno programado y ya entregado). No genera mano de obra (Regador es rol fijo).
+model RiegoRegistroDiario {
+  id                    String       @id @default(uuid())
+  seccionId             String
+  seccion               SeccionRiego @relation(fields: [seccionId], references: [id])
+  fecha                 DateTime     @db.Date
+  horas                 Decimal      @db.Decimal(6, 2)
+  fertirriegoConfirmado Boolean      @default(false)
+  cantidadAplicada      Decimal?     @db.Decimal(12, 4)
+  capturadoPorId        String
+
+  @@unique([seccionId, fecha])
+}
