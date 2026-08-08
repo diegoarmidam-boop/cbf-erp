@@ -3,6 +3,8 @@ import cors from "cors";
 import { authRouter } from "./routes/auth.routes.js";
 import { solicitudesRouter } from "./core/solicitudes.routes.js";
 import { nominaRouter } from "./modules/nomina/index.js";
+import { huertasRouter } from "./modules/unidades-produccion/huertas.routes.js";
+import { personalRouter } from "./modules/rh/personal.routes.js";
 
 export function createApp() {
   const app = express();
@@ -14,6 +16,8 @@ export function createApp() {
   app.use("/auth", authRouter);
   app.use("/solicitudes", solicitudesRouter);
   app.use("/nomina", nominaRouter);
+  app.use("/huertas", huertasRouter);
+  app.use("/personal", personalRouter);
 
   const manejarError: ErrorRequestHandler = (err, _req, res, _next) => {
     console.error(err);
