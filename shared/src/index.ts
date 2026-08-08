@@ -1,0 +1,5 @@
+export * from "./nomina/fechas.js";
+export * from "./nomina/registros.js";
+export * from "./nomina/bonos.js";
+export * from "./nomina/desglose.js";
+export * from "./nomina/semanal.js";

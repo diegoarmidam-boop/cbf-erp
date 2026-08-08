@@ -31,6 +31,7 @@ Fuera de alcance de V1: Cosecha, Empaque, Embarques, Contabilidad, Auditoría (U
 ```bash
 npm install
 cp backend/.env.example backend/.env   # configurar credenciales de MySQL local
+npm run build:shared                    # compila @cbf/shared antes de usarlo (dev:backend y seed ya lo hacen solos)
 npm run prisma:migrate
 npm run seed
 npm run dev:backend
