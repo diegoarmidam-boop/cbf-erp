@@ -174,7 +174,7 @@ CREATE TABLE `Personal` (
     `domicilio` VARCHAR(191) NULL,
     `telefono` VARCHAR(191) NULL,
     `telefonoEmergencia` VARCHAR(191) NULL,
-    `fechaIngreso` DATE NOT NULL,
+    `fechaIngreso` DATE NULL,
     `puestoId` VARCHAR(191) NULL,
     `sueldo` DECIMAL(10, 2) NULL,
     `rfc` VARCHAR(191) NULL,

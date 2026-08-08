@@ -309,7 +309,7 @@ model Personal {
   domicilio          String?
   telefono           String?
   telefonoEmergencia String?
-  fechaIngreso       DateTime     @db.Date
+  fechaIngreso       DateTime?    @db.Date // null hasta que RH lo capture — el seed inicial (Apéndice A) solo trae nombres
   puestoId           String?
   puesto             Puesto?      @relation(fields: [puestoId], references: [id])
   sueldo             Decimal?     @db.Decimal(10, 2) // solo aplica a tipo=fijo
