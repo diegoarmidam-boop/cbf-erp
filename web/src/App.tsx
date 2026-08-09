@@ -20,6 +20,12 @@ import PersonalDetalle from "./pages/rh/PersonalDetalle";
 import Puestos from "./pages/rh/Puestos";
 import DoNotHire from "./pages/rh/DoNotHire";
 import Accesos from "./pages/rh/Accesos";
+import AlmacenLayout from "./pages/almacen/AlmacenLayout";
+import Catalogo from "./pages/almacen/Catalogo";
+import Inventario from "./pages/almacen/Inventario";
+import Movimientos from "./pages/almacen/Movimientos";
+import AlmacenLocalPage from "./pages/almacen/AlmacenLocalPage";
+import Solicitudes from "./pages/Solicitudes";
 
 function RutaProtegida({ children }: { children: React.ReactNode }) {
   const { autenticado } = useAuth();
@@ -41,6 +47,7 @@ export default function App() {
             }
           >
             <Route path="/" element={<Navigate to="/nomina" replace />} />
+            <Route path="/solicitudes" element={<Solicitudes />} />
 
             <Route path="/nomina" element={<NominaLayout />}>
               <Route index element={<Navigate to="captura" replace />} />
@@ -67,6 +74,14 @@ export default function App() {
               <Route path="huertas" element={<HuertasYCuadros />} />
               <Route path="ciclos" element={<Ciclos />} />
               <Route path="riego" element={<SeccionesRiego />} />
+            </Route>
+
+            <Route path="/almacen" element={<AlmacenLayout />}>
+              <Route index element={<Navigate to="catalogo" replace />} />
+              <Route path="catalogo" element={<Catalogo />} />
+              <Route path="inventario" element={<Inventario />} />
+              <Route path="movimientos" element={<Movimientos />} />
+              <Route path="local" element={<AlmacenLocalPage />} />
             </Route>
           </Route>
         </Routes>

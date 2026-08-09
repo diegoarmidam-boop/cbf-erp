@@ -242,3 +242,72 @@ export interface DiaAsistencia {
   fecha: string;
   estado: EstadoAsistenciaDia;
 }
+
+export interface Producto {
+  id: string;
+  categoria: string;
+  ingredienteActivo: string | null;
+  nombreComercial: string;
+  presentacion: string;
+  unidad: string;
+  requiereLote: boolean;
+  autorizado: boolean;
+}
+
+export interface ProductoLote {
+  id: string;
+  lote: string;
+  fechaCaducidad: string | null;
+  cantidadActual: string;
+}
+
+export type TipoMovimientoAlmacenCentral =
+  | "entrada_compra"
+  | "salida_comprometida"
+  | "salida_real"
+  | "prestamo_rancho"
+  | "merma"
+  | "baja_caducidad"
+  | "abono_sobrante"
+  | "ajuste_manual";
+
+export interface MovimientoAlmacenCentral {
+  id: string;
+  productoId: string;
+  loteId: string | null;
+  tipo: TipoMovimientoAlmacenCentral;
+  cantidad: string;
+  huertaDestinoId: string | null;
+  fecha: string;
+  motivoAjuste: string | null;
+}
+
+export interface AlmacenLocalEntrada {
+  id: string;
+  huertaId: string;
+  productoId: string;
+  producto: Producto;
+  cantidadRecibidaAcumulada: string;
+  cantidadReportadaAcumulada: string;
+}
+
+export interface CandadoAlmacenLocal {
+  huertaId: string;
+  productoId: string;
+  nombreComercial: string;
+  cantidadRecibida: number;
+  cantidadReportada: number;
+  saldoSinJustificar: number;
+  diasDesdeUltimaEntrega: number | null;
+  alertaActiva: boolean;
+}
+
+export interface SolicitudPendiente {
+  id: string;
+  tipo: string;
+  entidadTabla: string;
+  entidadId: string | null;
+  payload: Record<string, unknown>;
+  estado: "pendiente" | "autorizada" | "rechazada";
+  fechaPropuesta: string;
+}

@@ -25,3 +25,17 @@ export const activadoresSolicitud: Record<string, Activador> = {
     await tx.actividad.update({ where: { id: solicitud.entidadId }, data: { tarifa, usarTarifaGeneral } });
   },
 };
+
+const activarAltaProducto: Activador = async (tx, solicitud) => {
+  const datos = solicitud.payload as {
+    categoria: string;
+    ingredienteActivo?: string;
+    nombreComercial: string;
+    presentacion: string;
+    unidad: string;
+    requiereLote: boolean;
+  };
+  await tx.producto.create({ data: { ...datos, autorizado: true, fechaAutorizacion: new Date() } });
+};
+activadoresSolicitud.producto_alta = activarAltaProducto;
+activadoresSolicitud.producto_regulado_alta = activarAltaProducto;

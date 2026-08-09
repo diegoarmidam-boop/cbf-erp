@@ -26,6 +26,14 @@ export const MODULOS_CONSTRUIDOS: ModuloInfo[] = [
     permisosAlternos: ["do_not_hire"],
   },
   { slug: "unidades_produccion", nombre: "Unidades de Producción", bgVar: "--mod-unidades-produccion-bg", fgVar: "--mod-unidades-produccion-fg", icono: "🌱" },
+  {
+    slug: "almacen",
+    nombre: "Almacén",
+    bgVar: "--mod-almacen-bg",
+    fgVar: "--mod-almacen-fg",
+    icono: "📦",
+    permisosAlternos: ["almacen_regulado"],
+  },
 ];
 
 export function moduloInfo(slug: string): ModuloInfo {

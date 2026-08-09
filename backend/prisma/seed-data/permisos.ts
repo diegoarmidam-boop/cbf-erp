@@ -52,8 +52,14 @@ export const PERMISOS_SEED: PermisoSeed[] = [
   { rol: "encargado_bodega", modulo: "almacen", ver: true, capturar: true, editar: true, autoriza: true },
   { rol: "bodeguista", modulo: "almacen", ver: true, capturar: true },
   { rol: "supervisor_huerta", modulo: "almacen", ver: true, capturar: true },
-  { rol: "gerente_tecnico_produccion", modulo: "almacen", ver: true, autoriza: true },
+  { rol: "gerente_tecnico_produccion", modulo: "almacen", ver: true },
   { rol: "gerente_administrativo", modulo: "almacen", ver: true, editar: true },
+
+  // Alta de producto regulado (agroquímico/fertilizante) — módulo aparte de
+  // "almacen": la regla es "más restrictiva que las demás" (bloque 4), solo
+  // Dirección General/Gerente Técnico, NUNCA Encargado de Bodega aunque
+  // autogestione el resto del catálogo.
+  { rol: "gerente_tecnico_produccion", modulo: "almacen_regulado", autoriza: true },
 
   // ---- Compras (9.14, incluye Proveedores) ----
   { rol: "encargado_compras", modulo: "compras", ver: true, capturar: true, editar: true, autoriza: true },

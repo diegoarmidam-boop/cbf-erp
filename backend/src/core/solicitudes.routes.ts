@@ -19,7 +19,7 @@ const MODULO_POR_TIPO: Record<string, string> = {
   actividad_tarifa: "nomina",
   personal_alta: "rh",
   producto_alta: "almacen",
-  producto_regulado_alta: "aplicaciones", // Dirección General o Gerente Técnico — regla más restrictiva
+  producto_regulado_alta: "almacen_regulado", // Dirección General o Gerente Técnico — regla más restrictiva
   orden_compra_manual: "compras",
 };
 

@@ -8,6 +8,7 @@ import { unidadesProduccionRouter } from "./modules/unidades-produccion/index.js
 import { personalRouter } from "./modules/rh/personal.routes.js";
 import { documentosRouter } from "./modules/rh/documentos.routes.js";
 import { rhRouter } from "./modules/rh/index.js";
+import { almacenRouter } from "./modules/almacen/index.js";
 
 export function createApp() {
   const app = express();
@@ -24,6 +25,7 @@ export function createApp() {
   app.use("/personal", personalRouter);
   app.use("/personal/:personalId/documentos", documentosRouter);
   app.use("/rh", rhRouter);
+  app.use("/almacen", almacenRouter);
 
   const manejarError: ErrorRequestHandler = (err, _req, res, _next) => {
     console.error(err);
