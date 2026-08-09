@@ -26,6 +26,9 @@ import Inventario from "./pages/almacen/Inventario";
 import Movimientos from "./pages/almacen/Movimientos";
 import AlmacenLocalPage from "./pages/almacen/AlmacenLocalPage";
 import Solicitudes from "./pages/Solicitudes";
+import ComprasLayout from "./pages/compras/ComprasLayout";
+import Ordenes from "./pages/compras/Ordenes";
+import Proveedores from "./pages/compras/Proveedores";
 
 function RutaProtegida({ children }: { children: React.ReactNode }) {
   const { autenticado } = useAuth();
@@ -82,6 +85,12 @@ export default function App() {
               <Route path="inventario" element={<Inventario />} />
               <Route path="movimientos" element={<Movimientos />} />
               <Route path="local" element={<AlmacenLocalPage />} />
+            </Route>
+
+            <Route path="/compras" element={<ComprasLayout />}>
+              <Route index element={<Navigate to="ordenes" replace />} />
+              <Route path="ordenes" element={<Ordenes />} />
+              <Route path="proveedores" element={<Proveedores />} />
             </Route>
           </Route>
         </Routes>

@@ -62,7 +62,11 @@ export const PERMISOS_SEED: PermisoSeed[] = [
   { rol: "gerente_tecnico_produccion", modulo: "almacen_regulado", autoriza: true },
 
   // ---- Compras (9.14, incluye Proveedores) ----
-  { rol: "encargado_compras", modulo: "compras", ver: true, capturar: true, editar: true, autoriza: true },
+  // Sin tope definido todavía (el propio documento lo deja pendiente) — por
+  // ahora TODA orden manual necesita autorización de Dirección
+  // General/Gerente Administrativo/Gerente Técnico; Encargado de Compras
+  // nunca se autoautoriza, solo propone, cotiza y formaliza ya autorizada.
+  { rol: "encargado_compras", modulo: "compras", ver: true, capturar: true, editar: true },
   { rol: "gerente_administrativo", modulo: "compras", ver: true, autoriza: true },
   { rol: "gerente_tecnico_produccion", modulo: "compras", autoriza: true },
   { rol: "contador", modulo: "compras", ver: true },

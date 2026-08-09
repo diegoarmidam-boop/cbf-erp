@@ -34,6 +34,7 @@ export const MODULOS_CONSTRUIDOS: ModuloInfo[] = [
     icono: "📦",
     permisosAlternos: ["almacen_regulado"],
   },
+  { slug: "compras", nombre: "Compras", bgVar: "--mod-compras-bg", fgVar: "--mod-compras-fg", icono: "🧾" },
 ];
 
 export function moduloInfo(slug: string): ModuloInfo {

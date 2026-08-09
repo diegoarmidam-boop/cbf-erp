@@ -812,6 +812,7 @@ enum EstadoOrdenCompra {
   pendiente_cotizar
   generada // "en camino"
   recibida
+  rechazada
 }
 
 model OrdenCompra {
@@ -827,6 +828,7 @@ model OrdenCompra {
   fechaEsperada          DateTime?         @db.Date
   referenciaAplicacionId String? // liga a Aplicacion/FertilizacionGranular/Fertirriego que la generó
   autorizadoPorId        String?
+  motivoRechazo          String?
   creadoPorId            String
   fechaCreacion          DateTime          @default(now())
 

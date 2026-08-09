@@ -12,49 +12,62 @@ export function lotesDeProducto(productoId: string) {
   return prisma.productoLote.findMany({ where: { productoId }, orderBy: { fechaCaducidad: "asc" } });
 }
 
+interface OpcionesEntrada {
+  lote?: string;
+  fechaCaducidad?: string;
+  referenciaId?: string;
+}
+
 /**
- * Entrada real de inventario — al recibir una compra (9.15). Si el producto
- * no lleva lote (Almacén General), se acumula todo en un lote implícito
- * único en vez de crear uno por cada entrada.
+ * Núcleo de "entrada real de inventario", parametrizado por `tx` para que
+ * otros módulos (Compras, al recibir una orden) puedan componerlo dentro de
+ * su propia transacción en vez de abrir una segunda transacción anidada —
+ * eso rompería la atomicidad (si la orden fallara después, la entrada ya
+ * habría quedado aplicada). `registrarEntrada` de abajo es el atajo para
+ * cuando Almacén lo usa solo, sin nadie más participando.
  */
-export async function registrarEntrada(
+export async function registrarEntradaTx(
+  tx: TransactionClient,
   productoId: string,
   cantidad: number,
   capturadoPorId: string,
-  opciones: { lote?: string; fechaCaducidad?: string; referenciaId?: string } = {}
+  opciones: OpcionesEntrada = {}
 ) {
-  return prisma.$transaction(async (tx) => {
-    const producto = await tx.producto.findUniqueOrThrow({ where: { id: productoId } });
-    const claveLote = producto.requiereLote ? (opciones.lote ?? SIN_LOTE) : SIN_LOTE;
+  const producto = await tx.producto.findUniqueOrThrow({ where: { id: productoId } });
+  const claveLote = producto.requiereLote ? (opciones.lote ?? SIN_LOTE) : SIN_LOTE;
 
-    let lote = producto.requiereLote
-      ? await tx.productoLote.findFirst({ where: { productoId, lote: claveLote } })
-      : await tx.productoLote.findFirst({ where: { productoId, lote: SIN_LOTE } });
+  let lote = producto.requiereLote
+    ? await tx.productoLote.findFirst({ where: { productoId, lote: claveLote } })
+    : await tx.productoLote.findFirst({ where: { productoId, lote: SIN_LOTE } });
 
-    if (!lote) {
-      lote = await tx.productoLote.create({
-        data: {
-          productoId,
-          lote: claveLote,
-          fechaCaducidad: opciones.fechaCaducidad ? new Date(opciones.fechaCaducidad) : undefined,
-          cantidadActual: 0,
-        },
-      });
-    }
-
-    await tx.productoLote.update({ where: { id: lote.id }, data: { cantidadActual: { increment: cantidad } } });
-    await tx.almacenCentralMovimiento.create({
+  if (!lote) {
+    lote = await tx.productoLote.create({
       data: {
         productoId,
-        loteId: lote.id,
-        tipo: "entrada_compra",
-        cantidad,
-        referenciaId: opciones.referenciaId,
-        capturadoPorId,
+        lote: claveLote,
+        fechaCaducidad: opciones.fechaCaducidad ? new Date(opciones.fechaCaducidad) : undefined,
+        cantidadActual: 0,
       },
     });
-    return lote;
+  }
+
+  await tx.productoLote.update({ where: { id: lote.id }, data: { cantidadActual: { increment: cantidad } } });
+  await tx.almacenCentralMovimiento.create({
+    data: {
+      productoId,
+      loteId: lote.id,
+      tipo: "entrada_compra",
+      cantidad,
+      referenciaId: opciones.referenciaId,
+      capturadoPorId,
+    },
   });
+  return lote;
+}
+
+/** Entrada real de inventario (9.15) cuando nadie más necesita compartir la transacción. */
+export async function registrarEntrada(productoId: string, cantidad: number, capturadoPorId: string, opciones: OpcionesEntrada = {}) {
+  return prisma.$transaction((tx) => registrarEntradaTx(tx, productoId, cantidad, capturadoPorId, opciones));
 }
 
 /**

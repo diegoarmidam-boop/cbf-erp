@@ -311,3 +311,34 @@ export interface SolicitudPendiente {
   estado: "pendiente" | "autorizada" | "rechazada";
   fechaPropuesta: string;
 }
+
+export interface Proveedor {
+  id: string;
+  nombre: string;
+  creditoMonto: string | null;
+  creditoVencimiento: string | null;
+  activo: boolean;
+}
+
+export interface MejorProveedor {
+  proveedor: Proveedor;
+  precioUnitario: string;
+  fecha: string;
+}
+
+export type EstadoOrdenCompra = "pendiente_autorizar" | "pendiente_cotizar" | "generada" | "recibida" | "rechazada";
+
+export interface OrdenCompra {
+  id: string;
+  origen: "automatica" | "manual";
+  productoId: string;
+  producto: Producto;
+  cantidadSolicitada: string;
+  estado: EstadoOrdenCompra;
+  proveedorId: string | null;
+  proveedor: Proveedor | null;
+  precioUnitario: string | null;
+  fechaEsperada: string | null;
+  motivoRechazo: string | null;
+  fechaCreacion: string;
+}
