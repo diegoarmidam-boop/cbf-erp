@@ -43,6 +43,16 @@ export default function Bonos() {
     }
   }
 
+  async function toggleActivo(b: BonoConfig) {
+    setError(null);
+    try {
+      await api.patch(`/nomina/bonos/${b.id}/activo`, { activo: !b.activo });
+      cargar();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "No se pudo actualizar.");
+    }
+  }
+
   async function generarPendientes() {
     setError(null);
     setMensaje(null);
@@ -132,6 +142,8 @@ export default function Bonos() {
           <tr>
             <th>Nombre</th>
             <th>Tipo</th>
+            <th>Estado</th>
+            <th></th>
           </tr>
         </thead>
         <tbody>
@@ -139,6 +151,14 @@ export default function Bonos() {
             <tr key={b.id}>
               <td>{b.nombre}</td>
               <td>{b.tipo}</td>
+              <td>
+                <span className={`tag ${b.activo ? "tag-success" : "tag-danger"}`}>{b.activo ? "Activo" : "Inactivo"}</span>
+              </td>
+              <td>
+                <button className="btn-secondary" onClick={() => toggleActivo(b)}>
+                  {b.activo ? "Desactivar" : "Reactivar"}
+                </button>
+              </td>
             </tr>
           ))}
         </tbody>

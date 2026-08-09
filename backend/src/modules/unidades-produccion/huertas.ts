@@ -9,7 +9,7 @@ export function crearHuerta(nombre: string, hectareasTotales: number) {
   return prisma.huerta.create({ data: { nombre, hectareasTotales } });
 }
 
-export function actualizarHuerta(id: string, data: { nombre?: string; hectareasTotales?: number; mapaUrl?: string }) {
+export function actualizarHuerta(id: string, data: { nombre?: string; hectareasTotales?: number; mapaUrl?: string; activo?: boolean }) {
   return prisma.huerta.update({ where: { id }, data });
 }
 

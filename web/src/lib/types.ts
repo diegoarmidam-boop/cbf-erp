@@ -252,6 +252,7 @@ export interface Producto {
   unidad: string;
   requiereLote: boolean;
   autorizado: boolean;
+  activo: boolean;
 }
 
 export interface ProductoLote {

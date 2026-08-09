@@ -52,6 +52,17 @@ export default function Prestamos() {
     }
   }
 
+  async function cancelar(id: string) {
+    if (!confirm("¿Cancelar este préstamo? Solo se puede si todavía no tiene descuentos aplicados.")) return;
+    setError(null);
+    try {
+      await api.post(`/nomina/prestamos/${id}/cancelar`);
+      cargar();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "No se pudo cancelar.");
+    }
+  }
+
   async function aplicarDescuento(id: string) {
     setError(null);
     try {
@@ -126,9 +137,12 @@ export default function Prestamos() {
                 <td>${Number(p.saldoPendiente).toFixed(2)}</td>
                 <td>${Number(p.montoPorDescuento).toFixed(2)}</td>
                 <td>{p.proximoDescuento.slice(0, 10)}</td>
-                <td>
+                <td style={{ display: "flex", gap: 6 }}>
                   <button className="btn-secondary" onClick={() => aplicarDescuento(p.id)}>
                     Aplicar descuento
+                  </button>
+                  <button className="btn-danger" onClick={() => cancelar(p.id)}>
+                    Cancelar
                   </button>
                 </td>
               </tr>

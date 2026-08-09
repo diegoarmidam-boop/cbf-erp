@@ -18,6 +18,16 @@ export default function Catalogo() {
   const [unidad, setUnidad] = useState("L");
   const [requiereLote, setRequiereLote] = useState(true);
 
+  async function toggleActivo(p: { id: string; activo: boolean }) {
+    setError(null);
+    try {
+      await api.patch(`/almacen/productos/${p.id}/activo`, { activo: !p.activo });
+      refetch();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "No se pudo actualizar.");
+    }
+  }
+
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
@@ -108,6 +118,8 @@ export default function Catalogo() {
               <th>Categoría</th>
               <th>Presentación</th>
               <th>Autorizado</th>
+              <th>Estado</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
@@ -119,6 +131,14 @@ export default function Catalogo() {
                 <td>{p.presentacion}</td>
                 <td>
                   <span className={`tag ${p.autorizado ? "tag-success" : "tag-warning"}`}>{p.autorizado ? "Sí" : "Pendiente"}</span>
+                </td>
+                <td>
+                  <span className={`tag ${p.activo ? "tag-success" : "tag-danger"}`}>{p.activo ? "Activo" : "Inactivo"}</span>
+                </td>
+                <td>
+                  <button className="btn-secondary" onClick={() => toggleActivo(p)}>
+                    {p.activo ? "Desactivar" : "Reactivar"}
+                  </button>
                 </td>
               </tr>
             ))}

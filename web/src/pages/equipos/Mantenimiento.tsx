@@ -49,6 +49,17 @@ export default function Mantenimiento() {
     }
   }
 
+  async function eliminarConcepto(id: string) {
+    if (!confirm("¿Borrar este concepto de servicio?")) return;
+    setError(null);
+    try {
+      await api.delete(`/equipos/mantenimiento/conceptos/${id}`);
+      cargar();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "No se pudo borrar.");
+    }
+  }
+
   async function crearEvento(e: FormEvent) {
     e.preventDefault();
     setError(null);
@@ -111,6 +122,7 @@ export default function Mantenimiento() {
               <tr>
                 <th>Concepto</th>
                 <th>Umbral</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
@@ -118,6 +130,11 @@ export default function Mantenimiento() {
                 <tr key={c.id}>
                   <td>{c.nombre}</td>
                   <td>{c.umbralHoras}h</td>
+                  <td>
+                    <button className="btn-secondary" onClick={() => eliminarConcepto(c.id)}>
+                      Borrar
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>

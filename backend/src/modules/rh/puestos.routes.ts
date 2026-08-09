@@ -38,3 +38,17 @@ puestosRouter.patch("/:id", requirePermission("rh", "editar"), async (req, res) 
   const puesto = await prisma.puesto.update({ where: { id: unoSolo(req.params.id) }, data: parsed.data });
   res.json(puesto);
 });
+
+// Puesto no tiene campo `activo` — no tiene sentido "desactivar" un catálogo
+// tan simple, así que se borra de verdad, pero solo si ya no tiene Personal
+// asignado (si no, se rompería esa referencia).
+puestosRouter.delete("/:id", requirePermission("rh", "editar"), async (req, res) => {
+  const id = unoSolo(req.params.id);
+  const enUso = await prisma.personal.findFirst({ where: { puestoId: id } });
+  if (enUso) {
+    res.status(409).json({ error: "Este puesto tiene Personal asignado — no se puede borrar." });
+    return;
+  }
+  await prisma.puesto.delete({ where: { id } });
+  res.status(204).end();
+});

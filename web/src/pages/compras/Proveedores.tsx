@@ -12,12 +12,22 @@ export default function Proveedores() {
 
   function cargar() {
     api
-      .get<Proveedor[]>("/compras/proveedores")
+      .get<Proveedor[]>("/compras/proveedores?todas=true")
       .then(setProveedores)
       .catch((err) => setError(err instanceof ApiError ? err.message : "No se pudo cargar."));
   }
 
   useEffect(cargar, []);
+
+  async function toggleActivo(p: Proveedor) {
+    setError(null);
+    try {
+      await api.patch(`/compras/proveedores/${p.id}/activo`, { activo: !p.activo });
+      cargar();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "No se pudo actualizar.");
+    }
+  }
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -74,6 +84,8 @@ export default function Proveedores() {
             <th>Nombre</th>
             <th>Crédito</th>
             <th>Vence</th>
+            <th>Estado</th>
+            <th></th>
           </tr>
         </thead>
         <tbody>
@@ -82,6 +94,14 @@ export default function Proveedores() {
               <td>{p.nombre}</td>
               <td>{p.creditoMonto ? `$${p.creditoMonto}` : "—"}</td>
               <td>{p.creditoVencimiento?.slice(0, 10) ?? "—"}</td>
+              <td>
+                <span className={`tag ${p.activo ? "tag-success" : "tag-danger"}`}>{p.activo ? "Activo" : "Inactivo"}</span>
+              </td>
+              <td>
+                <button className="btn-secondary" onClick={() => toggleActivo(p)}>
+                  {p.activo ? "Desactivar" : "Reactivar"}
+                </button>
+              </td>
             </tr>
           ))}
         </tbody>

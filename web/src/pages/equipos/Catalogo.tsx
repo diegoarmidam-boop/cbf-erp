@@ -5,7 +5,7 @@ import { useEquipos } from "../../lib/useEquipos";
 import type { TipoEquipo } from "../../lib/types";
 
 export default function Catalogo() {
-  const { equipos, cargando, refetch } = useEquipos();
+  const { equipos, cargando, refetch } = useEquipos(undefined, true);
   const { refetchEquipos } = useOutletContext<{ refetchEquipos: () => void }>();
   const [error, setError] = useState<string | null>(null);
   const [mostrarForm, setMostrarForm] = useState(false);
@@ -21,6 +21,17 @@ export default function Catalogo() {
     if (!mostrarForm) return;
     api.get<{ folio: string }>(`/equipos/sugerir-folio?tipo=${tipo}`).then((r) => setFolio(r.folio));
   }, [tipo, mostrarForm]);
+
+  async function toggleActivo(eq: { id: string; activo: boolean }) {
+    setError(null);
+    try {
+      await api.patch(`/equipos/${eq.id}/activo`, { activo: !eq.activo });
+      refetch();
+      refetchEquipos();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "No se pudo actualizar.");
+    }
+  }
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -106,6 +117,8 @@ export default function Catalogo() {
               <th>Marca/Modelo</th>
               <th>Año</th>
               <th>Placas</th>
+              <th>Estado</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
@@ -118,6 +131,14 @@ export default function Catalogo() {
                 </td>
                 <td>{e.anio ?? "—"}</td>
                 <td>{e.placas ?? "—"}</td>
+                <td>
+                  <span className={`tag ${e.activo ? "tag-success" : "tag-danger"}`}>{e.activo ? "Activo" : "Inactivo"}</span>
+                </td>
+                <td>
+                  <button className="btn-secondary" onClick={() => toggleActivo(e)}>
+                    {e.activo ? "Desactivar" : "Reactivar"}
+                  </button>
+                </td>
               </tr>
             ))}
           </tbody>

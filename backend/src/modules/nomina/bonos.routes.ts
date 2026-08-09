@@ -69,3 +69,17 @@ bonosRouter.post("/pendientes/:id/autorizar", requirePermission("nomina", "autor
 bonosRouter.post("/pendientes/:id/rechazar", requirePermission("nomina", "autoriza"), async (req, res) => {
   res.json(await rechazarBono(unoSolo(req.params.id), req.usuario!.usuarioId));
 });
+
+const activoSchema = z.object({ activo: z.boolean() });
+
+// Desactivar en vez de borrar — BonoOtorgado histórico depende de este
+// BonoConfig; uno inactivo simplemente deja de generarse en periodos nuevos.
+bonosRouter.patch("/:id/activo", requirePermission("nomina", "editar"), async (req, res) => {
+  const parsed = activoSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+  const bono = await prisma.bonoConfig.update({ where: { id: unoSolo(req.params.id) }, data: { activo: parsed.data.activo } });
+  res.json(bono);
+});

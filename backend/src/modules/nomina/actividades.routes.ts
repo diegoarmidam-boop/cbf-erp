@@ -11,8 +11,13 @@ actividadesRouter.use(requireAuth);
 
 // Igual que /nomina/grupos: hace falta tanto para quien solo consulta
 // (ver) como para quien captura día a día (capturar, ej. Supervisor).
-actividadesRouter.get("/", requirePermissionAny(["nomina", "ver"], ["nomina", "capturar"]), async (_req, res) => {
-  const actividades = await prisma.actividad.findMany({ where: { activo: true }, orderBy: { nombre: "asc" } });
+// `todas=true` es para la pantalla de catálogo (Dirección/Gerencia
+// Administrativa necesita ver y reactivar las inactivas); el resto de
+// consumidores (ej. selector de Captura del día) solo debe ofrecer las
+// vigentes, así que ese sigue siendo el default.
+actividadesRouter.get("/", requirePermissionAny(["nomina", "ver"], ["nomina", "capturar"]), async (req, res) => {
+  const todas = req.query.todas === "true";
+  const actividades = await prisma.actividad.findMany({ where: todas ? {} : { activo: true }, orderBy: { nombre: "asc" } });
   res.json(actividades);
 });
 
@@ -83,4 +88,19 @@ actividadesRouter.patch("/:id/tarifa", requirePermission("nomina", "capturar"), 
     propuestoPorId: req.usuario!.usuarioId,
   });
   res.status(202).json({ mensaje: "Propuesta de cambio de tarifa enviada — pendiente de autorización.", solicitud });
+});
+
+const activoSchema = z.object({ activo: z.boolean() });
+
+// Desactivar en vez de borrar — RegistroNomina histórico depende de esta
+// fila; una actividad inactiva simplemente deja de ofrecerse en capturas
+// nuevas, pero su historial sigue intacto.
+actividadesRouter.patch("/:id/activo", requirePermission("nomina", "editar"), async (req, res) => {
+  const parsed = activoSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+  const actividad = await prisma.actividad.update({ where: { id: unoSolo(req.params.id) }, data: { activo: parsed.data.activo } });
+  res.json(actividad);
 });

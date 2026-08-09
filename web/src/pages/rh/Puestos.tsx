@@ -13,6 +13,17 @@ export default function Puestos() {
   const [rangoMin, setRangoMin] = useState("");
   const [rangoMax, setRangoMax] = useState("");
 
+  async function eliminar(id: string) {
+    if (!confirm("¿Borrar este puesto? Esto no se puede deshacer.")) return;
+    setError(null);
+    try {
+      await api.delete(`/rh/puestos/${id}`);
+      refetch();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "No se pudo borrar.");
+    }
+  }
+
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
@@ -89,6 +100,7 @@ export default function Puestos() {
               <th>Periodicidad</th>
               <th>Asignación de costo</th>
               <th>Rango salarial</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
@@ -99,6 +111,11 @@ export default function Puestos() {
                 <td>{p.metodoAsignacionCosto}</td>
                 <td>
                   {p.rangoSalarialMin ?? "—"} – {p.rangoSalarialMax ?? "—"}
+                </td>
+                <td>
+                  <button className="btn-secondary" onClick={() => eliminar(p.id)}>
+                    Borrar
+                  </button>
                 </td>
               </tr>
             ))}

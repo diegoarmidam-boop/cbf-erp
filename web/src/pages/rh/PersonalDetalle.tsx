@@ -43,6 +43,17 @@ export default function PersonalDetalle() {
     }
   }
 
+  async function eliminarDocumento(documentoId: string) {
+    if (!id || !confirm("¿Borrar este documento?")) return;
+    setError(null);
+    try {
+      await api.delete(`/personal/${id}/documentos/${documentoId}`);
+      cargar();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "No se pudo borrar.");
+    }
+  }
+
   async function subirDocumento() {
     if (!id || !fileRef.current?.files?.[0]) return;
     setError(null);
@@ -139,10 +150,13 @@ export default function PersonalDetalle() {
         <h3 style={{ marginBottom: 10 }}>Documentos digitales</h3>
         <ul style={{ listStyle: "none", padding: 0, marginBottom: 14 }}>
           {(persona.documentos ?? []).map((d) => (
-            <li key={d.id} style={{ marginBottom: 6 }}>
+            <li key={d.id} style={{ marginBottom: 6, display: "flex", alignItems: "center", gap: 10 }}>
               <a href={`${api.apiUrl}${d.archivoUrl}`} target="_blank" rel="noreferrer">
                 {ETIQUETAS_DOC[d.tipoDocumento]} — {d.origen === "foto_celular" ? "foto" : "escaneo"}
               </a>
+              <button className="btn-secondary" onClick={() => eliminarDocumento(d.id)}>
+                Borrar
+              </button>
             </li>
           ))}
           {(persona.documentos ?? []).length === 0 && <p style={{ color: "var(--ink-soft)" }}>Sin documentos todavía.</p>}

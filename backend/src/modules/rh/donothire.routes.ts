@@ -2,6 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../../core/db.js";
 import { requireAuth, requirePermission } from "../../middleware/auth.js";
+import { unoSolo } from "../../core/http.js";
 
 export const doNotHireRouter = Router();
 doNotHireRouter.use(requireAuth);
@@ -26,4 +27,11 @@ doNotHireRouter.post("/", requirePermission("do_not_hire", "capturar"), async (r
     data: { ...parsed.data, registradoPorId: req.usuario!.usuarioId },
   });
   res.status(201).json(entrada);
+});
+
+// Sin dependientes en el sistema (es solo una lista de referencia) — se
+// puede borrar directo cuando la persona se aclara o se dio de alta por error.
+doNotHireRouter.delete("/:id", requirePermission("do_not_hire", "capturar"), async (req, res) => {
+  await prisma.doNotHire.delete({ where: { id: unoSolo(req.params.id) } });
+  res.status(204).end();
 });

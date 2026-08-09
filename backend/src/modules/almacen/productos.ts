@@ -30,7 +30,7 @@ export function crearProductoAutorizado(input: AltaProductoInput, autorizadoPorI
   });
 }
 
-/** Catálogo de compra: solo productos ya autorizados pueden elegirse (bloque 4/9.5/9.7). */
+/** Catálogo de compra: solo productos ya autorizados y activos pueden elegirse (bloque 4/9.5/9.7). */
 export function productosAutorizados(categoria?: string) {
-  return prisma.producto.findMany({ where: { categoria, autorizado: true }, orderBy: { nombreComercial: "asc" } });
+  return prisma.producto.findMany({ where: { categoria, autorizado: true, activo: true }, orderBy: { nombreComercial: "asc" } });
 }

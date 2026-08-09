@@ -27,6 +27,17 @@ export default function SeccionesRiego() {
     setCuadroIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   }
 
+  async function eliminar(id: string) {
+    if (!confirm("¿Borrar esta Sección de Riego?")) return;
+    setError(null);
+    try {
+      await api.delete(`/secciones-riego/${id}`);
+      cargar();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "No se pudo borrar.");
+    }
+  }
+
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
@@ -77,6 +88,7 @@ export default function SeccionesRiego() {
           <tr>
             <th>Nombre</th>
             <th>Cuadros</th>
+            <th></th>
           </tr>
         </thead>
         <tbody>
@@ -84,6 +96,11 @@ export default function SeccionesRiego() {
             <tr key={s.id}>
               <td>{s.nombre}</td>
               <td>{s.cuadros.map((c) => c.cuadro.nombre).join(", ") || "—"}</td>
+              <td>
+                <button className="btn-secondary" onClick={() => eliminar(s.id)}>
+                  Borrar
+                </button>
+              </td>
             </tr>
           ))}
         </tbody>

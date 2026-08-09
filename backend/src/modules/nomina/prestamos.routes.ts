@@ -4,7 +4,7 @@ import { requireAuth, requirePermission } from "../../middleware/auth.js";
 import { unoSolo } from "../../core/http.js";
 import { obtenerConfigNomina } from "./config.js";
 import { calcularPeriodoNomina } from "@cbf/shared";
-import { aplicarDescuento, crearPrestamo, historialPrestamo, listarPrestamos } from "./prestamos.js";
+import { aplicarDescuento, cancelarPrestamo, crearPrestamo, historialPrestamo, listarPrestamos, PrestamoConDescuentosError } from "./prestamos.js";
 
 export const prestamosRouter = Router();
 prestamosRouter.use(requireAuth);
@@ -45,4 +45,16 @@ prestamosRouter.post("/:id/aplicar-descuento", requirePermission("nomina", "edit
   const periodo = calcularPeriodoNomina(new Date().toISOString().slice(0, 10), config.diaCorteIndex);
   const monto = await aplicarDescuento(unoSolo(req.params.id), req.usuario!.usuarioId, periodo.fin);
   res.json({ montoAplicado: monto });
+});
+
+prestamosRouter.post("/:id/cancelar", requirePermission("nomina", "editar"), async (req, res) => {
+  try {
+    res.json(await cancelarPrestamo(unoSolo(req.params.id)));
+  } catch (err) {
+    if (err instanceof PrestamoConDescuentosError) {
+      res.status(409).json({ error: err.message });
+      return;
+    }
+    throw err;
+  }
 });

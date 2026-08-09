@@ -2,16 +2,22 @@ import { useEffect, useState, type FormEvent } from "react";
 import { useOutletContext } from "react-router-dom";
 import { api, ApiError } from "../../lib/api";
 import { useCuadros } from "../../lib/useCuadros";
-import type { AreaEfectiva } from "../../lib/types";
+import type { AreaEfectiva, EstatusCuadro, Huerta } from "../../lib/types";
 import { useHuertaSeleccionada } from "./HuertaSeleccionadaContext";
 
 function hoyISO(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+const ETIQUETAS_ESTATUS_CUADRO: Record<EstatusCuadro, string> = {
+  activo: "Activo",
+  en_descanso: "En descanso",
+  fuera_produccion: "Fuera de producción",
+};
+
 export default function HuertasYCuadros() {
   const { huertaId } = useHuertaSeleccionada();
-  const { refetchHuertas } = useOutletContext<{ refetchHuertas: () => void }>();
+  const { refetchHuertas, huertaActual } = useOutletContext<{ refetchHuertas: () => void; huertaActual: Huerta | null }>();
   const { cuadros, cargando, refetch } = useCuadros(huertaId);
   const [area, setArea] = useState<AreaEfectiva | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -79,12 +85,38 @@ export default function HuertasYCuadros() {
     }
   }
 
+  async function toggleActivoHuerta() {
+    if (!huertaActual) return;
+    setError(null);
+    try {
+      await api.patch(`/huertas/${huertaActual.id}`, { activo: !huertaActual.activo });
+      refetchHuertas();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "No se pudo actualizar.");
+    }
+  }
+
+  async function cambiarEstatusCuadro(cuadroId: string, estatus: EstatusCuadro) {
+    setError(null);
+    try {
+      await api.patch(`/cuadros/${cuadroId}/estatus`, { estatus });
+      refetch();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "No se pudo actualizar.");
+    }
+  }
+
   return (
     <div>
-      <div style={{ marginBottom: 16 }}>
+      <div style={{ marginBottom: 16, display: "flex", gap: 10, alignItems: "center" }}>
         <button className="btn-secondary" onClick={() => setMostrarFormHuerta((v) => !v)}>
           {mostrarFormHuerta ? "Cancelar" : "+ Nueva Huerta"}
         </button>
+        {huertaActual && (
+          <button className="btn-secondary" onClick={toggleActivoHuerta}>
+            {huertaActual.activo ? "Desactivar esta Huerta" : "Reactivar esta Huerta"}
+          </button>
+        )}
       </div>
 
       {mostrarFormHuerta && (
@@ -183,7 +215,13 @@ export default function HuertasYCuadros() {
                     <tr key={c.id}>
                       <td>{c.nombre}</td>
                       <td>
-                        <span className={`tag ${c.estatus === "activo" ? "tag-success" : "tag-neutral"}`}>{c.estatus}</span>
+                        <select value={c.estatus} onChange={(e) => cambiarEstatusCuadro(c.id, e.target.value as EstatusCuadro)}>
+                          {Object.entries(ETIQUETAS_ESTATUS_CUADRO).map(([v, l]) => (
+                            <option key={v} value={v}>
+                              {l}
+                            </option>
+                          ))}
+                        </select>
                       </td>
                       <td>{vigente?.hectareas ?? "—"}</td>
                       <td>{vigente?.variedad ?? "—"}</td>

@@ -1,13 +1,20 @@
 import { Router } from "express";
 import { z } from "zod";
 import { requireAuth, requirePermission } from "../../middleware/auth.js";
+import { prisma } from "../../core/db.js";
 import { crearProveedor, listarProveedores, mejoresProveedoresPorProducto } from "./proveedores.js";
 import { unoSolo } from "../../core/http.js";
 
 export const proveedoresRouter = Router();
 proveedoresRouter.use(requireAuth);
 
-proveedoresRouter.get("/", requirePermission("compras", "ver"), async (_req, res) => {
+// `todas=true` para la pantalla de catálogo (para poder reactivar); el
+// selector de "cotizar orden" solo debe ofrecer proveedores activos.
+proveedoresRouter.get("/", requirePermission("compras", "ver"), async (req, res) => {
+  if (req.query.todas === "true") {
+    res.json(await prisma.proveedor.findMany({ orderBy: { nombre: "asc" } }));
+    return;
+  }
   res.json(await listarProveedores());
 });
 
@@ -29,4 +36,18 @@ proveedoresRouter.post("/", requirePermission("compras", "capturar"), async (req
     return;
   }
   res.status(201).json(await crearProveedor(parsed.data));
+});
+
+const activoSchema = z.object({ activo: z.boolean() });
+
+// Desactivar en vez de borrar — las Órdenes de Compra ya formalizadas
+// dependen de este proveedor.
+proveedoresRouter.patch("/:id/activo", requirePermission("compras", "capturar"), async (req, res) => {
+  const parsed = activoSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+  const proveedor = await prisma.proveedor.update({ where: { id: unoSolo(req.params.id) }, data: { activo: parsed.data.activo } });
+  res.json(proveedor);
 });

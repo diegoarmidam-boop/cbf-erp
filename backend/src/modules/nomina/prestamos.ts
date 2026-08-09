@@ -71,3 +71,16 @@ export function listarPrestamos(filtro?: { personalId?: string; activo?: boolean
 export function historialPrestamo(prestamoId: string) {
   return prisma.prestamoDescuento.findMany({ where: { prestamoId }, orderBy: { fechaAplicado: "asc" } });
 }
+
+export class PrestamoConDescuentosError extends Error {
+  constructor() {
+    super("Este préstamo ya tiene descuentos aplicados en Nómina — no se puede cancelar, solo corregirlo manualmente.");
+  }
+}
+
+/** Cancela un préstamo capturado por error — solo antes de que toque un solo periodo de Nómina. */
+export async function cancelarPrestamo(prestamoId: string) {
+  const yaDescontado = await prisma.prestamoDescuento.findFirst({ where: { prestamoId } });
+  if (yaDescontado) throw new PrestamoConDescuentosError();
+  return prisma.prestamo.update({ where: { id: prestamoId }, data: { activo: false, saldoPendiente: 0 } });
+}

@@ -5,12 +5,19 @@ import fs from "node:fs";
 import { z } from "zod";
 import { requireAuth, requirePermission } from "../../middleware/auth.js";
 import { unoSolo } from "../../core/http.js";
+import { prisma } from "../../core/db.js";
 import { actualizarHuerta, calcularAreaEfectivaHuerta, crearHuerta, listarHuertas } from "./huertas.js";
 
 export const huertasRouter = Router();
 huertasRouter.use(requireAuth);
 
-huertasRouter.get("/", requirePermission("unidades_produccion", "ver"), async (_req, res) => {
+// `todas=true` para la pantalla de catálogo (para poder reactivar); el
+// resto de selectores del sistema solo deben ofrecer Huertas activas.
+huertasRouter.get("/", requirePermission("unidades_produccion", "ver"), async (req, res) => {
+  if (req.query.todas === "true") {
+    res.json(await prisma.huerta.findMany({ orderBy: { nombre: "asc" } }));
+    return;
+  }
   res.json(await listarHuertas());
 });
 
@@ -30,7 +37,11 @@ huertasRouter.post("/", requirePermission("unidades_produccion", "capturar"), as
   res.status(201).json(huerta);
 });
 
-const actualizarSchema = z.object({ nombre: z.string().min(1).optional(), hectareasTotales: z.number().positive().optional() });
+const actualizarSchema = z.object({
+  nombre: z.string().min(1).optional(),
+  hectareasTotales: z.number().positive().optional(),
+  activo: z.boolean().optional(),
+});
 
 huertasRouter.patch("/:id", requirePermission("unidades_produccion", "editar"), async (req, res) => {
   const parsed = actualizarSchema.safeParse(req.body);

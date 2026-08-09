@@ -695,6 +695,7 @@ model Producto {
   autorizado        Boolean   @default(false) // agroquímico/fertilizante deben autorizarse antes de comprarse/aplicarse
   autorizadoPorId   String?
   fechaAutorizacion DateTime?
+  activo            Boolean   @default(true) // desactivar en vez de borrar — hay lotes/movimientos/historial ligados
 
   lotes                   ProductoLote[]
   movimientosCentral      AlmacenCentralMovimiento[]

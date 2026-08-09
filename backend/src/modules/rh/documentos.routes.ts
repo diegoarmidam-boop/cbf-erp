@@ -51,3 +51,17 @@ documentosRouter.post("/", requirePermission("rh", "capturar"), upload.single("a
   });
   res.status(201).json(doc);
 });
+
+// Borra el registro y el archivo físico — para corregir una subida
+// equivocada (documento incorrecto, tipo mal elegido).
+documentosRouter.delete("/:documentoId", requirePermission("rh", "capturar"), async (req, res) => {
+  const doc = await prisma.personalDocumento.findUnique({ where: { id: unoSolo(req.params.documentoId) } });
+  if (!doc) {
+    res.status(404).json({ error: "Documento no encontrado." });
+    return;
+  }
+  await prisma.personalDocumento.delete({ where: { id: doc.id } });
+  const rutaArchivo = path.resolve(doc.archivoUrl.replace(/^\//, ""));
+  fs.unlink(rutaArchivo, () => {}); // best-effort — si el archivo ya no está, no es un error para el usuario
+  res.status(204).end();
+});

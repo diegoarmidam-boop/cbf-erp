@@ -22,6 +22,17 @@ export default function DoNotHire() {
 
   useEffect(cargar, []);
 
+  async function eliminar(id: string) {
+    if (!confirm("¿Quitar a esta persona de la lista?")) return;
+    setError(null);
+    try {
+      await api.delete(`/rh/do-not-hire/${id}`);
+      cargar();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "No se pudo borrar.");
+    }
+  }
+
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
@@ -76,6 +87,7 @@ export default function DoNotHire() {
             <th>Motivo</th>
             <th>Condiciones de salida</th>
             <th>Fecha</th>
+            {puedeCapturar && <th></th>}
           </tr>
         </thead>
         <tbody>
@@ -85,6 +97,13 @@ export default function DoNotHire() {
               <td>{e.motivo}</td>
               <td>{e.condicionesSalida ?? "—"}</td>
               <td>{e.fecha.slice(0, 10)}</td>
+              {puedeCapturar && (
+                <td>
+                  <button className="btn-secondary" onClick={() => eliminar(e.id)}>
+                    Borrar
+                  </button>
+                </td>
+              )}
             </tr>
           ))}
         </tbody>
