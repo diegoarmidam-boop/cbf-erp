@@ -450,3 +450,63 @@ export interface Aplicacion {
   diasSinAplicar?: number | null;
   alertaPendienteAplicar?: boolean;
 }
+
+export type ModoDosisGranular = "kg_ha" | "g_planta";
+
+export interface FertilizacionGranularRealizada {
+  id: string;
+  fertilizacionId: string;
+  personalId: string | null;
+  grupoId: string | null;
+  horas: string;
+  fechaReal: string;
+  registradoPorId: string;
+}
+
+export interface FertilizacionGranular {
+  id: string;
+  huertaId: string;
+  huerta: Huerta;
+  productoId: string;
+  producto: Producto;
+  recursoTipo: RecursoTipo;
+  equipoId: string | null;
+  equipo: Equipo | null;
+  modoDosis: ModoDosisGranular;
+  dosisValor: string;
+  fechaInicio: string;
+  fechaFin: string;
+  cantidadTotalCalculada: string;
+  estado: EstadoAplicacion;
+  fechaCreacion: string;
+  cuadros: { cuadro: Cuadro }[];
+  realizadas: FertilizacionGranularRealizada[];
+  comprometido?: boolean;
+  diasSinEntregar?: number | null;
+  alertaVencimiento?: boolean;
+  diasSinAplicar?: number | null;
+  alertaPendienteAplicar?: boolean;
+}
+
+export type FrecuenciaFertirriego = "diario" | "cada_2_dias" | "cada_3_dias" | "patron_2_1";
+
+export interface FertirriegoProgramacion {
+  id: string;
+  huertaId: string;
+  huerta: Huerta;
+  productoId: string;
+  producto: Producto;
+  dosisValor: string;
+  dosisUnidad: ConcentracionUnidad;
+  litrosAguaPorHa: string;
+  frecuencia: FrecuenciaFertirriego;
+  fechaInicio: string;
+  fechaFin: string;
+  cantidadTotalCalculada: string;
+  estado: EstadoAplicacion;
+  fechaCreacion: string;
+  secciones: { seccion: SeccionRiego }[];
+  comprometido?: boolean;
+  diasSinEntregar?: number | null;
+  alertaVencimiento?: boolean;
+}

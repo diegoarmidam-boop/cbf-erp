@@ -122,12 +122,20 @@ export async function programarAplicacion(input: ProgramarAplicacionInput, cread
   });
 }
 
-export function listarAplicaciones(huertaId?: string) {
-  return prisma.aplicacion.findMany({
+/**
+ * La lista también trae `comprometido`/alertas, no solo el detalle — si no,
+ * el botón "Confirmar entrega" del listado nunca aparecería (el campo
+ * vendría `undefined` en vez de `true`) aunque la aplicación sí esté
+ * comprometida; se descubrió probando la pantalla real con datos que
+ * seguían en "programada" al momento de revisar la lista.
+ */
+export async function listarAplicaciones(huertaId?: string) {
+  const aplicaciones = await prisma.aplicacion.findMany({
     where: { huertaId },
     include: { huerta: true, producto: true, equipo: true, cuadros: { include: { cuadro: true } }, realizadas: true },
     orderBy: { fechaCreacion: "desc" },
   });
+  return Promise.all(aplicaciones.map((a) => enriquecerConAlertas(a)));
 }
 
 async function enriquecerConAlertas<T extends { id: string; estado: string; fechaCreacion: Date }>(aplicacion: T, tx: TransactionClient | typeof prisma = prisma) {

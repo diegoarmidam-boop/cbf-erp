@@ -117,14 +117,26 @@ export async function recibirOrden(
       referenciaId: id,
     });
 
-    // Si esta orden nació automática porque una Aplicación en espera no
-    // alcanzaba stock (9.7/9.14), al recibirla se intenta apartar de
-    // inmediato la cantidad que esa Aplicación necesita — misma
-    // transacción, para que la entrada y el apartado queden atómicos.
+    // Si esta orden nació automática porque una Aplicación/Fertilización en
+    // espera no alcanzaba stock (9.5/9.7/9.14), al recibirla se intenta
+    // apartar de inmediato la cantidad que necesita — misma transacción,
+    // para que la entrada y el apartado queden atómicos. referenciaId puede
+    // apuntar a cualquiera de los tres orígenes; se prueban en orden.
     if (orden.referenciaAplicacionId) {
-      const aplicacion = await tx.aplicacion.findUnique({ where: { id: orden.referenciaAplicacionId } });
+      const refId = orden.referenciaAplicacionId;
+      const aplicacion = await tx.aplicacion.findUnique({ where: { id: refId } });
       if (aplicacion) {
-        await intentarComprometer(tx, orden.productoId, Number(aplicacion.cantidadTotalCalculada), aplicacion.id, recibidoPorId);
+        await intentarComprometer(tx, orden.productoId, Number(aplicacion.cantidadTotalCalculada), refId, recibidoPorId);
+      } else {
+        const granular = await tx.fertilizacionGranular.findUnique({ where: { id: refId } });
+        if (granular) {
+          await intentarComprometer(tx, orden.productoId, Number(granular.cantidadTotalCalculada), refId, recibidoPorId);
+        } else {
+          const fertirriego = await tx.fertirriegoProgramacion.findUnique({ where: { id: refId } });
+          if (fertirriego) {
+            await intentarComprometer(tx, orden.productoId, Number(fertirriego.cantidadTotalCalculada), refId, recibidoPorId);
+          }
+        }
       }
     }
     return tx.ordenCompra.findUniqueOrThrow({ where: { id } });

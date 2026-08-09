@@ -35,6 +35,9 @@ import Combustible from "./pages/equipos/Combustible";
 import Mantenimiento from "./pages/equipos/Mantenimiento";
 import UsoDiario from "./pages/equipos/UsoDiario";
 import Aplicaciones from "./pages/aplicaciones/Aplicaciones";
+import FertilizantesLayout from "./pages/fertilizantes/FertilizantesLayout";
+import Granular from "./pages/fertilizantes/Granular";
+import Fertirriego from "./pages/fertilizantes/Fertirriego";
 
 function RutaProtegida({ children }: { children: React.ReactNode }) {
   const { autenticado } = useAuth();
@@ -108,6 +111,12 @@ export default function App() {
             </Route>
 
             <Route path="/aplicaciones" element={<Aplicaciones />} />
+
+            <Route path="/fertilizantes" element={<FertilizantesLayout />}>
+              <Route index element={<Navigate to="granular" replace />} />
+              <Route path="granular" element={<Granular />} />
+              <Route path="fertirriego" element={<Fertirriego />} />
+            </Route>
           </Route>
         </Routes>
       </AuthProvider>

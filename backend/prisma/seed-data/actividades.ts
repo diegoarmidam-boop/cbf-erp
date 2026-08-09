@@ -19,4 +19,8 @@ export const ACTIVIDADES_SEED: Array<{ nombre: string }> = [
   { nombre: "Fumigación" },
   { nombre: "Limpieza" },
   { nombre: "Virosis" },
+  // Agregada al construir Fertilizantes (9.5, Módulo 8) — ninguna de las 12
+  // originales representaba "aplicar fertilizante granular"; decisión
+  // explícita del usuario, mismo esquema que las demás (Individual por hora).
+  { nombre: "Fertilización" },
 ];
