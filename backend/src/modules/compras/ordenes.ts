@@ -1,5 +1,5 @@
 import { prisma } from "../../core/db.js";
-import { registrarEntradaTx } from "../almacen/movimientos.js";
+import { intentarComprometer, registrarEntradaTx } from "../almacen/movimientos.js";
 
 export class SolicitudYaResueltaOrdenError extends Error {
   constructor() {
@@ -116,6 +116,17 @@ export async function recibirOrden(
       fechaCaducidad: opciones.fechaCaducidad,
       referenciaId: id,
     });
+
+    // Si esta orden nació automática porque una Aplicación en espera no
+    // alcanzaba stock (9.7/9.14), al recibirla se intenta apartar de
+    // inmediato la cantidad que esa Aplicación necesita — misma
+    // transacción, para que la entrada y el apartado queden atómicos.
+    if (orden.referenciaAplicacionId) {
+      const aplicacion = await tx.aplicacion.findUnique({ where: { id: orden.referenciaAplicacionId } });
+      if (aplicacion) {
+        await intentarComprometer(tx, orden.productoId, Number(aplicacion.cantidadTotalCalculada), aplicacion.id, recibidoPorId);
+      }
+    }
     return tx.ordenCompra.findUniqueOrThrow({ where: { id } });
   });
 }

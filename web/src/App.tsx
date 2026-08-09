@@ -34,6 +34,7 @@ import EquiposCatalogo from "./pages/equipos/Catalogo";
 import Combustible from "./pages/equipos/Combustible";
 import Mantenimiento from "./pages/equipos/Mantenimiento";
 import UsoDiario from "./pages/equipos/UsoDiario";
+import Aplicaciones from "./pages/aplicaciones/Aplicaciones";
 
 function RutaProtegida({ children }: { children: React.ReactNode }) {
   const { autenticado } = useAuth();
@@ -105,6 +106,8 @@ export default function App() {
               <Route path="mantenimiento" element={<Mantenimiento />} />
               <Route path="uso-diario" element={<UsoDiario />} />
             </Route>
+
+            <Route path="/aplicaciones" element={<Aplicaciones />} />
           </Route>
         </Routes>
       </AuthProvider>

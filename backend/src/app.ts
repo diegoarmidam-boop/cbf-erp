@@ -11,6 +11,7 @@ import { rhRouter } from "./modules/rh/index.js";
 import { almacenRouter } from "./modules/almacen/index.js";
 import { comprasRouter } from "./modules/compras/index.js";
 import { equiposModuleRouter } from "./modules/equipos/index.js";
+import { aplicacionesRouter } from "./modules/aplicaciones/index.js";
 
 export function createApp() {
   const app = express();
@@ -30,6 +31,7 @@ export function createApp() {
   app.use("/almacen", almacenRouter);
   app.use("/compras", comprasRouter);
   app.use("/equipos", equiposModuleRouter);
+  app.use("/aplicaciones", aplicacionesRouter);
 
   const manejarError: ErrorRequestHandler = (err, _req, res, _next) => {
     console.error(err);

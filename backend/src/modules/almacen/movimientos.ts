@@ -173,3 +173,90 @@ export async function registrarConsumoMaquinaria(productoId: string, cantidad: n
 export function movimientosProducto(productoId: string) {
   return prisma.almacenCentralMovimiento.findMany({ where: { productoId }, orderBy: { fecha: "desc" } });
 }
+
+export async function stockTotalProductoTx(tx: TransactionClient, productoId: string): Promise<number> {
+  const lotes = await tx.productoLote.findMany({ where: { productoId } });
+  return lotes.reduce((s, l) => s + Number(l.cantidadActual), 0);
+}
+
+/**
+ * Reserva ("comprometido") de stock para una Aplicación/Fertilización en
+ * espera (9.7/9.5) — descuenta FIFO desde ya, igual que una salida real,
+ * pero se marca "salida_comprometida" porque el producto todavía no salió
+ * físicamente hacia la Huerta (eso ocurre después, al confirmar la
+ * entrega). Devuelve false sin tocar nada si el stock disponible no
+ * alcanza todavía — quien llama decide qué hacer (ej. generar compra
+ * automática por el faltante). Idempotente: si ya existe un compromiso
+ * para esa referencia, no vuelve a descontar.
+ */
+export async function intentarComprometer(
+  tx: TransactionClient,
+  productoId: string,
+  cantidadNecesaria: number,
+  referenciaId: string,
+  capturadoPorId: string
+): Promise<boolean> {
+  const yaComprometido = await tx.almacenCentralMovimiento.findFirst({
+    where: { referenciaId, tipo: "salida_comprometida" },
+  });
+  if (yaComprometido) return true;
+
+  const disponible = await stockTotalProductoTx(tx, productoId);
+  if (disponible + 0.0001 < cantidadNecesaria) return false;
+
+  await descontarFIFO(tx, productoId, cantidadNecesaria);
+  await tx.almacenCentralMovimiento.create({
+    data: { productoId, tipo: "salida_comprometida", cantidad: cantidadNecesaria, referenciaId, capturadoPorId },
+  });
+  return true;
+}
+
+/**
+ * Libera un compromiso que nunca llegó a entregarse (vencimiento de 15
+ * días sin salir de bodega, o cancelación manual — 9.7) — regresa la
+ * cantidad al primer lote del producto; la precisión de a qué lote exacto
+ * regresa no importa a nivel de negocio, solo el total agregado del stock.
+ */
+export async function liberarComprometido(
+  tx: TransactionClient,
+  productoId: string,
+  cantidad: number,
+  referenciaId: string,
+  capturadoPorId: string,
+  motivo: string
+): Promise<void> {
+  const lote = await tx.productoLote.findFirst({ where: { productoId } });
+  if (!lote) throw new Error("No hay lote al que regresar el stock liberado.");
+  await tx.productoLote.update({ where: { id: lote.id }, data: { cantidadActual: { increment: cantidad } } });
+  await tx.almacenCentralMovimiento.create({
+    data: { productoId, tipo: "ajuste_manual", cantidad, referenciaId, capturadoPorId, motivoAjuste: motivo },
+  });
+}
+
+/**
+ * Confirma la entrega física de un compromiso ya reservado (9.7/9.5): el
+ * descuento FIFO ya ocurrió al comprometer, así que aquí solo se registra
+ * el movimiento de auditoría "salida_real" y se suma al Almacén Local de
+ * la Huerta — nunca se vuelve a descontar del Central.
+ */
+export async function confirmarEntregaComprometida(
+  tx: TransactionClient,
+  productoId: string,
+  huertaId: string,
+  cantidad: number,
+  referenciaId: string,
+  capturadoPorId: string
+) {
+  await tx.almacenCentralMovimiento.create({
+    data: { productoId, tipo: "salida_real", cantidad, huertaDestinoId: huertaId, referenciaId, capturadoPorId },
+  });
+  const local = await tx.almacenLocal.upsert({
+    where: { huertaId_productoId: { huertaId, productoId } },
+    update: { cantidadRecibidaAcumulada: { increment: cantidad } },
+    create: { huertaId, productoId, cantidadRecibidaAcumulada: cantidad },
+  });
+  await tx.almacenLocalMovimiento.create({
+    data: { almacenLocalId: local.id, tipo: "entrega", cantidad, referenciaId, capturadoPorId },
+  });
+  return local;
+}

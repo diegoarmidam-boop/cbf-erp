@@ -4,3 +4,4 @@ export * from "./nomina/bonos.js";
 export * from "./nomina/desglose.js";
 export * from "./nomina/semanal.js";
 export * from "./unidades-produccion/calculo.js";
+export * from "./aplicaciones/calculo.js";

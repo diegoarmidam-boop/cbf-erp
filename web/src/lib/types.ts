@@ -410,3 +410,43 @@ export interface EquipoUsoDiario {
   horas: string;
   huerta: { nombre: string };
 }
+
+export type RecursoTipo = "gente" | "implemento";
+export type ConcentracionUnidad = "ml_l" | "g_l" | "kg_l";
+export type EstadoAplicacion = "programada" | "entregada" | "realizada" | "vencida" | "cancelada";
+
+export interface AplicacionRealizada {
+  id: string;
+  aplicacionId: string;
+  personalId: string | null;
+  grupoId: string | null;
+  horas: string;
+  fechaReal: string;
+  registradoPorId: string;
+}
+
+export interface Aplicacion {
+  id: string;
+  huertaId: string;
+  huerta: Huerta;
+  productoId: string;
+  producto: Producto;
+  recursoTipo: RecursoTipo;
+  equipoId: string | null;
+  equipo: Equipo | null;
+  concentracionValor: string;
+  concentracionUnidad: ConcentracionUnidad;
+  litrosMezclaPorHa: string;
+  fechaInicio: string;
+  fechaFin: string;
+  cantidadTotalCalculada: string;
+  estado: EstadoAplicacion;
+  fechaCreacion: string;
+  cuadros: { cuadro: Cuadro }[];
+  realizadas: AplicacionRealizada[];
+  comprometido?: boolean;
+  diasSinEntregar?: number | null;
+  alertaVencimiento?: boolean;
+  diasSinAplicar?: number | null;
+  alertaPendienteAplicar?: boolean;
+}
