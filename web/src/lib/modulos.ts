@@ -35,6 +35,7 @@ export const MODULOS_CONSTRUIDOS: ModuloInfo[] = [
     permisosAlternos: ["almacen_regulado"],
   },
   { slug: "compras", nombre: "Compras", bgVar: "--mod-compras-bg", fgVar: "--mod-compras-fg", icono: "🧾" },
+  { slug: "equipos", nombre: "Equipos y Maquinaria", bgVar: "--mod-equipos-bg", fgVar: "--mod-equipos-fg", icono: "🚜" },
 ];
 
 export function moduloInfo(slug: string): ModuloInfo {

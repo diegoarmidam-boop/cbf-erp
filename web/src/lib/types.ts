@@ -342,3 +342,71 @@ export interface OrdenCompra {
   motivoRechazo: string | null;
   fechaCreacion: string;
 }
+
+export type TipoEquipo = "tractor" | "camioneta" | "remolque" | "implemento";
+
+export interface Equipo {
+  id: string;
+  tipo: TipoEquipo;
+  folio: string;
+  marca: string | null;
+  modelo: string | null;
+  anio: number | null;
+  placas: string | null;
+  activo: boolean;
+}
+
+export type TipoCombustible = "diesel_garrafa" | "gasolina_externa" | "diesel_externo";
+
+export interface CombustibleCarga {
+  id: string;
+  equipoId: string;
+  fecha: string;
+  tipo: TipoCombustible;
+  odometro: string | null;
+  horometro: string | null;
+  litros: string;
+  precioUnitario: string | null;
+}
+
+export interface AlertaRendimiento {
+  tasaActual: number;
+  promedioHistorico: number;
+  unidad: "L/hora" | "km/L";
+  desviacionPorcentual: number;
+  anomalo: boolean;
+}
+
+export interface MantenimientoConcepto {
+  id: string;
+  equipoId: string;
+  nombre: string;
+  umbralHoras: string;
+}
+
+export interface MantenimientoEvento {
+  id: string;
+  tipo: "preventivo" | "correctivo";
+  conceptoId: string | null;
+  concepto: MantenimientoConcepto | null;
+  descripcion: string;
+  mecanicoInterno: boolean;
+  costo: string | null;
+  fecha: string;
+}
+
+export interface AlertaMantenimiento {
+  conceptoId: string;
+  nombre: string;
+  umbralHoras: number;
+  horasAcumuladasDesdeUltimoServicio: number;
+  vencido: boolean;
+}
+
+export interface EquipoUsoDiario {
+  id: string;
+  fecha: string;
+  operador: { nombreCompleto: string };
+  horas: string;
+  huerta: { nombre: string };
+}

@@ -29,6 +29,11 @@ import Solicitudes from "./pages/Solicitudes";
 import ComprasLayout from "./pages/compras/ComprasLayout";
 import Ordenes from "./pages/compras/Ordenes";
 import Proveedores from "./pages/compras/Proveedores";
+import EquiposLayout from "./pages/equipos/EquiposLayout";
+import EquiposCatalogo from "./pages/equipos/Catalogo";
+import Combustible from "./pages/equipos/Combustible";
+import Mantenimiento from "./pages/equipos/Mantenimiento";
+import UsoDiario from "./pages/equipos/UsoDiario";
 
 function RutaProtegida({ children }: { children: React.ReactNode }) {
   const { autenticado } = useAuth();
@@ -91,6 +96,14 @@ export default function App() {
               <Route index element={<Navigate to="ordenes" replace />} />
               <Route path="ordenes" element={<Ordenes />} />
               <Route path="proveedores" element={<Proveedores />} />
+            </Route>
+
+            <Route path="/equipos" element={<EquiposLayout />}>
+              <Route index element={<Navigate to="catalogo" replace />} />
+              <Route path="catalogo" element={<EquiposCatalogo />} />
+              <Route path="combustible" element={<Combustible />} />
+              <Route path="mantenimiento" element={<Mantenimiento />} />
+              <Route path="uso-diario" element={<UsoDiario />} />
             </Route>
           </Route>
         </Routes>

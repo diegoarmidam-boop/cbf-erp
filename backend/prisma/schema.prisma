@@ -729,6 +729,7 @@ enum TipoMovimientoAlmacenCentral {
   baja_caducidad
   abono_sobrante
   ajuste_manual
+  consumo_maquinaria // diésel de garrafa consumido por un tractor — es inventario, igual que un agroquímico (9.13)
 }
 
 // FIFO obligatorio por ingrediente activo. Salidas quedan "comprometidas" al

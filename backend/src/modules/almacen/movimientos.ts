@@ -156,6 +156,20 @@ export async function registrarSalidaDirecta(
   });
 }
 
+/**
+ * Diésel de garrafa consumido por un tractor — es inventario de Almacén,
+ * igual que un agroquímico (9.13), así que una carga de combustible
+ * también descuenta por FIFO en vez de vivir aparte sin tocar el stock.
+ */
+export async function registrarConsumoMaquinaria(productoId: string, cantidad: number, equipoId: string, capturadoPorId: string) {
+  return prisma.$transaction(async (tx) => {
+    await descontarFIFO(tx, productoId, cantidad);
+    return tx.almacenCentralMovimiento.create({
+      data: { productoId, tipo: "consumo_maquinaria", cantidad, referenciaId: equipoId, capturadoPorId },
+    });
+  });
+}
+
 export function movimientosProducto(productoId: string) {
   return prisma.almacenCentralMovimiento.findMany({ where: { productoId }, orderBy: { fecha: "desc" } });
 }

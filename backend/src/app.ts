@@ -10,6 +10,7 @@ import { documentosRouter } from "./modules/rh/documentos.routes.js";
 import { rhRouter } from "./modules/rh/index.js";
 import { almacenRouter } from "./modules/almacen/index.js";
 import { comprasRouter } from "./modules/compras/index.js";
+import { equiposModuleRouter } from "./modules/equipos/index.js";
 
 export function createApp() {
   const app = express();
@@ -28,6 +29,7 @@ export function createApp() {
   app.use("/rh", rhRouter);
   app.use("/almacen", almacenRouter);
   app.use("/compras", comprasRouter);
+  app.use("/equipos", equiposModuleRouter);
 
   const manejarError: ErrorRequestHandler = (err, _req, res, _next) => {
     console.error(err);
