@@ -45,7 +45,15 @@ export default function CapturaDelDia() {
         setCerrado(captura.cerrado);
         setGrupos(gruposHuerta);
         if (captura.registros.length > 0) {
-          setFilas(captura.registros.map((r) => ({ ...r, cantidad: Number(r.cantidad) })));
+          // El backend no manda un campo "tipo" explícito — se deriva de
+          // cuál de los dos (personalId/grupoId) viene con valor.
+          setFilas(
+            captura.registros.map((r) => ({
+              ...r,
+              tipo: r.personalId ? "individual" : "grupal",
+              cantidad: Number(r.cantidad),
+            }))
+          );
         } else if (captura.sugerencia.length > 0) {
           setFilas(captura.sugerencia);
         } else {
