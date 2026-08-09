@@ -13,6 +13,7 @@ import { comprasRouter } from "./modules/compras/index.js";
 import { equiposModuleRouter } from "./modules/equipos/index.js";
 import { aplicacionesRouter } from "./modules/aplicaciones/index.js";
 import { fertilizantesModuleRouter } from "./modules/fertilizantes/index.js";
+import { riegoRouter } from "./modules/riego/index.js";
 
 export function createApp() {
   const app = express();
@@ -34,6 +35,7 @@ export function createApp() {
   app.use("/equipos", equiposModuleRouter);
   app.use("/aplicaciones", aplicacionesRouter);
   app.use("/fertilizantes", fertilizantesModuleRouter);
+  app.use("/riego", riegoRouter);
 
   const manejarError: ErrorRequestHandler = (err, _req, res, _next) => {
     console.error(err);

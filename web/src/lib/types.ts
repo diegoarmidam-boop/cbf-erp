@@ -490,6 +490,26 @@ export interface FertilizacionGranular {
 
 export type FrecuenciaFertirriego = "diario" | "cada_2_dias" | "cada_3_dias" | "patron_2_1";
 
+export interface RiegoRegistroDiario {
+  id: string;
+  seccionId: string;
+  fecha: string;
+  horas: string;
+  fertirriegoConfirmado: boolean;
+  cantidadAplicada: string | null;
+  capturadoPorId: string;
+}
+
+export interface FertirriegoActivo {
+  fertirriegoId: string;
+  producto: Producto;
+}
+
+export interface RiegoDiaResponse {
+  registro: RiegoRegistroDiario | null;
+  fertirriegoActivo: FertirriegoActivo | null;
+}
+
 export interface FertirriegoProgramacion {
   id: string;
   huertaId: string;

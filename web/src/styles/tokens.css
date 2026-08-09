@@ -48,6 +48,11 @@
   --mod-unidades-produccion-fg: #8b5e34;
   --mod-compras-bg: #eef1f4;
   --mod-compras-fg: #5b6ef5;
+  /* Riego no está en la tabla de colores del documento (bloque 11) — se
+     extendió siguiendo su propia regla ("pastel que no se repita, sin
+     rosa/guinda"): azul de agua, no usado por ningún otro módulo. */
+  --mod-riego-bg: #eaf2fe;
+  --mod-riego-fg: #3b82f6;
 }
 
 * {

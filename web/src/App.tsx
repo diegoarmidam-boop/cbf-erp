@@ -38,6 +38,7 @@ import Aplicaciones from "./pages/aplicaciones/Aplicaciones";
 import FertilizantesLayout from "./pages/fertilizantes/FertilizantesLayout";
 import Granular from "./pages/fertilizantes/Granular";
 import Fertirriego from "./pages/fertilizantes/Fertirriego";
+import Riego from "./pages/riego/Riego";
 
 function RutaProtegida({ children }: { children: React.ReactNode }) {
   const { autenticado } = useAuth();
@@ -117,6 +118,8 @@ export default function App() {
               <Route path="granular" element={<Granular />} />
               <Route path="fertirriego" element={<Fertirriego />} />
             </Route>
+
+            <Route path="/riego" element={<Riego />} />
           </Route>
         </Routes>
       </AuthProvider>
