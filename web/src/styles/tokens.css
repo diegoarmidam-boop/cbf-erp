@@ -59,6 +59,63 @@
   box-sizing: border-box;
 }
 
+/* Layout responsive del AppShell (bloque 4/5: sidebar en PC, menú
+   deslizable en celular) — la barra fija de 212px que funciona bien en
+   escritorio dejaba casi sin espacio la pantalla en un celular (375px de
+   ancho típico), así que abajo de 768px el sidebar se vuelve un cajón
+   (drawer) que se abre con el botón de hamburguesa en vez de ocupar
+   espacio siempre. */
+.app-mobile-topbar {
+  display: none;
+}
+.app-sidebar-backdrop {
+  display: none;
+}
+/* Ancho del sidebar como regla de CSS (no inline) — así la media query de
+   abajo lo puede sobreescribir en celular; un inline style siempre le
+   gana a una regla de clase, sin importar la media query. */
+.app-sidebar {
+  width: 212px;
+}
+@media (max-width: 767px) {
+  .app-shell {
+    flex-direction: column;
+  }
+  .app-mobile-topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .app-sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 240px;
+    max-width: 82vw;
+    transform: translateX(-100%);
+    transition: transform 0.2s ease;
+    z-index: 50;
+  }
+  .app-sidebar.abierto {
+    transform: translateX(0) !important;
+  }
+  .app-sidebar-backdrop.abierto {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.4);
+    z-index: 40;
+  }
+  .app-main {
+    padding: 16px !important;
+  }
+}
+
 body {
   margin: 0;
   background: var(--bg);
@@ -167,7 +224,13 @@ button {
   color: var(--ink-soft);
 }
 
+/* Tabla como su propio contenedor de scroll horizontal — nunca el <body>
+   (bloque de diseño responsive). display:block en <table> no rompe su
+   layout interno de columnas; solo hace que la caja externa se comporte
+   como contenedor con scroll cuando el contenido no cabe (ej. celular). */
 table {
+  display: block;
+  overflow-x: auto;
   width: 100%;
   border-collapse: collapse;
   font-size: 12.5px;

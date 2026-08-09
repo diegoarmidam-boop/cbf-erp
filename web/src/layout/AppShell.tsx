@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { NavLink, Outlet } from "react-router-dom";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import { MODULOS_CONSTRUIDOS, moduloVisible } from "../lib/modulos";
 import { api } from "../lib/api";
@@ -9,6 +9,8 @@ export default function AppShell() {
   const { usuario, modulosVisibles, logout } = useAuth();
   const modulos = MODULOS_CONSTRUIDOS.filter((m) => moduloVisible(m, modulosVisibles));
   const [pendientes, setPendientes] = useState(0);
+  const [menuAbierto, setMenuAbierto] = useState(false);
+  const location = useLocation();
 
   useEffect(() => {
     api
@@ -17,11 +19,32 @@ export default function AppShell() {
       .catch(() => setPendientes(0));
   }, []);
 
+  // Cerrar el cajón al navegar — si no, se quedaría abierto tapando la
+  // pantalla después de elegir una sección (bloque 4/5, menú de celular).
+  useEffect(() => {
+    setMenuAbierto(false);
+  }, [location.pathname]);
+
   return (
-    <div style={{ display: "flex", height: "100vh" }}>
+    <div className="app-shell" style={{ display: "flex", height: "100vh" }}>
+      <div className="app-mobile-topbar">
+        <button
+          className="btn-secondary"
+          onClick={() => setMenuAbierto(true)}
+          aria-label="Abrir menú"
+          style={{ padding: "8px 12px" }}
+        >
+          ☰
+        </button>
+        <div style={{ fontSize: 15, fontWeight: 800, color: "var(--wine)" }}>CHULA — BRAND ERP</div>
+        <div style={{ width: 40 }} />
+      </div>
+
+      <div className={`app-sidebar-backdrop ${menuAbierto ? "abierto" : ""}`} onClick={() => setMenuAbierto(false)} />
+
       <aside
+        className={`app-sidebar ${menuAbierto ? "abierto" : ""}`}
         style={{
-          width: 212,
           background: "var(--surface)",
           borderRight: "1px solid var(--border)",
           display: "flex",
@@ -35,7 +58,7 @@ export default function AppShell() {
           <div style={{ fontSize: 10, color: "var(--ink-soft)", letterSpacing: "0.08em" }}>BRAND — ERP</div>
         </div>
 
-        <nav style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        <nav style={{ display: "flex", flexDirection: "column", gap: 4, overflowY: "auto" }}>
           <NavLink
             to="/solicitudes"
             style={({ isActive }) => ({
@@ -133,7 +156,7 @@ export default function AppShell() {
         </div>
       </aside>
 
-      <main style={{ flex: 1, overflow: "auto", padding: 24 }}>
+      <main className="app-main" style={{ flex: 1, overflow: "auto", padding: 24, minWidth: 0 }}>
         <Outlet />
       </main>
     </div>
