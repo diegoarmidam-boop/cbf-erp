@@ -41,8 +41,11 @@ export async function tienePermiso(rol: Rol, modulo: string, accion: Accion): Pr
   return fila[accion];
 }
 
-// Módulos visibles para un rol (ver=true en al menos una fila), para armar
-// sidebar/bottom-nav/"Más" desde una única fuente (regla del bloque 4/5).
+// Módulos visibles para un rol — cualquier permiso (ver, capturar, editar
+// o autoriza) basta para que el módulo aparezca en sidebar/bottom-nav/
+// "Más" (regla del bloque 4/5). Un Supervisor con solo "capturar" en
+// Nómina sí debe ver la entrada de menú, aunque no tenga "ver" — si no,
+// nunca podría llegar a la pantalla de Captura del día desde el menú.
 export async function modulosVisibles(rol: Rol): Promise<string[]> {
   if (!matrizCache) await cargarMatrizPermisos();
   if (ROLES_ACCESO_UNIVERSAL.includes(rol) || rol === ROL_AUDITOR) {
@@ -50,6 +53,6 @@ export async function modulosVisibles(rol: Rol): Promise<string[]> {
     return Array.from(modulos);
   }
   return Array.from(matrizCache!.entries())
-    .filter(([clave, permisos]) => clave.startsWith(`${rol}::`) && permisos.ver)
+    .filter(([clave, permisos]) => clave.startsWith(`${rol}::`) && (permisos.ver || permisos.capturar || permisos.editar || permisos.autoriza))
     .map(([clave]) => clave.split("::")[1]!);
 }

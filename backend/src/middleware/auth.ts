@@ -44,6 +44,25 @@ export function requirePermission(modulo: string, accion: Accion) {
   };
 }
 
+// Para endpoints que sirven tanto a quien captura como a quien solo
+// consulta (ej. la lista de grupos de pago al armar la Captura del día) —
+// cualquiera de los pares (módulo, acción) basta.
+export function requirePermissionAny(...pares: [string, Accion][]) {
+  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    if (!req.usuario) {
+      res.status(401).json({ error: "No autenticado." });
+      return;
+    }
+    for (const [modulo, accion] of pares) {
+      if (await tienePermiso(req.usuario.rol, modulo, accion)) {
+        next();
+        return;
+      }
+    }
+    res.status(403).json({ error: "Tu rol no tiene permiso para esta acción." });
+  };
+}
+
 // Para roles con alcance restringido a su propia Huerta (Supervisor,
 // Regador, Ayudante) — filtra los datos, no reemplaza requirePermission.
 export function huertaIdDeAlcance(req: Request): string | null {

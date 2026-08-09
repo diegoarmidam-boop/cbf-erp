@@ -1,14 +1,16 @@
 import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../../core/db.js";
-import { requireAuth, requirePermission } from "../../middleware/auth.js";
+import { requireAuth, requirePermission, requirePermissionAny } from "../../middleware/auth.js";
 import { unoSolo } from "../../core/http.js";
 import { agregarMiembroAGrupo, miembrosDeGrupoEnFecha, quitarMiembroDeGrupo } from "./grupos.js";
 
 export const gruposRouter = Router();
 gruposRouter.use(requireAuth);
 
-gruposRouter.get("/", requirePermission("nomina", "ver"), async (req, res) => {
+// Ver la lista de grupos hace falta tanto para quien solo consulta (ver)
+// como para quien captura la Huerta día a día (capturar, ej. Supervisor).
+gruposRouter.get("/", requirePermissionAny(["nomina", "ver"], ["nomina", "capturar"]), async (req, res) => {
   const huertaId = String(req.query.huertaId ?? "");
   if (!huertaId) {
     res.status(400).json({ error: "huertaId es requerido." });

@@ -12,6 +12,55 @@ export interface Personal {
   huertaId: string | null;
   sueldo: string | null;
   puestoId: string | null;
+  puesto?: Puesto | null;
+  activo?: boolean;
+  fechaNacimiento?: string | null;
+  identificacion?: string | null;
+  domicilio?: string | null;
+  telefono?: string | null;
+  telefonoEmergencia?: string | null;
+  fechaIngreso?: string | null;
+  rfc?: string | null;
+  imssOSeguro?: string | null;
+  fechaBaja?: string | null;
+  motivoBaja?: string | null;
+  documentos?: PersonalDocumento[];
+}
+
+export interface PersonalDocumento {
+  id: string;
+  personalId: string;
+  tipoDocumento: "identificacion" | "contrato" | "comprobante_domicilio" | "otro";
+  origen: "foto_celular" | "escaneo";
+  archivoUrl: string;
+  fechaSubida: string;
+}
+
+export interface Puesto {
+  id: string;
+  nombre: string;
+  periodicidad: "semanal" | "quincenal" | "mensual";
+  rangoSalarialMin: string | null;
+  rangoSalarialMax: string | null;
+  metodoAsignacionCosto: "directo_huerta" | "prorrateo_hectareas";
+}
+
+export interface DoNotHireEntry {
+  id: string;
+  nombreReferencia: string;
+  motivo: string;
+  condicionesSalida: string | null;
+  fecha: string;
+}
+
+export interface UsuarioAcceso {
+  id: string;
+  nombre: string;
+  username: string;
+  rol: string;
+  huertaId: string | null;
+  activo: boolean;
+  personalId: string | null;
 }
 
 export type EsquemaPago = "individual_hora" | "individual_caja" | "grupal_remolque" | "depende_empacadores";

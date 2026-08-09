@@ -30,6 +30,15 @@ export const PERMISOS_SEED: PermisoSeed[] = [
   { rol: "recursos_humanos", modulo: "rh", ver: true, capturar: true, editar: true, autoriza: true },
   { rol: "gerente_administrativo", modulo: "rh", ver: true, editar: true },
 
+  // Do-not-hire vive aparte del módulo "rh" general: el documento dice
+  // explícitamente que es "visible para encargados de huerta" — pero un
+  // Supervisor no debe por eso ver domicilios/RFC/documentos del resto del
+  // personal, así que no le damos ver=true en "rh" completo.
+  { rol: "recursos_humanos", modulo: "do_not_hire", ver: true, capturar: true, editar: true },
+  { rol: "gerente_administrativo", modulo: "do_not_hire", ver: true },
+  { rol: "supervisor_huerta", modulo: "do_not_hire", ver: true },
+  { rol: "gerente_tecnico_produccion", modulo: "do_not_hire", ver: true },
+
   // ---- Nómina (9.11) ----
   { rol: "recursos_humanos", modulo: "nomina", ver: true, capturar: true, editar: true, autoriza: true },
   { rol: "encargado_nominas", modulo: "nomina", ver: true, capturar: true, editar: true },

@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../../core/db.js";
-import { requireAuth, requirePermission } from "../../middleware/auth.js";
+import { requireAuth, requirePermission, requirePermissionAny } from "../../middleware/auth.js";
 import { tienePermiso } from "../../core/permissions.js";
 import { crearSolicitud } from "../../core/solicitudes.js";
 import { unoSolo } from "../../core/http.js";
@@ -9,7 +9,9 @@ import { unoSolo } from "../../core/http.js";
 export const actividadesRouter = Router();
 actividadesRouter.use(requireAuth);
 
-actividadesRouter.get("/", requirePermission("nomina", "ver"), async (_req, res) => {
+// Igual que /nomina/grupos: hace falta tanto para quien solo consulta
+// (ver) como para quien captura día a día (capturar, ej. Supervisor).
+actividadesRouter.get("/", requirePermissionAny(["nomina", "ver"], ["nomina", "capturar"]), async (_req, res) => {
   const actividades = await prisma.actividad.findMany({ where: { activo: true }, orderBy: { nombre: "asc" } });
   res.json(actividades);
 });

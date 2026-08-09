@@ -11,6 +11,12 @@ import Bonos from "./pages/nomina/Bonos";
 import ReporteSemanal from "./pages/nomina/ReporteSemanal";
 import Catalogos from "./pages/nomina/Catalogos";
 import Huertas from "./pages/unidades-produccion/Huertas";
+import RHLayout from "./pages/rh/RHLayout";
+import Personal from "./pages/rh/Personal";
+import PersonalDetalle from "./pages/rh/PersonalDetalle";
+import Puestos from "./pages/rh/Puestos";
+import DoNotHire from "./pages/rh/DoNotHire";
+import Accesos from "./pages/rh/Accesos";
 
 function RutaProtegida({ children }: { children: React.ReactNode }) {
   const { autenticado } = useAuth();
@@ -42,6 +48,15 @@ export default function App() {
               <Route path="bonos" element={<Bonos />} />
               <Route path="reporte" element={<ReporteSemanal />} />
               <Route path="catalogos" element={<Catalogos />} />
+            </Route>
+
+            <Route path="/rh" element={<RHLayout />}>
+              <Route index element={<Navigate to="personal" replace />} />
+              <Route path="personal" element={<Personal />} />
+              <Route path="personal/:id" element={<PersonalDetalle />} />
+              <Route path="puestos" element={<Puestos />} />
+              <Route path="do-not-hire" element={<DoNotHire />} />
+              <Route path="accesos" element={<Accesos />} />
             </Route>
 
             <Route path="/unidades_produccion" element={<Huertas />} />

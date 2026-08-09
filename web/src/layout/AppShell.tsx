@@ -1,10 +1,10 @@
 import { NavLink, Outlet } from "react-router-dom";
 import { useAuth } from "../lib/auth";
-import { MODULOS_CONSTRUIDOS } from "../lib/modulos";
+import { MODULOS_CONSTRUIDOS, moduloVisible } from "../lib/modulos";
 
 export default function AppShell() {
   const { usuario, modulosVisibles, logout } = useAuth();
-  const modulos = MODULOS_CONSTRUIDOS.filter((m) => modulosVisibles.includes(m.slug));
+  const modulos = MODULOS_CONSTRUIDOS.filter((m) => moduloVisible(m, modulosVisibles));
 
   return (
     <div style={{ display: "flex", height: "100vh" }}>
