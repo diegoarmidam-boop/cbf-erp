@@ -1,24 +1,24 @@
 import { Router } from "express";
+import multer from "multer";
+import path from "node:path";
+import fs from "node:fs";
 import { z } from "zod";
-import { prisma } from "../../core/db.js";
 import { requireAuth, requirePermission } from "../../middleware/auth.js";
+import { unoSolo } from "../../core/http.js";
+import { actualizarHuerta, calcularAreaEfectivaHuerta, crearHuerta, listarHuertas } from "./huertas.js";
 
-// NOTA DE ALCANCE: esto es un stub mínimo — solo alta y listado de Huertas —
-// para que Nómina (módulo 1) tenga algo contra qué capturar. La ficha
-// completa de Unidades de Producción (Cuadros, Ciclos, Marco de Plantación,
-// Secciones de Riego) es el módulo 3 del orden de construcción y se
-// construye aparte, con su propia revisión.
 export const huertasRouter = Router();
 huertasRouter.use(requireAuth);
 
 huertasRouter.get("/", requirePermission("unidades_produccion", "ver"), async (_req, res) => {
-  res.json(await prisma.huerta.findMany({ where: { activo: true }, orderBy: { nombre: "asc" } }));
+  res.json(await listarHuertas());
 });
 
-const crearHuertaSchema = z.object({
-  nombre: z.string().min(1),
-  hectareasTotales: z.number().positive(),
+huertasRouter.get("/:id/area-efectiva", requirePermission("unidades_produccion", "ver"), async (req, res) => {
+  res.json(await calcularAreaEfectivaHuerta(unoSolo(req.params.id)));
 });
+
+const crearHuertaSchema = z.object({ nombre: z.string().min(1), hectareasTotales: z.number().positive() });
 
 huertasRouter.post("/", requirePermission("unidades_produccion", "capturar"), async (req, res) => {
   const parsed = crearHuertaSchema.safeParse(req.body);
@@ -26,6 +26,38 @@ huertasRouter.post("/", requirePermission("unidades_produccion", "capturar"), as
     res.status(400).json({ error: parsed.error.message });
     return;
   }
-  const huerta = await prisma.huerta.create({ data: parsed.data });
+  const huerta = await crearHuerta(parsed.data.nombre, parsed.data.hectareasTotales);
   res.status(201).json(huerta);
+});
+
+const actualizarSchema = z.object({ nombre: z.string().min(1).optional(), hectareasTotales: z.number().positive().optional() });
+
+huertasRouter.patch("/:id", requirePermission("unidades_produccion", "editar"), async (req, res) => {
+  const parsed = actualizarSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+  res.json(await actualizarHuerta(unoSolo(req.params.id), parsed.data));
+});
+
+// Mapa/croquis: capa visual de referencia, sin geometría estructurada (9.1).
+const MAPAS_DIR = path.resolve("uploads", "huertas");
+fs.mkdirSync(MAPAS_DIR, { recursive: true });
+const uploadMapa = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, MAPAS_DIR),
+    filename: (req, file, cb) => cb(null, `${unoSolo(req.params.id)}-${Date.now()}${path.extname(file.originalname)}`),
+  }),
+  limits: { fileSize: 20 * 1024 * 1024 },
+});
+
+huertasRouter.post("/:id/mapa", requirePermission("unidades_produccion", "editar"), uploadMapa.single("mapa"), async (req, res) => {
+  if (!req.file) {
+    res.status(400).json({ error: "Falta el archivo del mapa." });
+    return;
+  }
+  const mapaUrl = `/uploads/huertas/${req.file.filename}`;
+  const huerta = await actualizarHuerta(unoSolo(req.params.id), { mapaUrl });
+  res.json(huerta);
 });

@@ -3,6 +3,65 @@ export interface Huerta {
   nombre: string;
   hectareasTotales: string;
   activo: boolean;
+  mapaUrl?: string | null;
+}
+
+export interface AreaEfectiva {
+  areaEfectiva: number;
+  porcentajeAprovechamiento: number;
+}
+
+export type EstatusCuadro = "activo" | "en_descanso" | "fuera_produccion";
+
+export interface CuadroVersion {
+  id: string;
+  vigenteDesde: string;
+  vigenteHasta: string | null;
+  hectareas: string;
+  tipoSuelo: string | null;
+  fechaSiembra: string | null;
+  distSurcosM: string | null;
+  distPlantasM: string | null;
+  variedad: string | null;
+}
+
+export interface Cuadro {
+  id: string;
+  huertaId: string;
+  nombre: string;
+  estatus: EstatusCuadro;
+  camposPersonalizados: Record<string, unknown> | null;
+  versiones: CuadroVersion[];
+  plantasTotales: number | null;
+}
+
+export type TipoCiclo = "cultivo" | "descanso" | "prueba";
+export type EtapaCiclo = "preparacion_suelo" | "desarrollo" | "cosecha_empaque" | "post_cosecha";
+
+export interface CicloVariedad {
+  id: string;
+  cuadroId: string;
+  variedad: string;
+  hectareas: string | null;
+  porcentaje: string | null;
+}
+
+export interface Ciclo {
+  id: string;
+  huertaId: string;
+  tipo: TipoCiclo;
+  etapaActual: EtapaCiclo;
+  fechaInicio: string;
+  fechaFin: string | null;
+  activo: boolean;
+  variedades: CicloVariedad[];
+}
+
+export interface SeccionRiego {
+  id: string;
+  huertaId: string;
+  nombre: string;
+  cuadros: { cuadro: Cuadro }[];
 }
 
 export interface Personal {

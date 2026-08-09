@@ -10,7 +10,10 @@ import Prestamos from "./pages/nomina/Prestamos";
 import Bonos from "./pages/nomina/Bonos";
 import ReporteSemanal from "./pages/nomina/ReporteSemanal";
 import Catalogos from "./pages/nomina/Catalogos";
-import Huertas from "./pages/unidades-produccion/Huertas";
+import UPLayout from "./pages/unidades-produccion/UPLayout";
+import HuertasYCuadros from "./pages/unidades-produccion/HuertasYCuadros";
+import Ciclos from "./pages/unidades-produccion/Ciclos";
+import SeccionesRiego from "./pages/unidades-produccion/SeccionesRiego";
 import RHLayout from "./pages/rh/RHLayout";
 import Personal from "./pages/rh/Personal";
 import PersonalDetalle from "./pages/rh/PersonalDetalle";
@@ -59,7 +62,12 @@ export default function App() {
               <Route path="accesos" element={<Accesos />} />
             </Route>
 
-            <Route path="/unidades_produccion" element={<Huertas />} />
+            <Route path="/unidades_produccion" element={<UPLayout />}>
+              <Route index element={<Navigate to="huertas" replace />} />
+              <Route path="huertas" element={<HuertasYCuadros />} />
+              <Route path="ciclos" element={<Ciclos />} />
+              <Route path="riego" element={<SeccionesRiego />} />
+            </Route>
           </Route>
         </Routes>
       </AuthProvider>

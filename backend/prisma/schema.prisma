@@ -139,6 +139,9 @@ model Huerta {
   nombre           String  @unique
   hectareasTotales Decimal @db.Decimal(10, 4)
   activo           Boolean @default(true)
+  // Croquis/plano ya existente subido como imagen de referencia — capa
+  // visual estática, sin vínculo estructurado a Cuadro (9.1).
+  mapaUrl          String?
 
   cuadros                 Cuadro[]
   seccionesRiego          SeccionRiego[]
