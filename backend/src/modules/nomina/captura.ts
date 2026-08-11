@@ -27,12 +27,38 @@ export async function diaEstaCerrado(huertaId: string, fecha: FechaISO): Promise
   return !!cierre;
 }
 
-/** Registros ya guardados (manual) para una Huerta/fecha, con los datos de actividad ya resueltos. */
+/**
+ * Registros de una Huerta/fecha — manuales (editables, lo que se resave al
+ * guardar) y automáticos (los que llegaron de Aplicaciones/Fertilizantes/
+ * Cosecha/Empaque, de solo lectura aquí — bloqueados para edición directa,
+ * marcados visualmente por `origen` distinto de "manual").
+ */
 export async function obtenerCapturaDelDia(huertaId: string, fecha: FechaISO) {
   return prisma.registroNomina.findMany({
-    where: { huertaId, fecha: new Date(fecha), origen: "manual" },
-    include: { actividad: true },
+    where: { huertaId, fecha: new Date(fecha) },
+    include: { actividad: true, personal: true, cuadro: true },
+    orderBy: { fechaCaptura: "asc" },
   });
+}
+
+/** Huertas dentro del alcance del usuario — su propia UP si está restringido, o todas las activas si tiene alcance multi-rancho/global. */
+export async function huertasEnAlcance(huertaIdAlcance: string | null) {
+  return prisma.huerta.findMany({
+    where: { activo: true, ...(huertaIdAlcance ? { id: huertaIdAlcance } : {}) },
+    orderBy: { nombre: "asc" },
+  });
+}
+
+/** Vista "Todas UPs" (9.11): la misma captura del día, para cada Huerta dentro del alcance del usuario, en una sola llamada. */
+export async function obtenerCapturaTodasUPs(fecha: FechaISO, huertaIdAlcance: string | null) {
+  const huertas = await huertasEnAlcance(huertaIdAlcance);
+  return Promise.all(
+    huertas.map(async (huerta) => {
+      const [registros, cerrado] = await Promise.all([obtenerCapturaDelDia(huerta.id, fecha), diaEstaCerrado(huerta.id, fecha)]);
+      const sugerencia = registros.length === 0 && !cerrado ? await obtenerSugerenciaDesdeAyer(huerta.id, fecha) : [];
+      return { huerta, registros, cerrado, sugerencia };
+    })
+  );
 }
 
 /** Sugerencia de pre-llenado: mismas personas/grupo/actividad/cuadro que el día anterior con datos, cantidad en blanco. */
@@ -56,9 +82,13 @@ export async function guardarCapturaDelDia(
   huertaId: string,
   fecha: FechaISO,
   filas: FilaCapturaInput[],
-  capturadoPorId: string
+  capturadoPorId: string,
+  opciones: { permitirDiaCerrado?: boolean } = {}
 ): Promise<void> {
-  if (await diaEstaCerrado(huertaId, fecha)) throw new DiaCerradoError();
+  // Edición después de cerrado (9.11): solo para quien tiene permiso de
+  // "editar" en Nómina (verificado en la ruta) — el propio Supervisor sigue
+  // bloqueado por el candado normal.
+  if (!opciones.permitirDiaCerrado && (await diaEstaCerrado(huertaId, fecha))) throw new DiaCerradoError();
 
   for (const [i, fila] of filas.entries()) {
     if (!fila.actividadId) throw new CapturaInvalidaError(`Fila ${i + 1}: falta la actividad.`);

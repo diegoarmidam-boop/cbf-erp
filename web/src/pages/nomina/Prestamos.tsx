@@ -2,6 +2,13 @@ import { useEffect, useState, type FormEvent } from "react";
 import { api, ApiError } from "../../lib/api";
 import { usePersonal } from "../../lib/usePersonal";
 import type { Prestamo } from "../../lib/types";
+import FechaInput from "../../components/FechaInput";
+import { formatearFecha } from "../../lib/fecha";
+
+interface PeriodoNomina {
+  inicio: string;
+  fin: string;
+}
 
 function hoyISO(): string {
   return new Date().toISOString().slice(0, 10);
@@ -10,8 +17,10 @@ function hoyISO(): string {
 export default function Prestamos() {
   const { personal } = usePersonal();
   const [prestamos, setPrestamos] = useState<Prestamo[]>([]);
+  const [periodoActual, setPeriodoActual] = useState<PeriodoNomina | null>(null);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [confirmandoAdelanto, setConfirmandoAdelanto] = useState<Prestamo | null>(null);
 
   const [personalId, setPersonalId] = useState("");
   const [monto, setMonto] = useState("");
@@ -27,6 +36,7 @@ export default function Prestamos() {
       .then(setPrestamos)
       .catch((err) => setError(err instanceof ApiError ? err.message : "No se pudo cargar."))
       .finally(() => setCargando(false));
+    api.get<PeriodoNomina>("/nomina/prestamos/periodo-actual").then(setPeriodoActual);
   }
 
   useEffect(cargar, []);
@@ -63,13 +73,28 @@ export default function Prestamos() {
     }
   }
 
-  async function aplicarDescuento(id: string) {
+  async function ejecutarAplicarDescuento(id: string) {
     setError(null);
     try {
       await api.post(`/nomina/prestamos/${id}/aplicar-descuento`);
+      setConfirmandoAdelanto(null);
       cargar();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "No se pudo aplicar el descuento.");
+    }
+  }
+
+  function estaPendiente(p: Prestamo): boolean {
+    if (!periodoActual) return false;
+    return p.proximoDescuento.slice(0, 10) <= periodoActual.fin;
+  }
+
+  function clicAplicarDescuento(p: Prestamo) {
+    if (estaPendiente(p)) {
+      ejecutarAplicarDescuento(p.id);
+    } else {
+      // Estado neutral: ya se aplicó el descuento de este periodo — picarle de nuevo adelantaría el del siguiente periodo.
+      setConfirmandoAdelanto(p);
     }
   }
 
@@ -108,7 +133,7 @@ export default function Prestamos() {
         </label>
         <label className="field">
           Primer descuento
-          <input type="date" value={fechaPrimerDescuento} onChange={(e) => setFechaPrimerDescuento(e.target.value)} required />
+          <FechaInput value={fechaPrimerDescuento} onChange={setFechaPrimerDescuento} required />
         </label>
         <button className="btn-primary" type="submit">
           + Registrar préstamo
@@ -127,28 +152,59 @@ export default function Prestamos() {
               <th>Saldo pendiente</th>
               <th>Descuento/periodo</th>
               <th>Próximo descuento</th>
+              <th>Estado</th>
               <th></th>
             </tr>
           </thead>
           <tbody>
-            {prestamos.map((p) => (
-              <tr key={p.id}>
-                <td>{p.personal?.nombreCompleto}</td>
-                <td>${Number(p.saldoPendiente).toFixed(2)}</td>
-                <td>${Number(p.montoPorDescuento).toFixed(2)}</td>
-                <td>{p.proximoDescuento.slice(0, 10)}</td>
-                <td style={{ display: "flex", gap: 6 }}>
-                  <button className="btn-secondary" onClick={() => aplicarDescuento(p.id)}>
-                    Aplicar descuento
-                  </button>
-                  <button className="btn-danger" onClick={() => cancelar(p.id)}>
-                    Cancelar
-                  </button>
-                </td>
-              </tr>
-            ))}
+            {prestamos.map((p) => {
+              const pendiente = estaPendiente(p);
+              return (
+                <tr key={p.id} style={pendiente ? { background: "var(--pink-soft, #fdeef1)" } : undefined}>
+                  <td>{p.personal?.nombreCompleto}</td>
+                  <td>${Number(p.saldoPendiente).toFixed(2)}</td>
+                  <td>${Number(p.montoPorDescuento).toFixed(2)}</td>
+                  <td>{formatearFecha(p.proximoDescuento)}</td>
+                  <td>
+                    <span className={`tag ${pendiente ? "tag-warning" : "tag-neutral"}`}>
+                      {pendiente ? "Pendiente este periodo" : "Ya aplicado este periodo"}
+                    </span>
+                  </td>
+                  <td style={{ display: "flex", gap: 6 }}>
+                    <button className={pendiente ? "btn-primary" : "btn-secondary"} onClick={() => clicAplicarDescuento(p)}>
+                      Aplicar descuento
+                    </button>
+                    <button className="btn-danger" onClick={() => cancelar(p.id)}>
+                      Cancelar
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
+      )}
+
+      {confirmandoAdelanto && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div className="card" style={{ width: 400 }}>
+            <h3 style={{ marginBottom: 10 }}>¿Adelantar el descuento?</h3>
+            <p style={{ fontSize: 13, marginBottom: 14 }}>
+              El descuento de este periodo para <strong>{confirmandoAdelanto.personal?.nombreCompleto}</strong> ya se aplicó. ¿Quieres
+              descontar ${Number(confirmandoAdelanto.montoPorDescuento).toFixed(2)} correspondiente al periodo de{" "}
+              {confirmandoAdelanto.periodicidad === "quincenal" ? "quincena" : "semana"} que termina el{" "}
+              {formatearFecha(confirmandoAdelanto.proximoDescuento)}?
+            </p>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+              <button className="btn-secondary" onClick={() => setConfirmandoAdelanto(null)}>
+                Cancelar
+              </button>
+              <button className="btn-primary" onClick={() => ejecutarAplicarDescuento(confirmandoAdelanto.id)}>
+                Confirmar
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

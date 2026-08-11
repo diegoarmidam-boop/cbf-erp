@@ -1,8 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { api, ApiError } from "../../lib/api";
-import { useHuertas } from "../../lib/useHuertas";
-import { usePersonal } from "../../lib/usePersonal";
-import type { Actividad, ConfigNomina, EsquemaPago, GrupoPago } from "../../lib/types";
+import type { Actividad, ConfigNomina, EsquemaPago } from "../../lib/types";
 
 const DIAS = ["domingo", "lunes", "martes", "miercoles", "jueves", "viernes", "sabado"];
 const UNIDADES = ["hora", "dia", "surco", "planta", "remolque", "caja", "cuadro", "kg", "ha"];
@@ -13,14 +11,7 @@ const ESQUEMAS: { value: EsquemaPago; label: string }[] = [
   { value: "depende_empacadores", label: "Depende de Empacadores" },
 ];
 
-function hoyISO(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
 export default function Catalogos() {
-  const { huertas } = useHuertas();
-  const { personal } = usePersonal();
-
   const [actividades, setActividades] = useState<Actividad[]>([]);
   const [config, setConfig] = useState<ConfigNomina | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -37,14 +28,6 @@ export default function Catalogos() {
   const [diaCorte, setDiaCorte] = useState("jueves");
   const [diasGracia, setDiasGracia] = useState("3");
 
-  const [huertaGrupos, setHuertaGrupos] = useState("");
-  const [grupos, setGrupos] = useState<GrupoPago[]>([]);
-  const [mostrarFormGrupo, setMostrarFormGrupo] = useState(false);
-  const [nombreGrupo, setNombreGrupo] = useState("");
-  const [persistenteGrupo, setPersistenteGrupo] = useState(true);
-  const [miembrosGrupo, setMiembrosGrupo] = useState<string[]>([]);
-  const [agregarA, setAgregarA] = useState<Record<string, string>>({});
-
   function cargar() {
     api.get<Actividad[]>("/nomina/actividades?todas=true").then(setActividades);
     api.get<ConfigNomina>("/nomina/config").then((c) => {
@@ -56,17 +39,6 @@ export default function Catalogos() {
   }
 
   useEffect(cargar, []);
-
-  useEffect(() => {
-    if (!huertaGrupos && huertas.length > 0) setHuertaGrupos(huertas[0]!.id);
-  }, [huertas, huertaGrupos]);
-
-  function cargarGrupos() {
-    if (!huertaGrupos) return;
-    api.get<GrupoPago[]>(`/nomina/grupos?huertaId=${huertaGrupos}&fecha=${hoyISO()}`).then(setGrupos);
-  }
-
-  useEffect(cargarGrupos, [huertaGrupos]);
 
   async function crearActividad(e: FormEvent) {
     e.preventDefault();
@@ -113,64 +85,6 @@ export default function Catalogos() {
       cargar();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "No se pudo guardar la configuración.");
-    }
-  }
-
-  function alternarMiembroNuevo(personalId: string) {
-    setMiembrosGrupo((prev) => (prev.includes(personalId) ? prev.filter((p) => p !== personalId) : [...prev, personalId]));
-  }
-
-  async function crearGrupo(e: FormEvent) {
-    e.preventDefault();
-    setError(null);
-    try {
-      await api.post("/nomina/grupos", {
-        huertaId: huertaGrupos,
-        nombre: nombreGrupo || undefined,
-        persistente: persistenteGrupo,
-        fecha: hoyISO(),
-        miembros: miembrosGrupo,
-      });
-      setNombreGrupo("");
-      setMiembrosGrupo([]);
-      setMostrarFormGrupo(false);
-      cargarGrupos();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "No se pudo crear el grupo.");
-    }
-  }
-
-  async function agregarMiembro(grupoId: string) {
-    const personalId = agregarA[grupoId];
-    if (!personalId) return;
-    setError(null);
-    try {
-      await api.post(`/nomina/grupos/${grupoId}/miembros`, { personalId, fecha: hoyISO() });
-      setAgregarA((prev) => ({ ...prev, [grupoId]: "" }));
-      cargarGrupos();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "No se pudo agregar.");
-    }
-  }
-
-  async function quitarMiembro(grupoId: string, personalId: string) {
-    setError(null);
-    try {
-      await api.delete(`/nomina/grupos/${grupoId}/miembros/${personalId}?fecha=${hoyISO()}`);
-      cargarGrupos();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "No se pudo quitar.");
-    }
-  }
-
-  async function borrarGrupo(grupoId: string) {
-    if (!confirm("¿Borrar este grupo? Solo se puede si nunca se usó en una captura.")) return;
-    setError(null);
-    try {
-      await api.delete(`/nomina/grupos/${grupoId}`);
-      cargarGrupos();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "No se pudo borrar.");
     }
   }
 
@@ -285,108 +199,6 @@ export default function Catalogos() {
               ))}
             </tbody>
           </table>
-        </div>
-      </div>
-
-      <div>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 10, flexWrap: "wrap", gap: 10 }}>
-          <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
-            <h3>Grupos de pago (cuadrillas)</h3>
-            <label className="field" style={{ maxWidth: 220 }}>
-              Huerta
-              <select value={huertaGrupos} onChange={(e) => setHuertaGrupos(e.target.value)}>
-                {huertas.map((h) => (
-                  <option key={h.id} value={h.id}>
-                    {h.nombre}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-          <button className="btn-primary" onClick={() => setMostrarFormGrupo((v) => !v)}>
-            {mostrarFormGrupo ? "Cancelar" : "+ Nuevo grupo"}
-          </button>
-        </div>
-
-        {mostrarFormGrupo && (
-          <form onSubmit={crearGrupo} className="card" style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 16 }}>
-            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-              <label className="field">
-                Nombre (opcional — vacío si es armado del día, sin nombre fijo)
-                <input value={nombreGrupo} onChange={(e) => setNombreGrupo(e.target.value)} placeholder="Corte G1" />
-              </label>
-              <label className="field" style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                <input type="checkbox" checked={persistenteGrupo} onChange={(e) => setPersistenteGrupo(e.target.checked)} />
-                Persistente (se reutiliza semana a semana)
-              </label>
-            </div>
-            <div className="field">
-              Miembros iniciales
-              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", maxHeight: 160, overflowY: "auto", marginTop: 4 }}>
-                {personal.map((p) => (
-                  <label key={p.id} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12.5, color: "var(--ink)" }}>
-                    <input type="checkbox" checked={miembrosGrupo.includes(p.id)} onChange={() => alternarMiembroNuevo(p.id)} />
-                    {p.nombreCompleto}
-                  </label>
-                ))}
-              </div>
-            </div>
-            <div>
-              <button className="btn-primary" type="submit" disabled={miembrosGrupo.length === 0}>
-                Guardar
-              </button>
-            </div>
-          </form>
-        )}
-
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {grupos.map((g) => (
-            <div key={g.id} className="card">
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 10 }}>
-                <div>
-                  <span className="tag tag-neutral">{g.persistente ? "Persistente" : "Del día"}</span>
-                  <div style={{ fontSize: 13, fontWeight: 600, marginTop: 6 }}>{g.nombre ?? "(sin nombre)"}</div>
-                  <div style={{ fontSize: 12, color: "var(--ink-soft)", marginTop: 4 }}>
-                    {(g.miembrosHoy ?? []).map((personalId) => {
-                      const p = personal.find((x) => x.id === personalId);
-                      return (
-                        <span key={personalId} className="tag tag-neutral" style={{ marginRight: 4, marginBottom: 4, display: "inline-flex", gap: 4 }}>
-                          {p?.nombreCompleto ?? personalId}
-                          <button
-                            onClick={() => quitarMiembro(g.id, personalId)}
-                            style={{ border: "none", background: "none", cursor: "pointer", color: "var(--danger)", fontWeight: 700, padding: 0 }}
-                            title="Quitar del grupo"
-                          >
-                            ×
-                          </button>
-                        </span>
-                      );
-                    })}
-                    {(g.miembrosHoy ?? []).length === 0 && <span>Sin miembros hoy.</span>}
-                  </div>
-                </div>
-                <button className="btn-secondary" onClick={() => borrarGrupo(g.id)}>
-                  Borrar grupo
-                </button>
-              </div>
-              <div style={{ display: "flex", gap: 8, alignItems: "flex-end", marginTop: 10 }}>
-                <select value={agregarA[g.id] ?? ""} onChange={(e) => setAgregarA((prev) => ({ ...prev, [g.id]: e.target.value }))}>
-                  <option value="">Agregar persona…</option>
-                  {personal
-                    .filter((p) => !(g.miembrosHoy ?? []).includes(p.id))
-                    .map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.nombreCompleto}
-                      </option>
-                    ))}
-                </select>
-                <button className="btn-secondary" onClick={() => agregarMiembro(g.id)}>
-                  Agregar
-                </button>
-              </div>
-            </div>
-          ))}
-          {grupos.length === 0 && <p style={{ color: "var(--ink-soft)" }}>Esta Huerta no tiene grupos de pago todavía.</p>}
         </div>
       </div>
 

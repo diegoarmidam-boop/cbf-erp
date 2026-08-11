@@ -8,6 +8,7 @@ export interface AltaProveedorInput {
   nombre: string;
   creditoMonto?: number;
   creditoVencimiento?: string;
+  diasCredito?: number;
   datosFacturacion?: Record<string, unknown>;
 }
 
@@ -17,9 +18,14 @@ export function crearProveedor(input: AltaProveedorInput) {
       nombre: input.nombre,
       creditoMonto: input.creditoMonto,
       creditoVencimiento: input.creditoVencimiento ? new Date(input.creditoVencimiento) : undefined,
+      diasCredito: input.diasCredito,
       datosFacturacion: input.datosFacturacion,
     },
   });
+}
+
+export function actualizarDiasCredito(id: string, diasCredito: number) {
+  return prisma.proveedor.update({ where: { id }, data: { diasCredito } });
 }
 
 /**

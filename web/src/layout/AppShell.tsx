@@ -3,7 +3,7 @@ import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import { MODULOS_CONSTRUIDOS, moduloVisible } from "../lib/modulos";
 import { api } from "../lib/api";
-import type { SolicitudPendiente } from "../lib/types";
+import type { Notificacion } from "../lib/types";
 
 export default function AppShell() {
   const { usuario, modulosVisibles, logout } = useAuth();
@@ -14,7 +14,7 @@ export default function AppShell() {
 
   useEffect(() => {
     api
-      .get<SolicitudPendiente[]>("/solicitudes")
+      .get<Notificacion[]>("/notificaciones")
       .then((r) => setPendientes(r.length))
       .catch(() => setPendientes(0));
   }, []);
@@ -60,7 +60,7 @@ export default function AppShell() {
 
         <nav style={{ display: "flex", flexDirection: "column", gap: 4, overflowY: "auto" }}>
           <NavLink
-            to="/solicitudes"
+            to="/notificaciones"
             style={({ isActive }) => ({
               display: "flex",
               alignItems: "center",
@@ -90,7 +90,7 @@ export default function AppShell() {
               >
                 🔔
               </span>
-              Solicitudes
+              Notificaciones
             </span>
             {pendientes > 0 && (
               <span

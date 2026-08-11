@@ -4,6 +4,8 @@ import { usePersonal } from "../../lib/usePersonal";
 import { useHuertas } from "../../lib/useHuertas";
 import { useEquipoSeleccionado } from "./EquipoSeleccionadoContext";
 import type { EquipoUsoDiario } from "../../lib/types";
+import FechaInput from "../../components/FechaInput";
+import { formatearFecha } from "../../lib/fecha";
 
 function hoyISO(): string {
   return new Date().toISOString().slice(0, 10);
@@ -47,7 +49,7 @@ export default function UsoDiario() {
       <form onSubmit={onSubmit} className="card" style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 18 }}>
         <label className="field">
           Fecha
-          <input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} required />
+          <FechaInput value={fecha} onChange={setFecha} required />
         </label>
         <label className="field">
           Operador
@@ -94,7 +96,7 @@ export default function UsoDiario() {
         <tbody>
           {registros.map((r) => (
             <tr key={r.id}>
-              <td>{r.fecha.slice(0, 10)}</td>
+              <td>{formatearFecha(r.fecha)}</td>
               <td>{r.operador.nombreCompleto}</td>
               <td>{r.horas}</td>
               <td>{r.huerta.nombre}</td>

@@ -1,15 +1,24 @@
 import { prisma } from "../../core/db.js";
+import { obtenerVersionVigente } from "./cuadros.js";
 
 export interface VariedadCicloInput {
   cuadroId: string;
   variedad: string;
-  hectareas?: number;
+  hectareas: number;
   porcentaje?: number;
 }
 
 export class YaHayCicloActivoError extends Error {
   constructor() {
     super("Esta Huerta ya tiene un Ciclo activo — ciérralo antes de dar de alta uno nuevo (una Huerta solo puede tener un Ciclo activo a la vez).");
+  }
+}
+
+export class SuperficieExcedeCuadroError extends Error {
+  constructor(nombreCuadro: string, hectareasCuadro: number, hectareasAsignadas: number) {
+    super(
+      `El Cuadro "${nombreCuadro}" tiene ${hectareasCuadro} ha, pero entre las variedades capturadas se están asignando ${hectareasAsignadas} ha — la suma no puede exceder la superficie del Cuadro.`
+    );
   }
 }
 
@@ -21,6 +30,23 @@ export function cicloActivo(huertaId: string) {
   return prisma.ciclo.findFirst({ where: { huertaId, activo: true }, include: { variedades: true } });
 }
 
+/** Candado: la suma de hectáreas por Cuadro entre variedades no puede exceder la superficie vigente del Cuadro. */
+async function validarSuperficiePorCuadro(variedades: VariedadCicloInput[]) {
+  const sumaPorCuadro = new Map<string, number>();
+  for (const v of variedades) {
+    sumaPorCuadro.set(v.cuadroId, (sumaPorCuadro.get(v.cuadroId) ?? 0) + v.hectareas);
+  }
+  for (const [cuadroId, suma] of sumaPorCuadro) {
+    const [cuadro, version] = await Promise.all([
+      prisma.cuadro.findUnique({ where: { id: cuadroId } }),
+      obtenerVersionVigente(cuadroId),
+    ]);
+    if (version && suma > Number(version.hectareas) + 0.0001) {
+      throw new SuperficieExcedeCuadroError(cuadro?.nombre ?? cuadroId, Number(version.hectareas), suma);
+    }
+  }
+}
+
 export async function crearCiclo(
   huertaId: string,
   tipo: "cultivo" | "descanso" | "prueba",
@@ -29,6 +55,8 @@ export async function crearCiclo(
 ) {
   const existente = await cicloActivo(huertaId);
   if (existente) throw new YaHayCicloActivoError();
+
+  await validarSuperficiePorCuadro(variedades);
 
   return prisma.$transaction(async (tx) => {
     const ciclo = await tx.ciclo.create({ data: { huertaId, tipo, fechaInicio: new Date(fechaInicio) } });

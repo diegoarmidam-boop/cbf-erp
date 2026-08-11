@@ -1,179 +1,170 @@
 import { useEffect, useState } from "react";
 import { api, ApiError } from "../../lib/api";
-import { useHuertas } from "../../lib/useHuertas";
-import type { RiegoDiaResponse, RiegoRegistroDiario, SeccionRiego } from "../../lib/types";
+import type { RiegoHuertaTodasUPs } from "../../lib/types";
+import FechaInput from "../../components/FechaInput";
 
 function hoyISO(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+interface FilaEdit {
+  horas: string;
+  fertirriegoConfirmado: boolean;
+  cantidadAplicada: string;
+  motivoNoAplicado: string;
+}
+
 export default function Riego() {
-  const { huertas } = useHuertas();
-
-  const [huertaId, setHuertaId] = useState("");
-  const [secciones, setSecciones] = useState<SeccionRiego[]>([]);
-  const [seccionId, setSeccionId] = useState("");
   const [fecha, setFecha] = useState(hoyISO());
-
-  const [dia, setDia] = useState<RiegoDiaResponse | null>(null);
-  const [historial, setHistorial] = useState<RiegoRegistroDiario[]>([]);
-  const [cargando, setCargando] = useState(false);
-  const [guardando, setGuardando] = useState(false);
+  const [datos, setDatos] = useState<RiegoHuertaTodasUPs[]>([]);
+  const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [mensaje, setMensaje] = useState<string | null>(null);
+  const [guardandoId, setGuardandoId] = useState<string | null>(null);
+  const [ediciones, setEdiciones] = useState<Record<string, FilaEdit>>({});
 
-  const [horas, setHoras] = useState("");
-  const [fertirriegoConfirmado, setFertirriegoConfirmado] = useState(false);
-  const [cantidadAplicada, setCantidadAplicada] = useState("");
-
-  useEffect(() => {
-    if (!huertaId) {
-      setSecciones([]);
-      setSeccionId("");
-      return;
-    }
-    api.get<SeccionRiego[]>(`/secciones-riego?huertaId=${huertaId}`).then((s) => {
-      setSecciones(s);
-      if (s.length > 0) setSeccionId(s[0]!.id);
-    });
-  }, [huertaId]);
-
-  useEffect(() => {
-    if (!huertaId && huertas.length > 0) setHuertaId(huertas[0]!.id);
-  }, [huertas, huertaId]);
-
-  function cargarDia() {
-    if (!seccionId || !fecha) return;
+  function cargar() {
     setCargando(true);
     setError(null);
-    setMensaje(null);
     api
-      .get<RiegoDiaResponse>(`/riego/${seccionId}/${fecha}`)
+      .get<RiegoHuertaTodasUPs[]>(`/riego/todas-ups/${fecha}`)
       .then((r) => {
-        setDia(r);
-        setHoras(r.registro ? r.registro.horas : "");
-        setFertirriegoConfirmado(r.registro?.fertirriegoConfirmado ?? false);
-        setCantidadAplicada(r.registro?.cantidadAplicada ?? "");
+        setDatos(r);
+        const nuevas: Record<string, FilaEdit> = {};
+        for (const h of r) {
+          for (const fila of h.secciones) {
+            nuevas[fila.seccion.id] = {
+              horas: fila.registro ? fila.registro.horas : "",
+              fertirriegoConfirmado: fila.registro?.fertirriegoConfirmado ?? false,
+              cantidadAplicada: fila.registro?.cantidadAplicada ?? "",
+              motivoNoAplicado: fila.registro?.motivoNoAplicado ?? "",
+            };
+          }
+        }
+        setEdiciones(nuevas);
       })
       .catch((err) => setError(err instanceof ApiError ? err.message : "No se pudo cargar."))
       .finally(() => setCargando(false));
-    api.get<RiegoRegistroDiario[]>(`/riego/${seccionId}/historial`).then(setHistorial);
   }
 
-  useEffect(cargarDia, [seccionId, fecha]);
+  useEffect(cargar, [fecha]);
 
-  async function guardar() {
-    setGuardando(true);
+  function actualizarFila(seccionId: string, campo: keyof FilaEdit, valor: string | boolean) {
+    setEdiciones((prev) => ({ ...prev, [seccionId]: { ...prev[seccionId]!, [campo]: valor } }));
+  }
+
+  async function guardarFila(seccionId: string) {
+    const fila = ediciones[seccionId];
+    if (!fila) return;
     setError(null);
-    setMensaje(null);
+    setGuardandoId(seccionId);
     try {
       await api.post(`/riego/${seccionId}/${fecha}`, {
-        horas: Number(horas),
-        fertirriegoConfirmado,
-        cantidadAplicada: fertirriegoConfirmado ? Number(cantidadAplicada) : undefined,
+        horas: Number(fila.horas),
+        fertirriegoConfirmado: fila.fertirriegoConfirmado,
+        cantidadAplicada: fila.fertirriegoConfirmado ? Number(fila.cantidadAplicada) : undefined,
+        motivoNoAplicado: !fila.fertirriegoConfirmado ? fila.motivoNoAplicado || undefined : undefined,
       });
-      setMensaje("Guardado.");
-      cargarDia();
+      cargar();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "No se pudo guardar.");
     } finally {
-      setGuardando(false);
+      setGuardandoId(null);
     }
   }
 
   return (
     <div>
-      <h2 style={{ marginBottom: 16 }}>Riego</h2>
-
-      <div className="card" style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap", marginBottom: 18 }}>
-        <label className="field">
-          Huerta
-          <select value={huertaId} onChange={(e) => setHuertaId(e.target.value)}>
-            <option value="">Selecciona…</option>
-            {huertas.map((h) => (
-              <option key={h.id} value={h.id}>
-                {h.nombre}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="field">
-          Sección de Riego
-          <select value={seccionId} onChange={(e) => setSeccionId(e.target.value)}>
-            <option value="">Selecciona…</option>
-            {secciones.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.nombre}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="field">
-          Fecha
-          <input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} />
-        </label>
-      </div>
+      <label className="field" style={{ maxWidth: 200, marginBottom: 18 }}>
+        Fecha
+        <FechaInput value={fecha} onChange={setFecha} />
+      </label>
 
       {error && <div className="tag tag-danger" style={{ display: "block", padding: "8px 12px", marginBottom: 12 }}>{error}</div>}
-      {mensaje && <div className="tag tag-success" style={{ display: "block", padding: "8px 12px", marginBottom: 12 }}>{mensaje}</div>}
 
-      {!seccionId ? (
-        <p style={{ color: "var(--ink-soft)" }}>Elige una Huerta y una Sección de Riego.</p>
-      ) : cargando ? (
+      {cargando ? (
         <p>Cargando…</p>
       ) : (
-        <div className="card" style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 18 }}>
-          <label className="field">
-            Horas regadas
-            <input type="number" step="0.25" value={horas} onChange={(e) => setHoras(e.target.value)} />
-          </label>
-
-          {dia?.fertirriegoActivo ? (
-            <>
-              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "var(--ink)" }}>
-                <input type="checkbox" checked={fertirriegoConfirmado} onChange={(e) => setFertirriegoConfirmado(e.target.checked)} />
-                ¿Se metió el fertirriego programado hoy? ({dia.fertirriegoActivo.producto.nombreComercial})
-              </label>
-              {fertirriegoConfirmado && (
-                <label className="field">
-                  Cantidad aplicada ({dia.fertirriegoActivo.producto.unidad})
-                  <input type="number" step="0.0001" value={cantidadAplicada} onChange={(e) => setCantidadAplicada(e.target.value)} />
-                </label>
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          {datos.map(({ huerta, secciones }) => (
+            <div key={huerta.id} className="card">
+              <h3 style={{ marginBottom: 10 }}>{huerta.nombre}</h3>
+              {secciones.length === 0 ? (
+                <p style={{ color: "var(--ink-soft)", fontSize: 12.5 }}>Sin Secciones de Riego dadas de alta.</p>
+              ) : (
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Sección</th>
+                      <th>Horas regadas</th>
+                      <th>Fertirriego</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {secciones.map(({ seccion, fertirriegoActivo }) => {
+                      const fila = ediciones[seccion.id];
+                      if (!fila) return null;
+                      return (
+                        <tr key={seccion.id}>
+                          <td>{seccion.nombre}</td>
+                          <td>
+                            <input
+                              type="number"
+                              step="0.25"
+                              min={0}
+                              style={{ width: 80 }}
+                              value={fila.horas}
+                              onChange={(e) => actualizarFila(seccion.id, "horas", e.target.value)}
+                            />
+                          </td>
+                          <td>
+                            {fertirriegoActivo ? (
+                              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                                <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
+                                  <input
+                                    type="checkbox"
+                                    checked={fila.fertirriegoConfirmado}
+                                    onChange={(e) => actualizarFila(seccion.id, "fertirriegoConfirmado", e.target.checked)}
+                                  />
+                                  ¿Se metió? ({fertirriegoActivo.producto.nombreComercial})
+                                </label>
+                                {fila.fertirriegoConfirmado ? (
+                                  <input
+                                    type="number"
+                                    step="0.0001"
+                                    placeholder={`Cantidad (${fertirriegoActivo.producto.unidad})`}
+                                    style={{ width: 160 }}
+                                    value={fila.cantidadAplicada}
+                                    onChange={(e) => actualizarFila(seccion.id, "cantidadAplicada", e.target.value)}
+                                  />
+                                ) : (
+                                  <input
+                                    placeholder="Motivo por el que no se metió (obligatorio)"
+                                    style={{ width: 220 }}
+                                    value={fila.motivoNoAplicado}
+                                    onChange={(e) => actualizarFila(seccion.id, "motivoNoAplicado", e.target.value)}
+                                  />
+                                )}
+                              </div>
+                            ) : (
+                              <span style={{ fontSize: 11.5, color: "var(--ink-soft)" }}>Sin fertirriego programado hoy</span>
+                            )}
+                          </td>
+                          <td>
+                            <button className="btn-primary" onClick={() => guardarFila(seccion.id)} disabled={guardandoId === seccion.id}>
+                              Guardar
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               )}
-            </>
-          ) : (
-            <span style={{ fontSize: 12, color: "var(--ink-soft)" }}>No hay un fertirriego programado y entregado para esta Sección hoy.</span>
-          )}
-
-          <div>
-            <button className="btn-primary" onClick={guardar} disabled={guardando}>
-              Guardar
-            </button>
-          </div>
+            </div>
+          ))}
+          {datos.length === 0 && <p style={{ color: "var(--ink-soft)" }}>No hay Huertas activas.</p>}
         </div>
-      )}
-
-      {seccionId && historial.length > 0 && (
-        <table>
-          <thead>
-            <tr>
-              <th>Fecha</th>
-              <th>Horas</th>
-              <th>Fertirriego</th>
-              <th>Cantidad aplicada</th>
-            </tr>
-          </thead>
-          <tbody>
-            {historial.map((h) => (
-              <tr key={h.id}>
-                <td>{h.fecha.slice(0, 10)}</td>
-                <td>{h.horas}</td>
-                <td>{h.fertirriegoConfirmado ? "Sí" : "No"}</td>
-                <td>{h.fertirriegoConfirmado ? h.cantidadAplicada : "—"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
       )}
     </div>
   );

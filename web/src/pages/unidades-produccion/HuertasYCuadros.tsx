@@ -31,7 +31,6 @@ export default function HuertasYCuadros() {
   const [hectareasCuadro, setHectareasCuadro] = useState("");
   const [distSurcos, setDistSurcos] = useState("");
   const [distPlantas, setDistPlantas] = useState("");
-  const [variedad, setVariedad] = useState("");
   const [tipoSuelo, setTipoSuelo] = useState("");
 
   useEffect(() => {
@@ -68,7 +67,6 @@ export default function HuertasYCuadros() {
           hectareas: Number(hectareasCuadro),
           distSurcosM: distSurcos ? Number(distSurcos) : undefined,
           distPlantasM: distPlantas ? Number(distPlantas) : undefined,
-          variedad: variedad || undefined,
           tipoSuelo: tipoSuelo || undefined,
         },
       });
@@ -76,7 +74,6 @@ export default function HuertasYCuadros() {
       setHectareasCuadro("");
       setDistSurcos("");
       setDistPlantas("");
-      setVariedad("");
       setTipoSuelo("");
       setMostrarFormCuadro(false);
       refetch();
@@ -175,10 +172,6 @@ export default function HuertasYCuadros() {
                 <input value={tipoSuelo} onChange={(e) => setTipoSuelo(e.target.value)} />
               </label>
               <label className="field">
-                Variedad
-                <input value={variedad} onChange={(e) => setVariedad(e.target.value)} />
-              </label>
-              <label className="field">
                 Dist. entre surcos (m)
                 <input type="number" step="0.01" value={distSurcos} onChange={(e) => setDistSurcos(e.target.value)} />
               </label>
@@ -203,7 +196,6 @@ export default function HuertasYCuadros() {
                   <th>Nombre</th>
                   <th>Estatus</th>
                   <th>Hectáreas</th>
-                  <th>Variedad</th>
                   <th>Marco de plantación</th>
                   <th>Plantas totales</th>
                 </tr>
@@ -224,7 +216,6 @@ export default function HuertasYCuadros() {
                         </select>
                       </td>
                       <td>{vigente?.hectareas ?? "—"}</td>
-                      <td>{vigente?.variedad ?? "—"}</td>
                       <td>{vigente?.distSurcosM && vigente?.distPlantasM ? `${vigente.distSurcosM} × ${vigente.distPlantasM} m` : "—"}</td>
                       <td>{c.plantasTotales != null ? Math.round(c.plantasTotales).toLocaleString("es-MX") : "—"}</td>
                     </tr>

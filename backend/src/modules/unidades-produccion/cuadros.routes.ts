@@ -33,7 +33,6 @@ const versionSchema = z.object({
   fechaSiembra: z.string().optional(),
   distSurcosM: z.number().positive().optional(),
   distPlantasM: z.number().positive().optional(),
-  variedad: z.string().optional(),
 });
 
 const crearCuadroSchema = z.object({

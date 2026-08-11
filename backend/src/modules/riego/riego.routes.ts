@@ -3,7 +3,16 @@ import { z } from "zod";
 import { requireAuth, requirePermission, huertaIdDeAlcance } from "../../middleware/auth.js";
 import { unoSolo } from "../../core/http.js";
 import { prisma } from "../../core/db.js";
-import { fertirriegoActivoDeSeccion, FertirriegoNoActivoError, historialRiego, obtenerRiegoDiario, registrarRiegoDiario } from "./riego.js";
+import {
+  estadoRiegoTodasUPs,
+  fertirriegoActivoDeSeccion,
+  FertirriegoNoActivoError,
+  historialRiego,
+  historialSemanal,
+  MotivoNoAplicadoRequeridoError,
+  obtenerRiegoDiario,
+  registrarRiegoDiario,
+} from "./riego.js";
 
 export const riegoRouter = Router();
 riegoRouter.use(requireAuth);
@@ -18,6 +27,23 @@ async function verificarAlcanceSeccion(req: Request, res: Response, seccionId: s
   }
   return true;
 }
+
+// Vista "Todas UPs" (9.6) — antes de "/:seccionId/..." para no ser interpretado como un seccionId literal.
+riegoRouter.get("/todas-ups/:fecha", requirePermission("riego", "ver"), async (req, res) => {
+  const fecha = unoSolo(req.params.fecha);
+  const alcance = huertaIdDeAlcance(req);
+  res.json(await estadoRiegoTodasUPs(fecha, alcance ?? undefined));
+});
+
+riegoRouter.get("/historial-semanal/:huertaId/:fechaRef", requirePermission("riego", "ver"), async (req, res) => {
+  const huertaId = unoSolo(req.params.huertaId);
+  const alcance = huertaIdDeAlcance(req);
+  if (alcance && alcance !== huertaId) {
+    res.status(403).json({ error: "Tu acceso está restringido a tu propia Huerta." });
+    return;
+  }
+  res.json(await historialSemanal(huertaId, unoSolo(req.params.fechaRef)));
+});
 
 riegoRouter.get("/:seccionId/historial", requirePermission("riego", "ver"), async (req, res) => {
   const seccionId = unoSolo(req.params.seccionId);
@@ -40,6 +66,7 @@ const registrarSchema = z.object({
   horas: z.number().nonnegative(),
   fertirriegoConfirmado: z.boolean(),
   cantidadAplicada: z.number().positive().optional(),
+  motivoNoAplicado: z.string().optional(),
 });
 
 riegoRouter.post("/:seccionId/:fecha", requirePermission("riego", "capturar"), async (req, res) => {
@@ -56,7 +83,7 @@ riegoRouter.post("/:seccionId/:fecha", requirePermission("riego", "capturar"), a
     const registro = await registrarRiegoDiario(seccionId, fecha, parsed.data, req.usuario!.usuarioId);
     res.status(201).json(registro);
   } catch (err) {
-    if (err instanceof FertirriegoNoActivoError) {
+    if (err instanceof FertirriegoNoActivoError || err instanceof MotivoNoAplicadoRequeridoError) {
       res.status(409).json({ error: err.message });
       return;
     }

@@ -3,6 +3,7 @@ import cors from "cors";
 import path from "node:path";
 import { authRouter } from "./routes/auth.routes.js";
 import { solicitudesRouter } from "./core/solicitudes.routes.js";
+import { notificacionesRouter } from "./core/notificaciones.routes.js";
 import { nominaRouter } from "./modules/nomina/index.js";
 import { unidadesProduccionRouter } from "./modules/unidades-produccion/index.js";
 import { personalRouter } from "./modules/rh/personal.routes.js";
@@ -25,6 +26,7 @@ export function createApp() {
   app.get("/health", (_req, res) => res.json({ ok: true }));
   app.use("/auth", authRouter);
   app.use("/solicitudes", solicitudesRouter);
+  app.use("/notificaciones", notificacionesRouter);
   app.use("/nomina", nominaRouter);
   app.use(unidadesProduccionRouter);
   app.use("/personal", personalRouter);

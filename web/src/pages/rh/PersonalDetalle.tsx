@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { api, ApiError, getToken } from "../../lib/api";
 import type { Personal, PersonalDocumento } from "../../lib/types";
+import { formatearFecha } from "../../lib/fecha";
 
 const ETIQUETAS_DOC: Record<PersonalDocumento["tipoDocumento"], string> = {
   identificacion: "Identificación",
@@ -119,7 +120,7 @@ export default function PersonalDetalle() {
           </div>
           <div>
             <div style={{ color: "var(--ink-soft)" }}>Fecha de ingreso</div>
-            <div>{persona.fechaIngreso?.slice(0, 10) ?? "—"}</div>
+            <div>{formatearFecha(persona.fechaIngreso)}</div>
           </div>
           {persona.tipo === "fijo" && (
             <>

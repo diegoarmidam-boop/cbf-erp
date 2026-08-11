@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { requireAuth, requirePermission } from "../../middleware/auth.js";
 import { prisma } from "../../core/db.js";
-import { crearProveedor, listarProveedores, mejoresProveedoresPorProducto } from "./proveedores.js";
+import { actualizarDiasCredito, crearProveedor, listarProveedores, mejoresProveedoresPorProducto } from "./proveedores.js";
 import { unoSolo } from "../../core/http.js";
 
 export const proveedoresRouter = Router();
@@ -26,6 +26,7 @@ const altaSchema = z.object({
   nombre: z.string().min(1),
   creditoMonto: z.number().nonnegative().optional(),
   creditoVencimiento: z.string().optional(),
+  diasCredito: z.number().int().nonnegative().optional(),
   datosFacturacion: z.record(z.string(), z.unknown()).optional(),
 });
 
@@ -36,6 +37,17 @@ proveedoresRouter.post("/", requirePermission("compras", "capturar"), async (req
     return;
   }
   res.status(201).json(await crearProveedor(parsed.data));
+});
+
+const diasCreditoSchema = z.object({ diasCredito: z.number().int().nonnegative() });
+
+proveedoresRouter.patch("/:id/dias-credito", requirePermission("compras", "capturar"), async (req, res) => {
+  const parsed = diasCreditoSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+  res.json(await actualizarDiasCredito(unoSolo(req.params.id), parsed.data.diasCredito));
 });
 
 const activoSchema = z.object({ activo: z.boolean() });

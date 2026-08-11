@@ -3,6 +3,8 @@ import { NavLink, Outlet } from "react-router-dom";
 const TABS = [
   { to: "ordenes", label: "Órdenes" },
   { to: "proveedores", label: "Proveedores" },
+  { to: "cxp", label: "Cuentas por Pagar" },
+  { to: "comparador", label: "Comparador de Cotizaciones" },
 ];
 
 export default function ComprasLayout() {

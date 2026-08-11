@@ -1,9 +1,12 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { Fragment, useEffect, useState, type FormEvent } from "react";
 import { api, ApiError } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
 import { useHuertas } from "../../lib/useHuertas";
 import { usePersonal } from "../../lib/usePersonal";
-import type { Aplicacion, ConcentracionUnidad, Cuadro, Equipo, GrupoPago, Producto, RecursoTipo } from "../../lib/types";
+import type { Aplicacion, AplicacionRealizadaLinea, ConcentracionUnidad, Cuadro, Equipo, ModalidadAplicacion, Producto } from "../../lib/types";
+import FechaInput from "../../components/FechaInput";
+import { formatearFecha } from "../../lib/fecha";
+import { presentacionTexto } from "../../lib/producto";
 
 const ETIQUETAS_ESTADO: Record<string, string> = {
   programada: "Programada",
@@ -11,6 +14,12 @@ const ETIQUETAS_ESTADO: Record<string, string> = {
   realizada: "Realizada",
   vencida: "Vencida/liberada",
   cancelada: "Cancelada",
+};
+
+const ETIQUETAS_MODALIDAD: Record<ModalidadAplicacion, string> = {
+  mochila: "Mochila",
+  turbina: "Turbina",
+  aguilon: "Aguilón",
 };
 
 function tagEstado(estado: string) {
@@ -29,6 +38,56 @@ function formaEntero(valor: string): string {
   return Number.isFinite(n) ? n.toLocaleString("es-MX", { maximumFractionDigits: 3 }) : valor;
 }
 
+let contadorKey = 0;
+function nuevaKey(): string {
+  contadorKey += 1;
+  return `linea-${Date.now()}-${contadorKey}`;
+}
+
+interface LineaForm {
+  key: string;
+  modalidad: ModalidadAplicacion;
+  tractorId: string;
+  operadorId: string;
+  implementoId: string;
+  horas: string;
+  personalIds: string[];
+}
+
+function lineaVacia(): LineaForm {
+  return { key: nuevaKey(), modalidad: "mochila", tractorId: "", operadorId: "", implementoId: "", horas: "", personalIds: [] };
+}
+
+function lineasDesdeExistentes(lineas: AplicacionRealizadaLinea[]): LineaForm[] {
+  return lineas.map((l) => ({
+    key: nuevaKey(),
+    modalidad: l.modalidad,
+    tractorId: l.tractorId ?? "",
+    operadorId: l.operadorId ?? "",
+    implementoId: l.implementoId ?? "",
+    horas: l.horas,
+    personalIds: l.personas.map((p) => p.personalId),
+  }));
+}
+
+/** Validación de espejo del backend (9.7) — evita un viaje al servidor solo para descubrir un error de forma. */
+function validarLineasForm(lineas: LineaForm[]): string | null {
+  if (lineas.length === 0) return "Falta capturar al menos una línea de recurso (Mochila, Turbina o Aguilón).";
+  for (const l of lineas) {
+    if (l.modalidad === "mochila") {
+      if (l.personalIds.length === 0) return "Una línea de Mochila necesita al menos una persona.";
+    } else {
+      if (!l.tractorId || !l.operadorId || !l.implementoId) {
+        return `Una línea de ${ETIQUETAS_MODALIDAD[l.modalidad]} necesita Tractor, Operador e Implemento.`;
+      }
+      if (l.modalidad === "turbina" && l.personalIds.length > 0) return "Una línea de Turbina no lleva gente extra detrás.";
+      if (l.modalidad === "aguilon" && l.personalIds.length === 0) return "Una línea de Aguilón necesita al menos una persona detrás del tractor.";
+    }
+    if (!l.horas || Number(l.horas) <= 0) return "Falta capturar las horas de una línea.";
+  }
+  return null;
+}
+
 export default function Aplicaciones() {
   const { usuario } = useAuth();
   const { huertas } = useHuertas();
@@ -41,25 +100,31 @@ export default function Aplicaciones() {
   // ---- Programar ----
   const [mostrarForm, setMostrarForm] = useState(false);
   const [productos, setProductos] = useState<Producto[]>([]);
-  const [equiposImplemento, setEquiposImplemento] = useState<Equipo[]>([]);
   const [huertaId, setHuertaId] = useState("");
   const [cuadrosHuerta, setCuadrosHuerta] = useState<Cuadro[]>([]);
   const [cuadroIds, setCuadroIds] = useState<string[]>([]);
   const [productoId, setProductoId] = useState("");
-  const [recursoTipo, setRecursoTipo] = useState<RecursoTipo>("gente");
-  const [equipoId, setEquipoId] = useState("");
+  const [recursoSugerido, setRecursoSugerido] = useState<ModalidadAplicacion>("mochila");
   const [concentracionValor, setConcentracionValor] = useState("");
   const [concentracionUnidad, setConcentracionUnidad] = useState<ConcentracionUnidad>("ml_l");
   const [litrosMezclaPorHa, setLitrosMezclaPorHa] = useState("");
   const [fechaInicio, setFechaInicio] = useState(hoyISO());
   const [fechaFin, setFechaFin] = useState(hoyISO());
 
+  // ---- Equipos para líneas de Turbina/Aguilón ----
+  const [tractores, setTractores] = useState<Equipo[]>([]);
+  const [implementos, setImplementos] = useState<Equipo[]>([]);
+
   // ---- Registrar realizada ----
   const [registrando, setRegistrando] = useState<string | null>(null);
-  const [gruposHuerta, setGruposHuerta] = useState<GrupoPago[]>([]);
-  const [quien, setQuien] = useState(""); // "p:<id>" o "g:<id>"
-  const [horas, setHoras] = useState("");
   const [fechaReal, setFechaReal] = useState(hoyISO());
+  const [avanceCuadros, setAvanceCuadros] = useState<Record<string, string>>({});
+  const [lineas, setLineas] = useState<LineaForm[]>([lineaVacia()]);
+
+  // ---- Editar reporte existente ----
+  const [editando, setEditando] = useState<string | null>(null);
+  const [editAvanceCuadros, setEditAvanceCuadros] = useState<Record<string, string>>({});
+  const [editLineas, setEditLineas] = useState<LineaForm[]>([]);
 
   function cargar() {
     setCargando(true);
@@ -74,7 +139,8 @@ export default function Aplicaciones() {
 
   useEffect(() => {
     api.get<Producto[]>("/aplicaciones/productos").then(setProductos);
-    api.get<Equipo[]>("/aplicaciones/equipos-implemento").then(setEquiposImplemento);
+    api.get<Equipo[]>("/aplicaciones/equipos-tractor").then(setTractores);
+    api.get<Equipo[]>("/aplicaciones/equipos-implemento").then(setImplementos);
   }, []);
 
   useEffect(() => {
@@ -97,8 +163,7 @@ export default function Aplicaciones() {
         huertaId,
         cuadroIds,
         productoId,
-        recursoTipo,
-        equipoId: recursoTipo === "implemento" ? equipoId : undefined,
+        recursoSugerido,
         concentracionValor: Number(concentracionValor),
         concentracionUnidad,
         litrosMezclaPorHa: Number(litrosMezclaPorHa),
@@ -108,7 +173,6 @@ export default function Aplicaciones() {
       setMostrarForm(false);
       setCuadroIds([]);
       setProductoId("");
-      setEquipoId("");
       setConcentracionValor("");
       setLitrosMezclaPorHa("");
       cargar();
@@ -137,33 +201,118 @@ export default function Aplicaciones() {
     }
   }
 
-  async function abrirRegistrar(a: Aplicacion) {
+  function abrirRegistrar(a: Aplicacion) {
     setRegistrando(a.id);
-    setQuien("");
-    setHoras("");
     setFechaReal(hoyISO());
-    const grupos = await api.get<GrupoPago[]>(`/aplicaciones/grupos?huertaId=${a.huertaId}`);
-    setGruposHuerta(grupos);
+    setAvanceCuadros({});
+    setLineas([lineaVacia()]);
   }
 
-  async function confirmarRegistrar(id: string) {
+  function cuadrosDesdeMapa(mapa: Record<string, string>, restantes: Record<string, number> | undefined): { cuadroId: string; hectareas: number }[] {
+    return Object.entries(mapa)
+      .filter(([, hectareas]) => hectareas !== undefined)
+      .map(([cuadroId, hectareas]) => ({
+        cuadroId,
+        hectareas: hectareas === "" ? restantes?.[cuadroId] ?? 0 : Number(hectareas),
+      }))
+      .filter((c) => c.hectareas > 0);
+  }
+
+  function resumenConfirmacion(a: Aplicacion, mapa: Record<string, string>): string {
+    const lineasResumen = Object.entries(mapa)
+      .filter(([, hectareas]) => hectareas === "")
+      .map(([cuadroId]) => {
+        const nombre = a.cuadros.find((c) => c.cuadro.id === cuadroId)?.cuadro.nombre ?? cuadroId;
+        const ha = a.restantesPorCuadro?.[cuadroId] ?? 0;
+        return `${nombre}: se marca completo (${ha.toFixed(2)} ha)`;
+      });
+    if (lineasResumen.length === 0) return "";
+    return `Vas a dar por completados estos Cuadros:\n\n${lineasResumen.join("\n")}\n\n¿Confirmar?`;
+  }
+
+  function lineasParaEnviar(form: LineaForm[]) {
+    return form.map((l) => ({
+      modalidad: l.modalidad,
+      tractorId: l.modalidad !== "mochila" ? l.tractorId : undefined,
+      operadorId: l.modalidad !== "mochila" ? l.operadorId : undefined,
+      implementoId: l.modalidad !== "mochila" ? l.implementoId : undefined,
+      horas: Number(l.horas),
+      personalIds: l.personalIds,
+    }));
+  }
+
+  async function confirmarRegistrar(a: Aplicacion) {
     setError(null);
-    if (!quien) {
-      setError("Falta quién hizo la aplicación.");
+    const cuadros = cuadrosDesdeMapa(avanceCuadros, a.restantesPorCuadro);
+    if (cuadros.length === 0) {
+      setError("Falta capturar qué Cuadro(s) se avanzaron y sus hectáreas en este reporte.");
       return;
     }
-    const [tipo, refId] = quien.split(":");
+    const errorLineas = validarLineasForm(lineas);
+    if (errorLineas) {
+      setError(errorLineas);
+      return;
+    }
+    const resumen = resumenConfirmacion(a, avanceCuadros);
+    if (resumen && !confirm(resumen)) return;
+
     try {
-      await api.post(`/aplicaciones/${id}/realizada`, {
-        personalId: tipo === "p" ? refId : undefined,
-        grupoId: tipo === "g" ? refId : undefined,
-        horas: Number(horas),
-        fechaReal,
-      });
+      await api.post(`/aplicaciones/${a.id}/realizada`, { fechaReal, cuadros, lineas: lineasParaEnviar(lineas) });
       setRegistrando(null);
       cargar();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "No se pudo registrar.");
+    }
+  }
+
+  function abrirEditar(a: Aplicacion, r: Aplicacion["realizadas"][number]) {
+    setEditando(r.id);
+    const mapa: Record<string, string> = {};
+    for (const c of r.cuadros) mapa[c.cuadroId] = c.hectareas;
+    setEditAvanceCuadros(mapa);
+    setEditLineas(lineasDesdeExistentes(r.lineas));
+    void a;
+  }
+
+  async function confirmarEditar(a: Aplicacion, realizadaId: string) {
+    setError(null);
+    const cuadros = cuadrosDesdeMapa(editAvanceCuadros, a.restantesPorCuadro);
+    if (cuadros.length === 0) {
+      setError("Falta capturar qué Cuadro(s) se avanzaron y sus hectáreas en este reporte.");
+      return;
+    }
+    const errorLineas = validarLineasForm(editLineas);
+    if (errorLineas) {
+      setError(errorLineas);
+      return;
+    }
+    try {
+      await api.patch(`/aplicaciones/realizada/${realizadaId}`, { cuadros, lineas: lineasParaEnviar(editLineas) });
+      setEditando(null);
+      cargar();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "No se pudo guardar la edición.");
+    }
+  }
+
+  async function cancelar(id: string) {
+    if (!confirm("¿Cancelar esta aplicación? Se regresará a bodega central el producto no aplicado y se generará un abono al Rancho.")) return;
+    setError(null);
+    try {
+      await api.post(`/aplicaciones/${id}/cancelar`);
+      cargar();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "No se pudo cancelar.");
+    }
+  }
+
+  async function confirmarRecepcion(id: string) {
+    setError(null);
+    try {
+      await api.post(`/aplicaciones/${id}/confirmar-recepcion-cancelacion`);
+      cargar();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "No se pudo confirmar.");
     }
   }
 
@@ -197,7 +346,7 @@ export default function Aplicaciones() {
                 <option value="">Selecciona…</option>
                 {productos.map((p) => (
                   <option key={p.id} value={p.id}>
-                    {p.nombreComercial} ({p.presentacion})
+                    {p.nombreComercial} ({presentacionTexto(p)})
                   </option>
                 ))}
               </select>
@@ -221,25 +370,16 @@ export default function Aplicaciones() {
 
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
             <label className="field">
-              Recurso
-              <select value={recursoTipo} onChange={(e) => setRecursoTipo(e.target.value as RecursoTipo)}>
-                <option value="gente">Con gente</option>
-                <option value="implemento">Con implemento</option>
+              Recurso sugerido
+              <select value={recursoSugerido} onChange={(e) => setRecursoSugerido(e.target.value as ModalidadAplicacion)}>
+                <option value="mochila">Mochila</option>
+                <option value="turbina">Turbina</option>
+                <option value="aguilon">Aguilón</option>
               </select>
             </label>
-            {recursoTipo === "implemento" && (
-              <label className="field">
-                Equipo
-                <select value={equipoId} onChange={(e) => setEquipoId(e.target.value)} required>
-                  <option value="">Selecciona…</option>
-                  {equiposImplemento.map((eq) => (
-                    <option key={eq.id} value={eq.id}>
-                      {eq.folio} {eq.marca ?? ""}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
+            <span style={{ fontSize: 11, color: "var(--ink-soft)", maxWidth: 260 }}>
+              Solo referencia de cómo se planea — el detalle real se captura día a día en el reporte de avance.
+            </span>
           </div>
 
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
@@ -261,11 +401,11 @@ export default function Aplicaciones() {
             </label>
             <label className="field">
               Fecha inicio
-              <input type="date" value={fechaInicio} onChange={(e) => setFechaInicio(e.target.value)} required />
+              <FechaInput value={fechaInicio} onChange={setFechaInicio} required />
             </label>
             <label className="field">
               Fecha fin
-              <input type="date" value={fechaFin} onChange={(e) => setFechaFin(e.target.value)} required />
+              <FechaInput value={fechaFin} onChange={setFechaFin} required />
             </label>
             <button className="btn-primary" type="submit">
               Programar
@@ -295,14 +435,21 @@ export default function Aplicaciones() {
                     Cuadros: {a.cuadros.map((c) => c.cuadro.nombre).join(", ") || "—"} · {formaEntero(a.cantidadTotalCalculada)} {a.producto.unidad}
                   </div>
                   <div style={{ fontSize: 12, color: "var(--ink-soft)" }}>
-                    {a.concentracionValor} {a.concentracionUnidad.replace("_", "/")} · {a.litrosMezclaPorHa} L mezcla/ha ·{" "}
-                    {a.recursoTipo === "implemento" ? `Con implemento (${a.equipo?.folio ?? "—"})` : "Con gente"} · {a.fechaInicio.slice(0, 10)} a{" "}
-                    {a.fechaFin.slice(0, 10)}
+                    {a.concentracionValor} {a.concentracionUnidad.replace("_", "/")} · {a.litrosMezclaPorHa} L mezcla/ha · Sugerido:{" "}
+                    {ETIQUETAS_MODALIDAD[a.recursoSugerido]} · {formatearFecha(a.fechaInicio)} a {formatearFecha(a.fechaFin)}
                   </div>
                   {a.realizadas.length > 0 && (
                     <div style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: 4 }}>
-                      Horas registradas: {a.realizadas.reduce((s, r) => s + Number(r.horas), 0)} ({a.realizadas.length} reporte
-                      {a.realizadas.length === 1 ? "" : "s"})
+                      {(a.porcentajeAvance ?? 0).toFixed(1)}% avance · {a.horasHombreTotales ?? 0} horas-hombre totales · {a.realizadas.length}{" "}
+                      reporte{a.realizadas.length === 1 ? "" : "s"}
+                    </div>
+                  )}
+                  {a.estado === "cancelada" && (
+                    <div style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: 4 }}>
+                      Cancelada el {formatearFecha(a.fechaCancelacion)}
+                      {a.confirmacionBodegaPorId
+                        ? ` · Bodega confirmó recepción el ${formatearFecha(a.fechaConfirmacionBodega)}`
+                        : " · Pendiente de confirmación de Bodega"}
                     </div>
                   )}
                 </div>
@@ -320,7 +467,17 @@ export default function Aplicaciones() {
                   )}
                   {(a.estado === "entregada" || a.estado === "realizada") && registrando !== a.id && (
                     <button className="btn-primary" onClick={() => abrirRegistrar(a)}>
-                      Registrar horas
+                      Registrar avance
+                    </button>
+                  )}
+                  {(a.estado === "entregada" || a.estado === "realizada") && a.alertaPendienteAplicar && (
+                    <button className="btn-danger" onClick={() => cancelar(a.id)}>
+                      Cancelar (15+ días sin terminar)
+                    </button>
+                  )}
+                  {a.estado === "cancelada" && !a.confirmacionBodegaPorId && (
+                    <button className="btn-primary" onClick={() => confirmarRecepcion(a.id)}>
+                      Bodega: confirmar recepción
                     </button>
                   )}
                 </div>
@@ -328,36 +485,52 @@ export default function Aplicaciones() {
 
               {registrando === a.id && (
                 <div style={{ marginTop: 12, borderTop: "1px solid var(--border)", paddingTop: 12 }}>
-                  <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
-                    <label className="field">
-                      Quién la hizo
-                      <select value={quien} onChange={(e) => setQuien(e.target.value)}>
-                        <option value="">Selecciona…</option>
-                        <optgroup label="Personal">
-                          {personal.map((p) => (
-                            <option key={p.id} value={`p:${p.id}`}>
-                              {p.nombreCompleto}
-                            </option>
-                          ))}
-                        </optgroup>
-                        <optgroup label="Grupos">
-                          {gruposHuerta.map((g) => (
-                            <option key={g.id} value={`g:${g.id}`}>
-                              {g.nombre ?? "(sin nombre)"}
-                            </option>
-                          ))}
-                        </optgroup>
-                      </select>
-                    </label>
-                    <label className="field">
-                      Horas
-                      <input type="number" step="0.25" value={horas} onChange={(e) => setHoras(e.target.value)} />
-                    </label>
-                    <label className="field">
-                      Fecha
-                      <input type="date" value={fechaReal} onChange={(e) => setFechaReal(e.target.value)} />
-                    </label>
-                    <button className="btn-primary" onClick={() => confirmarRegistrar(a.id)}>
+                  <label className="field" style={{ maxWidth: 180, marginBottom: 10 }}>
+                    Fecha
+                    <FechaInput value={fechaReal} onChange={setFechaReal} />
+                  </label>
+
+                  <div style={{ fontSize: 11.5, color: "var(--ink-soft)", marginBottom: 6 }}>
+                    ¿Qué Cuadro(s) se avanzaron en este reporte, y cuántas hectáreas de cada uno? (deja el número en blanco para marcarlo completo)
+                  </div>
+                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
+                    {a.cuadros.map(({ cuadro }) => {
+                      const restan = a.restantesPorCuadro?.[cuadro.id];
+                      return (
+                        <label key={cuadro.id} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5 }}>
+                          <input
+                            type="checkbox"
+                            checked={avanceCuadros[cuadro.id] !== undefined}
+                            onChange={(e) =>
+                              setAvanceCuadros((prev) => {
+                                const copia = { ...prev };
+                                if (e.target.checked) copia[cuadro.id] = "";
+                                else delete copia[cuadro.id];
+                                return copia;
+                              })
+                            }
+                          />
+                          {cuadro.nombre} {restan !== undefined && <span style={{ color: "var(--ink-soft)" }}>(quedan {restan.toFixed(2)} ha)</span>}
+                          {avanceCuadros[cuadro.id] !== undefined && (
+                            <input
+                              type="number"
+                              min={0}
+                              step="0.0001"
+                              placeholder={restan !== undefined ? `${restan.toFixed(2)} (completo)` : "ha"}
+                              style={{ width: 110 }}
+                              value={avanceCuadros[cuadro.id]}
+                              onChange={(e) => setAvanceCuadros((prev) => ({ ...prev, [cuadro.id]: e.target.value }))}
+                            />
+                          )}
+                        </label>
+                      );
+                    })}
+                  </div>
+
+                  <LineasEditor lineas={lineas} setLineas={setLineas} tractores={tractores} implementos={implementos} personal={personal} />
+
+                  <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                    <button className="btn-primary" onClick={() => confirmarRegistrar(a)}>
                       Guardar
                     </button>
                     <button className="btn-secondary" onClick={() => setRegistrando(null)}>
@@ -366,11 +539,254 @@ export default function Aplicaciones() {
                   </div>
                 </div>
               )}
+
+              {a.realizadas.length > 0 && (
+                <div style={{ marginTop: 12, borderTop: "1px solid var(--border)", paddingTop: 12 }}>
+                  <div style={{ fontSize: 11.5, fontWeight: 600, marginBottom: 6 }}>Historial de reportes</div>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Fecha</th>
+                        <th>Líneas</th>
+                        <th>Cuadros avanzados</th>
+                        <th></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {a.realizadas.map((r) => (
+                        <Fragment key={r.id}>
+                          <tr>
+                            <td>{formatearFecha(r.fechaReal)}</td>
+                            <td>
+                              {r.lineas
+                                .map(
+                                  (l) =>
+                                    `${ETIQUETAS_MODALIDAD[l.modalidad]} (${l.horas}h${
+                                      l.operador ? ` · ${l.operador.nombreCompleto}` : ""
+                                    }${l.personas.length > 0 ? ` · ${l.personas.map((p) => p.personal.nombreCompleto).join(", ")}` : ""})`
+                                )
+                                .join(" + ") || "—"}
+                            </td>
+                            <td>{r.cuadros.map((c) => `${c.cuadro.nombre} (${c.hectareas} ha)`).join(", ") || "—"}</td>
+                            <td>
+                              {editando !== r.id && (
+                                <button className="btn-secondary" onClick={() => abrirEditar(a, r)}>
+                                  Editar
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                          {editando === r.id && (
+                            <tr>
+                              <td colSpan={4}>
+                                <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 8 }}>
+                                  {a.cuadros.map(({ cuadro }) => {
+                                    const restan = a.restantesPorCuadro?.[cuadro.id];
+                                    return (
+                                      <label key={cuadro.id} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5 }}>
+                                        <input
+                                          type="checkbox"
+                                          checked={editAvanceCuadros[cuadro.id] !== undefined}
+                                          onChange={(e) =>
+                                            setEditAvanceCuadros((prev) => {
+                                              const copia = { ...prev };
+                                              if (e.target.checked) copia[cuadro.id] = "";
+                                              else delete copia[cuadro.id];
+                                              return copia;
+                                            })
+                                          }
+                                        />
+                                        {cuadro.nombre} {restan !== undefined && <span style={{ color: "var(--ink-soft)" }}>(quedan {restan.toFixed(2)} ha)</span>}
+                                        {editAvanceCuadros[cuadro.id] !== undefined && (
+                                          <input
+                                            type="number"
+                                            min={0}
+                                            step="0.0001"
+                                            placeholder="ha"
+                                            style={{ width: 80 }}
+                                            value={editAvanceCuadros[cuadro.id]}
+                                            onChange={(e) => setEditAvanceCuadros((prev) => ({ ...prev, [cuadro.id]: e.target.value }))}
+                                          />
+                                        )}
+                                      </label>
+                                    );
+                                  })}
+                                </div>
+
+                                <LineasEditor lineas={editLineas} setLineas={setEditLineas} tractores={tractores} implementos={implementos} personal={personal} />
+
+                                <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                                  <button className="btn-primary" onClick={() => confirmarEditar(a, r.id)}>
+                                    Guardar cambios
+                                  </button>
+                                  <button className="btn-secondary" onClick={() => setEditando(null)}>
+                                    Cancelar
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </Fragment>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           ))}
           {aplicaciones.length === 0 && <p style={{ color: "var(--ink-soft)" }}>No hay aplicaciones{usuario?.huertaId ? " en tu Huerta" : ""}.</p>}
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Captura de maquinaria y personas por reporte (9.7, 8-ago-2026): una o
+ * varias líneas, cada una con su propia modalidad — se pueden combinar
+ * dentro del mismo reporte (ej. una cuadrilla con Mochila y otra con
+ * Aguilón el mismo día).
+ */
+function LineasEditor({
+  lineas,
+  setLineas,
+  tractores,
+  implementos,
+  personal,
+}: {
+  lineas: LineaForm[];
+  setLineas: (updater: (prev: LineaForm[]) => LineaForm[]) => void;
+  tractores: Equipo[];
+  implementos: Equipo[];
+  personal: { id: string; nombreCompleto: string }[];
+}) {
+  function actualizar(key: string, cambios: Partial<LineaForm>) {
+    setLineas((prev) => prev.map((l) => (l.key !== key ? l : { ...l, ...cambios })));
+  }
+
+  function agregarPersona(key: string, personalId: string) {
+    if (!personalId) return;
+    setLineas((prev) => prev.map((l) => (l.key !== key || l.personalIds.includes(personalId) ? l : { ...l, personalIds: [...l.personalIds, personalId] })));
+  }
+
+  function quitarPersona(key: string, personalId: string) {
+    setLineas((prev) => prev.map((l) => (l.key !== key ? l : { ...l, personalIds: l.personalIds.filter((id) => id !== personalId) })));
+  }
+
+  function agregarLinea() {
+    setLineas((prev) => [...prev, lineaVacia()]);
+  }
+
+  function quitarLinea(key: string) {
+    setLineas((prev) => (prev.length === 1 ? prev : prev.filter((l) => l.key !== key)));
+  }
+
+  return (
+    <div>
+      <div style={{ fontSize: 11.5, color: "var(--ink-soft)", marginBottom: 8 }}>
+        Recurso real usado — una línea por modalidad, se pueden combinar varias en el mismo reporte.
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {lineas.map((l) => (
+          <div key={l.key} className="card" style={{ background: "var(--surface-soft, #fafafa)" }}>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 8 }}>
+              <label className="field">
+                Modalidad
+                <select value={l.modalidad} onChange={(e) => actualizar(l.key, { modalidad: e.target.value as ModalidadAplicacion, personalIds: [] })}>
+                  <option value="mochila">Mochila</option>
+                  <option value="turbina">Turbina</option>
+                  <option value="aguilon">Aguilón</option>
+                </select>
+              </label>
+              <label className="field">
+                Horas
+                <input type="number" step="0.25" style={{ width: 90 }} value={l.horas} onChange={(e) => actualizar(l.key, { horas: e.target.value })} />
+              </label>
+              {lineas.length > 1 && (
+                <button className="btn-secondary" onClick={() => quitarLinea(l.key)}>
+                  Quitar línea
+                </button>
+              )}
+            </div>
+
+            {l.modalidad !== "mochila" && (
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 8 }}>
+                <label className="field">
+                  Tractor
+                  <select value={l.tractorId} onChange={(e) => actualizar(l.key, { tractorId: e.target.value })}>
+                    <option value="">Selecciona…</option>
+                    {tractores.map((eq) => (
+                      <option key={eq.id} value={eq.id}>
+                        {eq.folio} {eq.marca ?? ""}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field">
+                  Operador
+                  <select value={l.operadorId} onChange={(e) => actualizar(l.key, { operadorId: e.target.value })}>
+                    <option value="">Selecciona…</option>
+                    {personal.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.nombreCompleto}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field">
+                  Implemento
+                  <select value={l.implementoId} onChange={(e) => actualizar(l.key, { implementoId: e.target.value })}>
+                    <option value="">Selecciona…</option>
+                    {implementos.map((eq) => (
+                      <option key={eq.id} value={eq.id}>
+                        {eq.folio} {eq.marca ?? ""}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            )}
+
+            {l.modalidad !== "turbina" && (
+              <div>
+                <div style={{ fontSize: 11, color: "var(--ink-soft)", marginBottom: 4 }}>
+                  {l.modalidad === "mochila" ? "Personas de esta línea" : "Personas detrás del tractor"}
+                </div>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 6 }}>
+                  {l.personalIds.map((id) => {
+                    const p = personal.find((x) => x.id === id);
+                    return (
+                      <span key={id} className="tag tag-neutral" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        {p?.nombreCompleto ?? id}
+                        <button
+                          type="button"
+                          onClick={() => quitarPersona(l.key, id)}
+                          style={{ border: "none", background: "none", cursor: "pointer", padding: 0, fontWeight: 700 }}
+                        >
+                          ×
+                        </button>
+                      </span>
+                    );
+                  })}
+                </div>
+                <select value="" onChange={(e) => agregarPersona(l.key, e.target.value)}>
+                  <option value="">+ Agregar persona…</option>
+                  {personal
+                    .filter((p) => !l.personalIds.includes(p.id))
+                    .map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.nombreCompleto}
+                      </option>
+                    ))}
+                </select>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+      <button className="btn-secondary" style={{ marginTop: 8 }} onClick={agregarLinea}>
+        + Otra línea
+      </button>
     </div>
   );
 }

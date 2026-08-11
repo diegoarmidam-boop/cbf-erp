@@ -7,6 +7,7 @@ import {
   cotizarOrden,
   crearOrdenManual,
   listarOrdenes,
+  marcarOrdenPagada,
   ProductoNoAutorizadoError,
   recibirOrden,
   rechazarOrden,
@@ -87,6 +88,11 @@ ordenesRouter.post("/:id/cotizar", requirePermission("compras", "capturar"), asy
     }
     throw err;
   }
+});
+
+// CxP (9.14): confirmación manual de pago — Encargado de Compras (editar) o quien autoriza gasto (Gerencia/Director).
+ordenesRouter.post("/:id/marcar-pagada", requirePermissionAny(["compras", "editar"], ["compras", "autoriza"]), async (req, res) => {
+  res.json(await marcarOrdenPagada(unoSolo(req.params.id)));
 });
 
 const recibirSchema = z.object({ cantidadRecibida: z.number().positive(), lote: z.string().optional(), fechaCaducidad: z.string().optional() });

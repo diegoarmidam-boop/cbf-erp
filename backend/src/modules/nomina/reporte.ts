@@ -13,7 +13,7 @@ export interface FilaReporteSemanal {
   bonos: number;
   descuentoPrestamos: number;
   neto: number;
-  prestamosAplicados: { prestamoId: string; monto: number }[];
+  prestamosAplicados: { prestamoId: string; monto: number; yaAplicado: boolean }[];
 }
 
 export interface ReporteNominaSemanal {
@@ -35,14 +35,26 @@ export async function generarReporteNominaSemanal(hoy: FechaISO): Promise<Report
       persona.tipo === "fijo" && persona.puesto ? fijoDebePagarseEnPeriodo(persona.puesto.periodicidad, periodo, semanaInfo) : false;
     const bonos = await totalBonosAutorizadosPersonaEnPeriodo(persona.id, periodo.inicio, periodo.fin);
 
-    const prestamosActivos = await prisma.prestamo.findMany({ where: { personalId: persona.id, activo: true } });
-    const prestamosQueAplican = prestamosActivos.filter((pr) =>
-      prestamoAplicaEnPeriodo(pr.proximoDescuento.toISOString().slice(0, 10), periodo.fin)
-    );
-    const prestamosAplicados = prestamosQueAplican.map((pr) => ({
-      prestamoId: pr.id,
-      monto: Math.min(Number(pr.montoPorDescuento), Number(pr.saldoPendiente)),
-    }));
+    // Bug corregido (8-ago-2026): antes esto era pura proyección a partir de
+    // proximoDescuento — en cuanto se aplicaba de verdad, proximoDescuento
+    // avanzaba al siguiente periodo y el descuento "desaparecía" del reporte
+    // de ESTE periodo (columna quedaba en $0.00). Ahora primero se busca si
+    // ya existe un PrestamoDescuento real para este periodo exacto (lo que
+    // de verdad se descontó) y solo se recurre a la proyección si todavía
+    // no se ha aplicado.
+    const prestamosDelPersona = await prisma.prestamo.findMany({
+      where: { personalId: persona.id },
+      include: { descuentos: { where: { periodoFin: new Date(periodo.fin) } } },
+    });
+    const prestamosAplicados: { prestamoId: string; monto: number; yaAplicado: boolean }[] = [];
+    for (const pr of prestamosDelPersona) {
+      const descuentoExistente = pr.descuentos[0];
+      if (descuentoExistente) {
+        prestamosAplicados.push({ prestamoId: pr.id, monto: Number(descuentoExistente.monto), yaAplicado: true });
+      } else if (pr.activo && prestamoAplicaEnPeriodo(pr.proximoDescuento.toISOString().slice(0, 10), periodo.fin)) {
+        prestamosAplicados.push({ prestamoId: pr.id, monto: Math.min(Number(pr.montoPorDescuento), Number(pr.saldoPendiente)), yaAplicado: false });
+      }
+    }
     const descuentoPrestamos = prestamosAplicados.reduce((s, p) => s + p.monto, 0);
 
     const { bruto, neto } = calcularFilaNominaSemanal({
@@ -83,6 +95,7 @@ export async function confirmarNominaSemanal(hoy: FechaISO, confirmadoPorId: str
   const reporte = await generarReporteNominaSemanal(hoy);
   for (const fila of reporte.filas) {
     for (const p of fila.prestamosAplicados) {
+      if (p.yaAplicado) continue; // ya se descontó antes (ej. por el botón individual de Préstamos) — no se vuelve a aplicar
       await aplicarDescuento(p.prestamoId, confirmadoPorId, reporte.periodo.fin);
     }
   }

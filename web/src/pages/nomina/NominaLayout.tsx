@@ -3,6 +3,7 @@ import { NavLink, Outlet } from "react-router-dom";
 const TABS = [
   { to: "captura", label: "Captura del día" },
   { to: "cierre", label: "Cierre del día" },
+  { to: "grupos", label: "Grupos de Pago" },
   { to: "asistencia", label: "Asistencia" },
   { to: "prestamos", label: "Préstamos" },
   { to: "bonos", label: "Bonos" },

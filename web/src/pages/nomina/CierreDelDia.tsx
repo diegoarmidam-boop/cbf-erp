@@ -1,53 +1,237 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { api, ApiError } from "../../lib/api";
+import { useAuth } from "../../lib/auth";
 import { useHuertas } from "../../lib/useHuertas";
-import type { DiaPendiente } from "../../lib/types";
+import type { CapturaHuertaTodasUPs, DiaCerradoInfo, ResumenCierreHuerta } from "../../lib/types";
+import FechaInput from "../../components/FechaInput";
+import { formatearFecha } from "../../lib/fecha";
 
-function tagEstado(estado: DiaPendiente["estado"]) {
+const ROLES_EDITAR_NOMINA = ["director_general", "recursos_humanos", "encargado_nominas", "gerente_administrativo"];
+
+function hoyISO(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function tagEstadoPlazo(estado: ResumenCierreHuerta["estadoPlazo"]) {
   if (estado === "al_corriente") return <span className="tag tag-success">Al corriente</span>;
   if (estado === "vence_hoy") return <span className="tag tag-warning">Vence hoy</span>;
   return <span className="tag tag-danger">Vencido</span>;
 }
 
 export default function CierreDelDia() {
-  const { huertas, cargando: cargandoHuertas } = useHuertas();
+  const { usuario } = useAuth();
+  const { huertas } = useHuertas();
+  const puedeVerCerrados = usuario ? ROLES_EDITAR_NOMINA.includes(usuario.rol) : false;
+
+  const [fecha, setFecha] = useState(hoyISO());
+  const [resumen, setResumen] = useState<ResumenCierreHuerta[]>([]);
+  const [cargando, setCargando] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const [huertaDetalle, setHuertaDetalle] = useState<{ id: string; nombre: string } | null>(null);
+
+  const [mostrarCerrados, setMostrarCerrados] = useState(false);
+
+  function cargarResumen() {
+    if (!fecha) return;
+    setCargando(true);
+    setError(null);
+    api
+      .get<ResumenCierreHuerta[]>(`/nomina/cierre/resumen/${fecha}`)
+      .then(setResumen)
+      .catch((err) => setError(err instanceof ApiError ? err.message : "No se pudo cargar."))
+      .finally(() => setCargando(false));
+  }
+
+  useEffect(cargarResumen, [fecha]);
+
+  if (huertaDetalle) {
+    return (
+      <DetalleCierre
+        huerta={huertaDetalle}
+        fecha={fecha}
+        onVolver={() => {
+          setHuertaDetalle(null);
+          cargarResumen();
+        }}
+      />
+    );
+  }
+
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 12, marginBottom: 16, alignItems: "flex-end", flexWrap: "wrap" }}>
+        <label className="field" style={{ maxWidth: 180 }}>
+          Fecha
+          <FechaInput value={fecha} onChange={setFecha} />
+        </label>
+        {puedeVerCerrados && (
+          <button className="btn-secondary" onClick={() => setMostrarCerrados((v) => !v)}>
+            {mostrarCerrados ? "Ocultar días cerrados" : "Ver días cerrados"}
+          </button>
+        )}
+      </div>
+
+      {error && <div className="tag tag-danger" style={{ display: "block", padding: "8px 12px", marginBottom: 12 }}>{error}</div>}
+
+      {mostrarCerrados && puedeVerCerrados && <DiasCerradosLista huertas={huertas} />}
+
+      {cargando ? (
+        <p>Cargando…</p>
+      ) : resumen.length === 0 ? (
+        <p style={{ color: "var(--ink-soft)" }}>No hay nada capturado en ninguna Huerta para este día.</p>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {resumen.map((r) => (
+            <div key={r.huerta.id} className="card" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
+              <div>
+                <div style={{ fontWeight: 600, fontSize: 13.5, marginBottom: 6 }}>
+                  {r.huerta.nombre} {r.cerrado ? <span className="tag tag-neutral">Cerrado</span> : tagEstadoPlazo(r.estadoPlazo)}
+                </div>
+                <div style={{ fontSize: 12, color: "var(--ink-soft)" }}>
+                  {r.cantidadPersonas} personas · {r.totalActividades} actividades · Total bruto ${r.totalBruto.toFixed(2)}
+                </div>
+              </div>
+              <button className="btn-primary" onClick={() => setHuertaDetalle(r.huerta)}>
+                Ver detalle
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DetalleCierre({ huerta, fecha, onVolver }: { huerta: { id: string; nombre: string }; fecha: string; onVolver: () => void }) {
+  const [datos, setDatos] = useState<Omit<CapturaHuertaTodasUPs, "huerta"> | null>(null);
+  const [cargando, setCargando] = useState(true);
+  const [cerrando, setCerrando] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  function cargar() {
+    setCargando(true);
+    api
+      .get<Omit<CapturaHuertaTodasUPs, "huerta">>(`/nomina/captura/${huerta.id}/${fecha}`)
+      .then(setDatos)
+      .catch((err) => setError(err instanceof ApiError ? err.message : "No se pudo cargar."))
+      .finally(() => setCargando(false));
+  }
+
+  useEffect(cargar, [huerta.id, fecha]);
+
+  async function cerrarDia() {
+    if (!confirm(`¿Cerrar el día ${formatearFecha(fecha)} de ${huerta.nombre}? Ya no se podrán editar las capturas después.`)) return;
+    setCerrando(true);
+    setError(null);
+    try {
+      await api.post(`/nomina/cierre/${huerta.id}/${fecha}`);
+      onVolver();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "No se pudo cerrar el día.");
+    } finally {
+      setCerrando(false);
+    }
+  }
+
+  const porPersona = new Map<string, { nombre: string; lineas: typeof datos extends null ? never : NonNullable<typeof datos>["registros"] }>();
+  if (datos) {
+    for (const r of datos.registros) {
+      const key = r.personalId ? `p:${r.personalId}` : `g:${r.grupoId}`;
+      const nombre = r.personalId ? r.personal?.nombreCompleto ?? "—" : "Grupo";
+      if (!porPersona.has(key)) porPersona.set(key, { nombre, lineas: [] });
+      porPersona.get(key)!.lineas.push(r);
+    }
+  }
+
+  return (
+    <div>
+      <button className="btn-secondary" onClick={onVolver} style={{ marginBottom: 14 }}>
+        ← Volver al resumen
+      </button>
+      <h3 style={{ marginBottom: 4 }}>
+        {huerta.nombre} — {formatearFecha(fecha)}
+      </h3>
+      {datos?.cerrado && <span className="tag tag-neutral">Este día ya está cerrado</span>}
+
+      {error && <div className="tag tag-danger" style={{ display: "block", padding: "8px 12px", margin: "12px 0" }}>{error}</div>}
+
+      {cargando ? (
+        <p>Cargando…</p>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 14 }}>
+          {[...porPersona.entries()].map(([key, p]) => (
+            <div key={key} className="card">
+              <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>{p.nombre}</div>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Actividad</th>
+                    <th>Cantidad</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {p.lineas.map((l) => (
+                    <tr key={l.id}>
+                      <td>
+                        {l.actividad.nombre}
+                        {l.origen !== "manual" && <span className="tag tag-neutral" style={{ marginLeft: 6 }}>Automático</span>}
+                      </td>
+                      <td>
+                        {l.cantidad} {l.actividad.unidad}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ))}
+          {porPersona.size === 0 && <p style={{ color: "var(--ink-soft)" }}>Sin capturas ese día.</p>}
+        </div>
+      )}
+
+      {!datos?.cerrado && (
+        <div style={{ marginTop: 18 }}>
+          <button className="btn-primary" onClick={cerrarDia} disabled={cerrando || cargando}>
+            {cerrando ? "Cerrando…" : "Cerrar día"}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DiasCerradosLista({ huertas }: { huertas: { id: string; nombre: string }[] }) {
   const [huertaId, setHuertaId] = useState("");
-  const [pendientes, setPendientes] = useState<DiaPendiente[]>([]);
-  const [cargando, setCargando] = useState(false);
+  const [dias, setDias] = useState<DiaCerradoInfo[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!huertaId && huertas.length > 0) setHuertaId(huertas[0]!.id);
   }, [huertas, huertaId]);
 
-  function cargarPendientes() {
+  function cargar() {
     if (!huertaId) return;
-    setCargando(true);
-    api
-      .get<DiaPendiente[]>(`/nomina/cierre/pendientes?huertaId=${huertaId}`)
-      .then(setPendientes)
-      .catch((err) => setError(err instanceof ApiError ? err.message : "No se pudo cargar."))
-      .finally(() => setCargando(false));
+    api.get<DiaCerradoInfo[]>(`/nomina/cierre/cerrados?huertaId=${huertaId}`).then(setDias);
   }
 
-  useEffect(cargarPendientes, [huertaId]);
+  useEffect(cargar, [huertaId]);
 
-  async function cerrar(fecha: string) {
+  async function reabrir(fecha: string) {
+    if (!confirm(`¿Reabrir el día ${formatearFecha(fecha)}? Se podrá volver a editar la captura hasta que se cierre de nuevo.`)) return;
     setError(null);
     try {
-      await api.post(`/nomina/cierre/${huertaId}/${fecha}`);
-      cargarPendientes();
+      await api.delete(`/nomina/cierre/${huertaId}/${fecha}`);
+      cargar();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "No se pudo cerrar el día.");
+      setError(err instanceof ApiError ? err.message : "No se pudo reabrir.");
     }
   }
 
-  if (cargandoHuertas) return <p>Cargando…</p>;
-  if (huertas.length === 0) return <p style={{ color: "var(--ink-soft)" }}>No hay Huertas dadas de alta todavía.</p>;
-
   return (
-    <div>
-      <label className="field" style={{ marginBottom: 16, maxWidth: 260 }}>
+    <div className="card" style={{ marginBottom: 16 }}>
+      <label className="field" style={{ maxWidth: 240, marginBottom: 10 }}>
         Huerta
         <select value={huertaId} onChange={(e) => setHuertaId(e.target.value)}>
           {huertas.map((h) => (
@@ -57,39 +241,39 @@ export default function CierreDelDia() {
           ))}
         </select>
       </label>
-
-      {error && <div className="tag tag-danger" style={{ display: "block", padding: "8px 12px", marginBottom: 12 }}>{error}</div>}
-
-      <div className="card">
-        {cargando ? (
-          <p>Cargando…</p>
-        ) : pendientes.length === 0 ? (
-          <p style={{ color: "var(--ink-soft)" }}>No hay días pendientes de cerrar en esta Huerta.</p>
-        ) : (
-          <table>
-            <thead>
-              <tr>
-                <th>Fecha</th>
-                <th>Plazo</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {pendientes.map((d) => (
-                <tr key={d.fecha}>
-                  <td>{d.fecha}</td>
-                  <td>{tagEstado(d.estado)}</td>
-                  <td>
-                    <button className="btn-primary" onClick={() => cerrar(d.fecha)}>
-                      Cerrar día
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
+      {error && <div className="tag tag-danger" style={{ display: "block", padding: "8px 12px", marginBottom: 10 }}>{error}</div>}
+      <table>
+        <thead>
+          <tr>
+            <th>Fecha</th>
+            <th>Cerrado por</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {dias.map((d) => (
+            <tr key={d.fecha}>
+              <td>{formatearFecha(d.fecha)}</td>
+              <td>{d.cerradoPorNombre}</td>
+              <td style={{ display: "flex", gap: 6 }}>
+                <Link to={`/nomina/captura?fecha=${d.fecha}`} className="btn-secondary">
+                  Ir a corregir
+                </Link>
+                <button className="btn-secondary" onClick={() => reabrir(d.fecha)}>
+                  Reabrir
+                </button>
+              </td>
+            </tr>
+          ))}
+          {dias.length === 0 && (
+            <tr>
+              <td colSpan={3} style={{ textAlign: "center", color: "var(--ink-soft)" }}>
+                Sin días cerrados en esta Huerta.
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
     </div>
   );
 }

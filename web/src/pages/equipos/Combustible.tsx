@@ -4,6 +4,8 @@ import { useProductos } from "../../lib/useProductos";
 import { useEquipos } from "../../lib/useEquipos";
 import { useEquipoSeleccionado } from "./EquipoSeleccionadoContext";
 import type { AlertaRendimiento, CombustibleCarga } from "../../lib/types";
+import FechaInput from "../../components/FechaInput";
+import { formatearFecha } from "../../lib/fecha";
 
 function hoyISO(): string {
   return new Date().toISOString().slice(0, 10);
@@ -77,7 +79,7 @@ export default function Combustible() {
       <form onSubmit={onSubmit} className="card" style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 18 }}>
         <label className="field">
           Fecha
-          <input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} required />
+          <FechaInput value={fecha} onChange={setFecha} required />
         </label>
         <label className="field">
           Tipo
@@ -140,7 +142,7 @@ export default function Combustible() {
         <tbody>
           {cargas.map((c) => (
             <tr key={c.id}>
-              <td>{c.fecha.slice(0, 10)}</td>
+              <td>{formatearFecha(c.fecha)}</td>
               <td>{c.tipo}</td>
               <td>{c.odometro ?? c.horometro ?? "—"}</td>
               <td>{c.litros}</td>

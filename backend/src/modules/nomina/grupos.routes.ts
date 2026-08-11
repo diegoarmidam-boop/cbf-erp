@@ -3,20 +3,14 @@ import { z } from "zod";
 import { prisma } from "../../core/db.js";
 import { requireAuth, requirePermission, requirePermissionAny } from "../../middleware/auth.js";
 import { unoSolo } from "../../core/http.js";
-import { agregarMiembroAGrupo, miembrosDeGrupoEnFecha, quitarMiembroDeGrupo } from "./grupos.js";
+import { agregarMiembroAGrupo, checklistDiaDeGrupo, guardarAsistenciaDia, miembrosDeGrupoEnFecha, quitarMiembroDeGrupo } from "./grupos.js";
 
 export const gruposRouter = Router();
 gruposRouter.use(requireAuth);
 
-// Ver la lista de grupos hace falta tanto para quien solo consulta (ver)
-// como para quien captura la Huerta día a día (capturar, ej. Supervisor).
+// Catálogo global (9.11) — ya no se filtra por Huerta.
 gruposRouter.get("/", requirePermissionAny(["nomina", "ver"], ["nomina", "capturar"]), async (req, res) => {
-  const huertaId = String(req.query.huertaId ?? "");
-  if (!huertaId) {
-    res.status(400).json({ error: "huertaId es requerido." });
-    return;
-  }
-  const grupos = await prisma.grupoPago.findMany({ where: { huertaId } });
+  const grupos = await prisma.grupoPago.findMany({ orderBy: { nombre: "asc" } });
   const fecha = typeof req.query.fecha === "string" ? req.query.fecha : undefined;
   const conMiembros = await Promise.all(
     grupos.map(async (g) => ({
@@ -28,7 +22,6 @@ gruposRouter.get("/", requirePermissionAny(["nomina", "ver"], ["nomina", "captur
 });
 
 const crearGrupoSchema = z.object({
-  huertaId: z.string().min(1),
   nombre: z.string().optional(),
   persistente: z.boolean().default(true),
   fecha: z.string(), // fecha del primer miembro / creación (YYYY-MM-DD)
@@ -41,8 +34,8 @@ gruposRouter.post("/", requirePermission("nomina", "capturar"), async (req, res)
     res.status(400).json({ error: parsed.error.message });
     return;
   }
-  const { huertaId, nombre, persistente, fecha, miembros } = parsed.data;
-  const grupo = await prisma.grupoPago.create({ data: { huertaId, nombre, persistente } });
+  const { nombre, persistente, fecha, miembros } = parsed.data;
+  const grupo = await prisma.grupoPago.create({ data: { nombre, persistente } });
   for (const personalId of miembros) {
     await agregarMiembroAGrupo(grupo.id, personalId, fecha);
   }
@@ -67,6 +60,25 @@ gruposRouter.delete("/:id/miembros/:personalId", requirePermission("nomina", "ca
   res.status(204).end();
 });
 
+// Asistencia dinámica y sustitución (9.11): checklist editable del día, sin tocar todavía el roster fijo.
+gruposRouter.get("/:id/asistencia/:fecha", requirePermissionAny(["nomina", "ver"], ["nomina", "capturar"]), async (req, res) => {
+  res.json(await checklistDiaDeGrupo(unoSolo(req.params.id), unoSolo(req.params.fecha)));
+});
+
+const asistenciaDiaSchema = z.object({
+  marcas: z.array(z.object({ personalId: z.string().min(1), tipo: z.enum(["ausente", "sustituto"]) })),
+});
+
+gruposRouter.post("/:id/asistencia/:fecha", requirePermission("nomina", "capturar"), async (req, res) => {
+  const parsed = asistenciaDiaSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+  await guardarAsistenciaDia(unoSolo(req.params.id), unoSolo(req.params.fecha), parsed.data.marcas, req.usuario!.usuarioId);
+  res.status(204).end();
+});
+
 // Solo se puede borrar un grupo que nunca se usó en una captura — si ya
 // tiene RegistroNomina ligado, el historial depende de él (referencia por
 // id), así que se bloquea en vez de romper esos registros.
@@ -77,6 +89,7 @@ gruposRouter.delete("/:id", requirePermission("nomina", "capturar"), async (req,
     res.status(409).json({ error: "Este grupo ya se usó en una captura de Nómina — no se puede borrar." });
     return;
   }
+  await prisma.grupoAsistenciaDia.deleteMany({ where: { grupoId: id } });
   await prisma.grupoMiembro.deleteMany({ where: { grupoId: id } });
   await prisma.grupoPago.delete({ where: { id } });
   res.status(204).end();

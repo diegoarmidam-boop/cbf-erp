@@ -22,7 +22,7 @@ export class TransicionInvalidaError extends Error {
 export function listarOrdenes(estado?: string) {
   return prisma.ordenCompra.findMany({
     where: { estado: estado as never },
-    include: { producto: true, proveedor: true },
+    include: { producto: true, proveedor: true, recepciones: true },
     orderBy: { fechaCreacion: "desc" },
   });
 }
@@ -79,8 +79,14 @@ export async function cotizarOrden(id: string, proveedorId: string, precioUnitar
       proveedorId,
       precioUnitario,
       fechaEsperada: fechaEsperada ? new Date(fechaEsperada) : undefined,
+      fechaFormalizacion: new Date(),
     },
   });
+}
+
+/** CxP (9.14): botón manual — no hay conciliación bancaria automática, Gerencia confirma que ya se pagó. */
+export function marcarOrdenPagada(id: string) {
+  return prisma.ordenCompra.update({ where: { id }, data: { pagada: true, fechaPago: new Date() } });
 }
 
 /**

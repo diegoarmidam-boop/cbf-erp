@@ -2,6 +2,7 @@ import { useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import { ApiError } from "../lib/api";
+import logoChula from "../assets/logo-chula-brand.jpg";
 
 export default function Login() {
   const { login } = useAuth();
@@ -40,7 +41,8 @@ export default function Login() {
         className="card"
         style={{ width: 320, display: "flex", flexDirection: "column", gap: 14 }}
       >
-        <div>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", gap: 6 }}>
+          <img src={logoChula} alt="Chula Brand" style={{ width: 84, height: "auto" }} />
           <h1 style={{ fontSize: 22, color: "var(--wine)" }}>CHULA</h1>
           <div style={{ fontSize: 11, letterSpacing: "0.1em", color: "var(--ink-soft)" }}>BRAND — ERP</div>
         </div>

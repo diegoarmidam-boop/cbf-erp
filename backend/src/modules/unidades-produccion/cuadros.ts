@@ -7,7 +7,6 @@ export interface VersionCuadroInput {
   fechaSiembra?: string;
   distSurcosM?: number;
   distPlantasM?: number;
-  variedad?: string;
 }
 
 export function listarCuadros(huertaId: string) {
@@ -26,7 +25,6 @@ export async function crearCuadro(huertaId: string, nombre: string, version: Ver
         fechaSiembra: version.fechaSiembra ? new Date(version.fechaSiembra) : undefined,
         distSurcosM: version.distSurcosM,
         distPlantasM: version.distPlantasM,
-        variedad: version.variedad,
       },
     });
     return cuadro;
@@ -34,9 +32,9 @@ export async function crearCuadro(huertaId: string, nombre: string, version: Ver
 }
 
 /**
- * Un cambio de configuración (recalle, ajuste de calles, replanteo de
- * variedad) no sobreescribe la versión vigente — la cierra y abre una
- * nueva, para conservar el historial por fecha (9.1).
+ * Un cambio de configuración (recalle, ajuste de calles) no sobreescribe
+ * la versión vigente — la cierra y abre una nueva, para conservar el
+ * historial por fecha (9.1).
  */
 export async function actualizarConfiguracionCuadro(cuadroId: string, version: VersionCuadroInput, vigenteDesde: string) {
   return prisma.$transaction(async (tx) => {
@@ -55,7 +53,6 @@ export async function actualizarConfiguracionCuadro(cuadroId: string, version: V
         fechaSiembra: version.fechaSiembra ? new Date(version.fechaSiembra) : undefined,
         distSurcosM: version.distSurcosM,
         distPlantasM: version.distPlantasM,
-        variedad: version.variedad,
       },
     });
   });

@@ -2,6 +2,8 @@ import { useState, type FormEvent } from "react";
 import { api, ApiError } from "../../lib/api";
 import { useProductos } from "../../lib/useProductos";
 import { useHuertas } from "../../lib/useHuertas";
+import { presentacionTexto } from "../../lib/producto";
+import FechaInput from "../../components/FechaInput";
 
 type Accion = "entrada" | "entregar" | "salida";
 type TipoSalida = "prestamo_rancho" | "merma" | "baja_caducidad" | "abono_sobrante" | "ajuste_manual";
@@ -72,7 +74,7 @@ export default function Movimientos() {
             <option value="">Selecciona…</option>
             {productos.map((p) => (
               <option key={p.id} value={p.id}>
-                {p.nombreComercial} ({p.presentacion})
+                {p.nombreComercial} ({presentacionTexto(p)})
               </option>
             ))}
           </select>
@@ -90,7 +92,7 @@ export default function Movimientos() {
             </label>
             <label className="field">
               Caducidad
-              <input type="date" value={fechaCaducidad} onChange={(e) => setFechaCaducidad(e.target.value)} />
+              <FechaInput value={fechaCaducidad} onChange={setFechaCaducidad} />
             </label>
           </>
         )}

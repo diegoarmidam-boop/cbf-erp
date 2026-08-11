@@ -2,6 +2,9 @@ import { useEffect, useState, type FormEvent } from "react";
 import { api, ApiError } from "../../lib/api";
 import { useHuertas } from "../../lib/useHuertas";
 import type { ConcentracionUnidad, FertirriegoProgramacion, FrecuenciaFertirriego, Producto, SeccionRiego } from "../../lib/types";
+import FechaInput from "../../components/FechaInput";
+import { formatearFecha } from "../../lib/fecha";
+import { presentacionTexto } from "../../lib/producto";
 
 const ETIQUETAS_ESTADO: Record<string, string> = {
   programada: "Programada",
@@ -157,7 +160,7 @@ export default function Fertirriego() {
                 <option value="">Selecciona…</option>
                 {productos.map((p) => (
                   <option key={p.id} value={p.id}>
-                    {p.nombreComercial} ({p.presentacion})
+                    {p.nombreComercial} ({presentacionTexto(p)})
                   </option>
                 ))}
               </select>
@@ -210,11 +213,11 @@ export default function Fertirriego() {
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
             <label className="field">
               Fecha inicio
-              <input type="date" value={fechaInicio} onChange={(e) => setFechaInicio(e.target.value)} required />
+              <FechaInput value={fechaInicio} onChange={setFechaInicio} required />
             </label>
             <label className="field">
               Fecha fin
-              <input type="date" value={fechaFin} onChange={(e) => setFechaFin(e.target.value)} required />
+              <FechaInput value={fechaFin} onChange={setFechaFin} required />
             </label>
             <button className="btn-primary" type="submit">
               Programar
@@ -245,7 +248,7 @@ export default function Fertirriego() {
                   </div>
                   <div style={{ fontSize: 12, color: "var(--ink-soft)" }}>
                     {f.dosisValor} {f.dosisUnidad.replace("_", "/")} · {f.litrosAguaPorHa} L agua/ha · {ETIQUETAS_FRECUENCIA[f.frecuencia]} ·{" "}
-                    {f.fechaInicio.slice(0, 10)} a {f.fechaFin.slice(0, 10)}
+                    {formatearFecha(f.fechaInicio)} a {formatearFecha(f.fechaFin)}
                   </div>
                 </div>
 

@@ -20,7 +20,8 @@ const altaSchema = z.object({
   categoria: z.string().min(1),
   ingredienteActivo: z.string().optional(),
   nombreComercial: z.string().min(1),
-  presentacion: z.string().min(1),
+  contenedor: z.string().min(1),
+  presentacionCantidad: z.number().positive(),
   unidad: z.string().min(1),
   requiereLote: z.boolean(),
 });

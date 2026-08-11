@@ -22,7 +22,6 @@ export interface CuadroVersion {
   fechaSiembra: string | null;
   distSurcosM: string | null;
   distPlantasM: string | null;
-  variedad: string | null;
 }
 
 export interface Cuadro {
@@ -137,10 +136,26 @@ export interface Actividad {
 
 export interface GrupoPago {
   id: string;
-  huertaId: string;
   nombre: string | null;
   persistente: boolean;
   miembrosHoy?: string[];
+}
+
+export type TipoAsistenciaGrupoDia = "ausente" | "sustituto";
+
+export interface GrupoAsistenciaDia {
+  id: string;
+  grupoId: string;
+  fecha: string;
+  personalId: string;
+  personal: Personal;
+  tipo: TipoAsistenciaGrupoDia;
+  registradoPorId: string;
+}
+
+export interface ChecklistDiaGrupo {
+  roster: Personal[];
+  marcas: GrupoAsistenciaDia[];
 }
 
 export interface FilaCaptura {
@@ -152,12 +167,30 @@ export interface FilaCaptura {
   cantidad: number | null;
 }
 
+export type OrigenRegistroNomina =
+  | "manual"
+  | "automatico_aplicacion"
+  | "automatico_fertilizacion"
+  | "automatico_cosecha"
+  | "automatico_empaque";
+
 export interface RegistroNomina extends FilaCaptura {
   id: string;
+  huertaId: string;
   actividad: Actividad;
+  personal?: Personal | null;
+  cuadro?: Cuadro | null;
+  origen: OrigenRegistroNomina;
 }
 
 export interface CapturaDelDiaResponse {
+  registros: RegistroNomina[];
+  cerrado: boolean;
+  sugerencia: FilaCaptura[];
+}
+
+export interface CapturaHuertaTodasUPs {
+  huerta: Huerta;
   registros: RegistroNomina[];
   cerrado: boolean;
   sugerencia: FilaCaptura[];
@@ -168,6 +201,20 @@ export type EstadoPlazo = "al_corriente" | "vence_hoy" | "vencido";
 export interface DiaPendiente {
   fecha: string;
   estado: EstadoPlazo;
+}
+
+export interface ResumenCierreHuerta {
+  huerta: { id: string; nombre: string };
+  cantidadPersonas: number;
+  totalActividades: number;
+  totalBruto: number;
+  cerrado: boolean;
+  estadoPlazo: EstadoPlazo;
+}
+
+export interface DiaCerradoInfo {
+  fecha: string;
+  cerradoPorNombre: string;
 }
 
 export interface Prestamo {
@@ -248,10 +295,17 @@ export interface Producto {
   categoria: string;
   ingredienteActivo: string | null;
   nombreComercial: string;
-  presentacion: string;
+  contenedor: string;
+  presentacionCantidad: string;
   unidad: string;
   requiereLote: boolean;
   autorizado: boolean;
+  activo: boolean;
+}
+
+export interface CatalogoAbiertoItem {
+  id: string;
+  nombre: string;
   activo: boolean;
 }
 
@@ -270,7 +324,8 @@ export type TipoMovimientoAlmacenCentral =
   | "merma"
   | "baja_caducidad"
   | "abono_sobrante"
-  | "ajuste_manual";
+  | "ajuste_manual"
+  | "consumo_maquinaria";
 
 export interface MovimientoAlmacenCentral {
   id: string;
@@ -313,11 +368,22 @@ export interface SolicitudPendiente {
   fechaPropuesta: string;
 }
 
+export interface Notificacion {
+  id: string;
+  tipo: string;
+  titulo: string;
+  detalle: string;
+  urgente: boolean;
+  fecha: string;
+  enlace: string;
+}
+
 export interface Proveedor {
   id: string;
   nombre: string;
   creditoMonto: string | null;
   creditoVencimiento: string | null;
+  diasCredito: number | null;
   activo: boolean;
 }
 
@@ -328,6 +394,14 @@ export interface MejorProveedor {
 }
 
 export type EstadoOrdenCompra = "pendiente_autorizar" | "pendiente_cotizar" | "generada" | "recibida" | "rechazada";
+
+export interface OrdenCompraRecepcion {
+  id: string;
+  cantidadRecibida: string;
+  lote: string | null;
+  fechaCaducidad: string | null;
+  fechaRecepcion: string;
+}
 
 export interface OrdenCompra {
   id: string;
@@ -342,6 +416,58 @@ export interface OrdenCompra {
   fechaEsperada: string | null;
   motivoRechazo: string | null;
   fechaCreacion: string;
+  fechaFormalizacion: string | null;
+  pagada: boolean;
+  fechaPago: string | null;
+  recepciones: OrdenCompraRecepcion[];
+}
+
+export interface OrdenCxP {
+  id: string;
+  producto: { nombreComercial: string };
+  proveedor: { id: string; nombre: string; diasCredito: number };
+  precioUnitario: string | null;
+  cantidadSolicitada: string;
+  fechaFormalizacion: string;
+  fechaLimitePago: string;
+  viernesDePago: string;
+  alertaVisible: boolean;
+}
+
+export interface ComparacionResumen {
+  id: string;
+  nombre: string | null;
+  fechaCreacion: string;
+  items: { producto: { nombreComercial: string } }[];
+}
+
+export interface CotizacionCalculada {
+  id: string;
+  proveedor: { id: string; nombre: string };
+  precioPresentacion: number;
+  cantidadPresentacion: number;
+  unidadPresentacion: string;
+  unidadesAPedir: number;
+  cantidadComprada: number;
+  precioFinal: number;
+  porcentajeAprovechamiento: number;
+  recomendado: boolean;
+}
+
+export interface ItemCalculado {
+  id: string;
+  producto: { id: string; nombreComercial: string };
+  cantidadNecesaria: number;
+  unidad: string;
+  cotizaciones: CotizacionCalculada[];
+  recomendacion: { proveedorId: string; proveedorNombre: string; ahorro: number } | null;
+}
+
+export interface ComparacionCalculada {
+  id: string;
+  nombre: string | null;
+  fechaCreacion: string;
+  items: ItemCalculado[];
 }
 
 export type TipoEquipo = "tractor" | "camioneta" | "remolque" | "implemento";
@@ -416,14 +542,43 @@ export type RecursoTipo = "gente" | "implemento";
 export type ConcentracionUnidad = "ml_l" | "g_l" | "kg_l";
 export type EstadoAplicacion = "programada" | "entregada" | "realizada" | "vencida" | "cancelada";
 
+// Modalidad real de ejecución de una Aplicación (9.7, 8-ago-2026) — exclusivo
+// de Aplicaciones, Fertilización Granular conserva RecursoTipo sin cambios.
+export type ModalidadAplicacion = "mochila" | "turbina" | "aguilon";
+
+export interface RealizadaCuadro {
+  id: string;
+  cuadroId: string;
+  cuadro: Cuadro;
+  hectareas: string;
+}
+
+export interface LineaRealizadaPersona {
+  personalId: string;
+  personal: Personal;
+}
+
+export interface AplicacionRealizadaLinea {
+  id: string;
+  realizadaId: string;
+  modalidad: ModalidadAplicacion;
+  tractorId: string | null;
+  tractor: Equipo | null;
+  operadorId: string | null;
+  operador: Personal | null;
+  implementoId: string | null;
+  implemento: Equipo | null;
+  horas: string;
+  personas: LineaRealizadaPersona[];
+}
+
 export interface AplicacionRealizada {
   id: string;
   aplicacionId: string;
-  personalId: string | null;
-  grupoId: string | null;
-  horas: string;
   fechaReal: string;
   registradoPorId: string;
+  cuadros: RealizadaCuadro[];
+  lineas: AplicacionRealizadaLinea[];
 }
 
 export interface Aplicacion {
@@ -432,17 +587,20 @@ export interface Aplicacion {
   huerta: Huerta;
   productoId: string;
   producto: Producto;
-  recursoTipo: RecursoTipo;
-  equipoId: string | null;
-  equipo: Equipo | null;
+  recursoSugerido: ModalidadAplicacion;
   concentracionValor: string;
   concentracionUnidad: ConcentracionUnidad;
   litrosMezclaPorHa: string;
   fechaInicio: string;
   fechaFin: string;
   cantidadTotalCalculada: string;
+  hectareasTotalesProgramadas: string;
   estado: EstadoAplicacion;
   fechaCreacion: string;
+  canceladaPorId: string | null;
+  fechaCancelacion: string | null;
+  confirmacionBodegaPorId: string | null;
+  fechaConfirmacionBodega: string | null;
   cuadros: { cuadro: Cuadro }[];
   realizadas: AplicacionRealizada[];
   comprometido?: boolean;
@@ -450,6 +608,10 @@ export interface Aplicacion {
   alertaVencimiento?: boolean;
   diasSinAplicar?: number | null;
   alertaPendienteAplicar?: boolean;
+  hectareasAvanzadas?: number;
+  horasHombreTotales?: number;
+  porcentajeAvance?: number;
+  restantesPorCuadro?: Record<string, number>;
 }
 
 export type ModoDosisGranular = "kg_ha" | "g_planta";
@@ -462,6 +624,7 @@ export interface FertilizacionGranularRealizada {
   horas: string;
   fechaReal: string;
   registradoPorId: string;
+  cuadros: RealizadaCuadro[];
 }
 
 export interface FertilizacionGranular {
@@ -478,8 +641,13 @@ export interface FertilizacionGranular {
   fechaInicio: string;
   fechaFin: string;
   cantidadTotalCalculada: string;
+  hectareasTotalesProgramadas: string;
   estado: EstadoAplicacion;
   fechaCreacion: string;
+  canceladaPorId: string | null;
+  fechaCancelacion: string | null;
+  confirmacionBodegaPorId: string | null;
+  fechaConfirmacionBodega: string | null;
   cuadros: { cuadro: Cuadro }[];
   realizadas: FertilizacionGranularRealizada[];
   comprometido?: boolean;
@@ -487,6 +655,9 @@ export interface FertilizacionGranular {
   alertaVencimiento?: boolean;
   diasSinAplicar?: number | null;
   alertaPendienteAplicar?: boolean;
+  hectareasAvanzadas?: number;
+  horasHombreTotales?: number;
+  porcentajeAvance?: number;
 }
 
 export type FrecuenciaFertirriego = "diario" | "cada_2_dias" | "cada_3_dias" | "patron_2_1";
@@ -498,6 +669,7 @@ export interface RiegoRegistroDiario {
   horas: string;
   fertirriegoConfirmado: boolean;
   cantidadAplicada: string | null;
+  motivoNoAplicado: string | null;
   capturadoPorId: string;
 }
 
@@ -509,6 +681,28 @@ export interface FertirriegoActivo {
 export interface RiegoDiaResponse {
   registro: RiegoRegistroDiario | null;
   fertirriegoActivo: FertirriegoActivo | null;
+}
+
+export interface RiegoSeccionFila {
+  seccion: SeccionRiego;
+  registro: RiegoRegistroDiario | null;
+  fertirriegoActivo: FertirriegoActivo | null;
+}
+
+export interface RiegoHuertaTodasUPs {
+  huerta: Huerta;
+  secciones: RiegoSeccionFila[];
+}
+
+export interface RiegoHistorialSemanalDia {
+  fecha: string;
+  horas: number | null;
+  fertirriegoAplicado: boolean;
+}
+
+export interface RiegoHistorialSemanal {
+  dias: { fecha: string; etiqueta: string }[];
+  secciones: { seccion: SeccionRiego; dias: RiegoHistorialSemanalDia[] }[];
 }
 
 export interface FertirriegoProgramacion {

@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { api, ApiError } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
 import type { DoNotHireEntry } from "../../lib/types";
+import { formatearFecha } from "../../lib/fecha";
 
 export default function DoNotHire() {
   const { modulosVisibles } = useAuth();
@@ -96,7 +97,7 @@ export default function DoNotHire() {
               <td>{e.nombreReferencia}</td>
               <td>{e.motivo}</td>
               <td>{e.condicionesSalida ?? "—"}</td>
-              <td>{e.fecha.slice(0, 10)}</td>
+              <td>{formatearFecha(e.fecha)}</td>
               {puedeCapturar && (
                 <td>
                   <button className="btn-secondary" onClick={() => eliminar(e.id)}>

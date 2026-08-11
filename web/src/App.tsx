@@ -5,6 +5,7 @@ import AppShell from "./layout/AppShell";
 import NominaLayout from "./pages/nomina/NominaLayout";
 import CapturaDelDia from "./pages/nomina/CapturaDelDia";
 import CierreDelDia from "./pages/nomina/CierreDelDia";
+import Grupos from "./pages/nomina/Grupos";
 import Asistencia from "./pages/nomina/Asistencia";
 import Prestamos from "./pages/nomina/Prestamos";
 import Bonos from "./pages/nomina/Bonos";
@@ -21,14 +22,15 @@ import Puestos from "./pages/rh/Puestos";
 import DoNotHire from "./pages/rh/DoNotHire";
 import Accesos from "./pages/rh/Accesos";
 import AlmacenLayout from "./pages/almacen/AlmacenLayout";
-import Catalogo from "./pages/almacen/Catalogo";
 import Inventario from "./pages/almacen/Inventario";
 import Movimientos from "./pages/almacen/Movimientos";
 import AlmacenLocalPage from "./pages/almacen/AlmacenLocalPage";
-import Solicitudes from "./pages/Solicitudes";
+import Notificaciones from "./pages/Notificaciones";
 import ComprasLayout from "./pages/compras/ComprasLayout";
 import Ordenes from "./pages/compras/Ordenes";
 import Proveedores from "./pages/compras/Proveedores";
+import CxP from "./pages/compras/CxP";
+import Comparador from "./pages/compras/Comparador";
 import EquiposLayout from "./pages/equipos/EquiposLayout";
 import EquiposCatalogo from "./pages/equipos/Catalogo";
 import Combustible from "./pages/equipos/Combustible";
@@ -38,7 +40,9 @@ import Aplicaciones from "./pages/aplicaciones/Aplicaciones";
 import FertilizantesLayout from "./pages/fertilizantes/FertilizantesLayout";
 import Granular from "./pages/fertilizantes/Granular";
 import Fertirriego from "./pages/fertilizantes/Fertirriego";
+import RiegoLayout from "./pages/riego/RiegoLayout";
 import Riego from "./pages/riego/Riego";
+import HistorialSemanal from "./pages/riego/HistorialSemanal";
 
 function RutaProtegida({ children }: { children: React.ReactNode }) {
   const { autenticado } = useAuth();
@@ -60,12 +64,13 @@ export default function App() {
             }
           >
             <Route path="/" element={<Navigate to="/nomina" replace />} />
-            <Route path="/solicitudes" element={<Solicitudes />} />
+            <Route path="/notificaciones" element={<Notificaciones />} />
 
             <Route path="/nomina" element={<NominaLayout />}>
               <Route index element={<Navigate to="captura" replace />} />
               <Route path="captura" element={<CapturaDelDia />} />
               <Route path="cierre" element={<CierreDelDia />} />
+              <Route path="grupos" element={<Grupos />} />
               <Route path="asistencia" element={<Asistencia />} />
               <Route path="prestamos" element={<Prestamos />} />
               <Route path="bonos" element={<Bonos />} />
@@ -90,8 +95,7 @@ export default function App() {
             </Route>
 
             <Route path="/almacen" element={<AlmacenLayout />}>
-              <Route index element={<Navigate to="catalogo" replace />} />
-              <Route path="catalogo" element={<Catalogo />} />
+              <Route index element={<Navigate to="inventario" replace />} />
               <Route path="inventario" element={<Inventario />} />
               <Route path="movimientos" element={<Movimientos />} />
               <Route path="local" element={<AlmacenLocalPage />} />
@@ -101,6 +105,8 @@ export default function App() {
               <Route index element={<Navigate to="ordenes" replace />} />
               <Route path="ordenes" element={<Ordenes />} />
               <Route path="proveedores" element={<Proveedores />} />
+              <Route path="cxp" element={<CxP />} />
+              <Route path="comparador" element={<Comparador />} />
             </Route>
 
             <Route path="/equipos" element={<EquiposLayout />}>
@@ -119,7 +125,11 @@ export default function App() {
               <Route path="fertirriego" element={<Fertirriego />} />
             </Route>
 
-            <Route path="/riego" element={<Riego />} />
+            <Route path="/riego" element={<RiegoLayout />}>
+              <Route index element={<Navigate to="captura" replace />} />
+              <Route path="captura" element={<Riego />} />
+              <Route path="historial" element={<HistorialSemanal />} />
+            </Route>
           </Route>
         </Routes>
       </AuthProvider>

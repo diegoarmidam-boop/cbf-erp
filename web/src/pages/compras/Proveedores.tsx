@@ -1,6 +1,8 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { api, ApiError } from "../../lib/api";
 import type { Proveedor } from "../../lib/types";
+import FechaInput from "../../components/FechaInput";
+import { formatearFecha } from "../../lib/fecha";
 
 export default function Proveedores() {
   const [proveedores, setProveedores] = useState<Proveedor[]>([]);
@@ -9,6 +11,9 @@ export default function Proveedores() {
   const [nombre, setNombre] = useState("");
   const [creditoMonto, setCreditoMonto] = useState("");
   const [creditoVencimiento, setCreditoVencimiento] = useState("");
+  const [diasCredito, setDiasCredito] = useState("");
+  const [editandoDiasId, setEditandoDiasId] = useState<string | null>(null);
+  const [diasCreditoEdit, setDiasCreditoEdit] = useState("");
 
   function cargar() {
     api
@@ -37,14 +42,27 @@ export default function Proveedores() {
         nombre,
         creditoMonto: creditoMonto ? Number(creditoMonto) : undefined,
         creditoVencimiento: creditoVencimiento || undefined,
+        diasCredito: diasCredito ? Number(diasCredito) : undefined,
       });
       setNombre("");
       setCreditoMonto("");
       setCreditoVencimiento("");
+      setDiasCredito("");
       setMostrarForm(false);
       cargar();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "No se pudo guardar.");
+    }
+  }
+
+  async function guardarDiasCredito(id: string) {
+    setError(null);
+    try {
+      await api.patch(`/compras/proveedores/${id}/dias-credito`, { diasCredito: Number(diasCreditoEdit) });
+      setEditandoDiasId(null);
+      cargar();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "No se pudo actualizar.");
     }
   }
 
@@ -68,7 +86,11 @@ export default function Proveedores() {
           </label>
           <label className="field">
             Vencimiento del crédito
-            <input type="date" value={creditoVencimiento} onChange={(e) => setCreditoVencimiento(e.target.value)} />
+            <FechaInput value={creditoVencimiento} onChange={setCreditoVencimiento} />
+          </label>
+          <label className="field">
+            Días de crédito
+            <input type="number" min={0} step="1" value={diasCredito} onChange={(e) => setDiasCredito(e.target.value)} placeholder="Ej. 15" />
           </label>
           <button className="btn-primary" type="submit">
             Guardar
@@ -84,6 +106,7 @@ export default function Proveedores() {
             <th>Nombre</th>
             <th>Crédito</th>
             <th>Vence</th>
+            <th>Días de crédito</th>
             <th>Estado</th>
             <th></th>
           </tr>
@@ -93,7 +116,38 @@ export default function Proveedores() {
             <tr key={p.id}>
               <td>{p.nombre}</td>
               <td>{p.creditoMonto ? `$${p.creditoMonto}` : "—"}</td>
-              <td>{p.creditoVencimiento?.slice(0, 10) ?? "—"}</td>
+              <td>{formatearFecha(p.creditoVencimiento)}</td>
+              <td>
+                {editandoDiasId === p.id ? (
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <input
+                      type="number"
+                      min={0}
+                      step="1"
+                      style={{ width: 70 }}
+                      value={diasCreditoEdit}
+                      onChange={(e) => setDiasCreditoEdit(e.target.value)}
+                      autoFocus
+                    />
+                    <button className="btn-secondary" onClick={() => guardarDiasCredito(p.id)}>
+                      Guardar
+                    </button>
+                    <button className="btn-secondary" onClick={() => setEditandoDiasId(null)}>
+                      Cancelar
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    className="btn-secondary"
+                    onClick={() => {
+                      setEditandoDiasId(p.id);
+                      setDiasCreditoEdit(p.diasCredito != null ? String(p.diasCredito) : "");
+                    }}
+                  >
+                    {p.diasCredito != null ? `${p.diasCredito} días` : "Sin definir"}
+                  </button>
+                )}
+              </td>
               <td>
                 <span className={`tag ${p.activo ? "tag-success" : "tag-danger"}`}>{p.activo ? "Activo" : "Inactivo"}</span>
               </td>

@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { requireAuth, requirePermission } from "../../middleware/auth.js";
 import { unoSolo } from "../../core/http.js";
-import { avanzarEtapa, cerrarCiclo, crearCiclo, listarCiclos, YaHayCicloActivoError } from "./ciclos.js";
+import { avanzarEtapa, cerrarCiclo, crearCiclo, listarCiclos, SuperficieExcedeCuadroError, YaHayCicloActivoError } from "./ciclos.js";
 
 export const ciclosRouter = Router();
 ciclosRouter.use(requireAuth);
@@ -19,7 +19,7 @@ ciclosRouter.get("/", requirePermission("unidades_produccion", "ver"), async (re
 const variedadSchema = z.object({
   cuadroId: z.string().min(1),
   variedad: z.string().min(1),
-  hectareas: z.number().positive().optional(),
+  hectareas: z.number().positive(),
   porcentaje: z.number().min(0).max(100).optional(),
 });
 
@@ -27,7 +27,7 @@ const crearCicloSchema = z.object({
   huertaId: z.string().min(1),
   tipo: z.enum(["cultivo", "descanso", "prueba"]),
   fechaInicio: z.string(),
-  variedades: z.array(variedadSchema).max(10, "Máximo 10 variedades por cuadro de prueba."),
+  variedades: z.array(variedadSchema),
 });
 
 ciclosRouter.post("/", requirePermission("unidades_produccion", "capturar"), async (req, res) => {
@@ -41,6 +41,10 @@ ciclosRouter.post("/", requirePermission("unidades_produccion", "capturar"), asy
     res.status(201).json(ciclo);
   } catch (err) {
     if (err instanceof YaHayCicloActivoError) {
+      res.status(409).json({ error: err.message });
+      return;
+    }
+    if (err instanceof SuperficieExcedeCuadroError) {
       res.status(409).json({ error: err.message });
       return;
     }

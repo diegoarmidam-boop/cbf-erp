@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { requireAuth, requirePermission, huertaIdDeAlcance } from "../../middleware/auth.js";
 import { tienePermiso } from "../../core/permissions.js";
-import { cerrarDia, CierreVencidoRequiereAutorizacionError, diasPendientesDeCierre, reabrirDia } from "./cierre.js";
+import { cerrarDia, CierreVencidoRequiereAutorizacionError, diasCerrados, diasPendientesDeCierre, reabrirDia, resumenCierreTodasUPs } from "./cierre.js";
 
 export const cierreRouter = Router();
 cierreRouter.use(requireAuth);
@@ -14,6 +14,22 @@ cierreRouter.get("/pendientes", requirePermission("nomina", "ver"), async (req, 
     return;
   }
   res.json(await diasPendientesDeCierre(huertaId));
+});
+
+// Paso 1 — Resumen "Todas UPs" (9.11) — antes de "/:huertaId/..." para no confundirse con un huertaId literal "resumen".
+cierreRouter.get("/resumen/:fecha", requirePermission("nomina", "ver"), async (req, res) => {
+  const alcance = huertaIdDeAlcance(req);
+  res.json(await resumenCierreTodasUPs(req.params.fecha as string, alcance));
+});
+
+// Listado navegable de días cerrados (9.11) — para editar después del cierre.
+cierreRouter.get("/cerrados", requirePermission("nomina", "editar"), async (req, res) => {
+  const huertaId = String(req.query.huertaId ?? "");
+  if (!huertaId) {
+    res.status(400).json({ error: "huertaId es requerido." });
+    return;
+  }
+  res.json(await diasCerrados(huertaId));
 });
 
 cierreRouter.post("/:huertaId/:fecha", requirePermission("nomina", "capturar"), async (req, res) => {

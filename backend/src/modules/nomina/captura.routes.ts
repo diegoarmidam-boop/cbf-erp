@@ -1,11 +1,13 @@
 import { Router } from "express";
 import { z } from "zod";
 import { requireAuth, requirePermission, huertaIdDeAlcance } from "../../middleware/auth.js";
+import { tienePermiso } from "../../core/permissions.js";
 import {
   CapturaInvalidaError,
   DiaCerradoError,
   guardarCapturaDelDia,
   obtenerCapturaDelDia,
+  obtenerCapturaTodasUPs,
   obtenerSugerenciaDesdeAyer,
   diaEstaCerrado,
 } from "./captura.js";
@@ -21,6 +23,12 @@ function verificarAlcanceHuerta(req: Parameters<Parameters<typeof capturaRouter.
   }
   return true;
 }
+
+// Vista "Todas UPs" (9.11) — antes de "/:huertaId/:fecha" para no ser interpretado como un huertaId literal "todas-ups".
+capturaRouter.get("/todas-ups/:fecha", requirePermission("nomina", "capturar"), async (req, res) => {
+  const alcance = huertaIdDeAlcance(req);
+  res.json(await obtenerCapturaTodasUPs(req.params.fecha as string, alcance));
+});
 
 capturaRouter.get("/:huertaId/:fecha", requirePermission("nomina", "capturar"), async (req, res) => {
   if (!verificarAlcanceHuerta(req, res)) return;
@@ -53,7 +61,13 @@ capturaRouter.post("/:huertaId/:fecha", requirePermission("nomina", "capturar"),
   }
 
   try {
-    await guardarCapturaDelDia(huertaId, fecha, parsed.data.filas, req.usuario!.usuarioId);
+    // Edición después de cerrado (9.11): solo Director General, RH,
+    // Encargado de Nóminas y Gerente Administrativo (mismo grupo que ya
+    // tiene "editar" en la matriz de este módulo) — el Supervisor sigue
+    // topado por el candado normal de día cerrado.
+    const cerrado = await diaEstaCerrado(huertaId, fecha);
+    const puedeEditarCerrado = cerrado && (await tienePermiso(req.usuario!.rol, "nomina", "editar"));
+    await guardarCapturaDelDia(huertaId, fecha, parsed.data.filas, req.usuario!.usuarioId, { permitirDiaCerrado: puedeEditarCerrado });
     res.status(204).end();
   } catch (err) {
     if (err instanceof DiaCerradoError) {

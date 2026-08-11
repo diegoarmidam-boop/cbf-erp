@@ -2,6 +2,9 @@ import { useEffect, useState, type FormEvent } from "react";
 import { api, ApiError } from "../../lib/api";
 import { useProductos } from "../../lib/useProductos";
 import type { MejorProveedor, OrdenCompra, Proveedor } from "../../lib/types";
+import FechaInput from "../../components/FechaInput";
+import { formatearFecha } from "../../lib/fecha";
+import { presentacionTexto } from "../../lib/producto";
 
 const ETIQUETAS_ESTADO: Record<string, string> = {
   pendiente_autorizar: "Pendiente de autorizar",
@@ -140,7 +143,7 @@ export default function Ordenes() {
               <option value="">Selecciona…</option>
               {productos.map((p) => (
                 <option key={p.id} value={p.id}>
-                  {p.nombreComercial} ({p.presentacion})
+                  {p.nombreComercial} ({presentacionTexto(p)})
                 </option>
               ))}
             </select>
@@ -170,10 +173,15 @@ export default function Ordenes() {
                 {o.proveedor && (
                   <div style={{ fontSize: 12, color: "var(--ink-soft)" }}>
                     {o.proveedor.nombre} · ${o.precioUnitario}/{o.producto.unidad}
-                    {o.fechaEsperada && ` · esperada ${o.fechaEsperada.slice(0, 10)}`}
+                    {o.fechaEsperada && ` · esperada ${formatearFecha(o.fechaEsperada)}`}
                   </div>
                 )}
                 {o.motivoRechazo && <div style={{ fontSize: 12, color: "var(--danger)" }}>Motivo: {o.motivoRechazo}</div>}
+                {o.estado === "recibida" && o.recepciones.length > 0 && (
+                  <div style={{ fontSize: 12, color: "var(--ink-soft)" }}>
+                    Recibido: {o.recepciones.map((r) => `${r.cantidadRecibida} ${o.producto.unidad} el ${formatearFecha(r.fechaRecepcion)}`).join(" · ")}
+                  </div>
+                )}
               </div>
 
               <div style={{ display: "flex", gap: 6 }}>
@@ -225,7 +233,7 @@ export default function Ordenes() {
                   </label>
                   <label className="field">
                     Fecha esperada
-                    <input type="date" value={fechaEsperada} onChange={(e) => setFechaEsperada(e.target.value)} />
+                    <FechaInput value={fechaEsperada} onChange={setFechaEsperada} />
                   </label>
                   <button className="btn-primary" onClick={() => confirmarCotizar(o.id)}>
                     Formalizar orden
@@ -249,7 +257,7 @@ export default function Ordenes() {
                       </label>
                       <label className="field">
                         Caducidad
-                        <input type="date" value={fechaCaducidad} onChange={(e) => setFechaCaducidad(e.target.value)} />
+                        <FechaInput value={fechaCaducidad} onChange={setFechaCaducidad} />
                       </label>
                     </>
                   )}

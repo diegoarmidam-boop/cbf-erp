@@ -2,6 +2,8 @@ import { useEffect, useState, type FormEvent } from "react";
 import { api, ApiError } from "../../lib/api";
 import { useEquipoSeleccionado } from "./EquipoSeleccionadoContext";
 import type { AlertaMantenimiento, MantenimientoConcepto, MantenimientoEvento } from "../../lib/types";
+import FechaInput from "../../components/FechaInput";
+import { formatearFecha } from "../../lib/fecha";
 
 function hoyISO(): string {
   return new Date().toISOString().slice(0, 10);
@@ -184,7 +186,7 @@ export default function Mantenimiento() {
               </label>
               <label className="field">
                 Fecha
-                <input type="date" value={fechaEvento} onChange={(e) => setFechaEvento(e.target.value)} required />
+                <FechaInput value={fechaEvento} onChange={setFechaEvento} required />
               </label>
               <button className="btn-primary" type="submit">
                 Guardar
@@ -203,7 +205,7 @@ export default function Mantenimiento() {
             <tbody>
               {eventos.map((e) => (
                 <tr key={e.id}>
-                  <td>{e.fecha.slice(0, 10)}</td>
+                  <td>{formatearFecha(e.fecha)}</td>
                   <td>{e.tipo}</td>
                   <td>{e.descripcion}</td>
                   <td>{e.costo ? `$${e.costo}` : "—"}</td>

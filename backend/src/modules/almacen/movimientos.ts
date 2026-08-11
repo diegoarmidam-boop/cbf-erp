@@ -8,6 +8,48 @@ export async function stockTotalProducto(productoId: string): Promise<number> {
   return lotes.reduce((s, l) => s + Number(l.cantidadActual), 0);
 }
 
+/** Existencia de todos los productos en una sola consulta — evita N+1 en la tabla de Inventario. */
+export async function stockTotalTodos(): Promise<Record<string, number>> {
+  const lotes = await prisma.productoLote.findMany({ select: { productoId: true, cantidadActual: true } });
+  const totales: Record<string, number> = {};
+  for (const l of lotes) {
+    totales[l.productoId] = (totales[l.productoId] ?? 0) + Number(l.cantidadActual);
+  }
+  return totales;
+}
+
+/**
+ * Comprometido pendiente de entregar, por producto: cuando Compras recibe
+ * una orden automática ligada a una Aplicación/Fertilización, el stock
+ * entra y se compromete (descuenta FIFO) en la misma transacción — el
+ * total "disponible" (stockTotalTodos) puede quedar en 0 aunque la entrega
+ * sí ocurrió de verdad, porque ya está apartada para esa Aplicación
+ * específica. Sin esta cifra aparte, en Inventario se ve como si la
+ * recepción nunca hubiera pasado (confirmado 8-ago-2026, pruebas reales).
+ * "Pendiente" = tiene salida_comprometida pero todavía no su salida_real
+ * correspondiente (que se registra al confirmar la entrega a la Huerta).
+ */
+export async function stockComprometidoPendienteTodos(): Promise<Record<string, number>> {
+  const comprometidos = await prisma.almacenCentralMovimiento.findMany({
+    where: { tipo: "salida_comprometida" },
+    select: { productoId: true, cantidad: true, referenciaId: true },
+  });
+  const referenciasEntregadas = new Set(
+    (
+      await prisma.almacenCentralMovimiento.findMany({
+        where: { tipo: "salida_real", referenciaId: { not: null } },
+        select: { referenciaId: true },
+      })
+    ).map((m) => m.referenciaId)
+  );
+  const totales: Record<string, number> = {};
+  for (const m of comprometidos) {
+    if (m.referenciaId && referenciasEntregadas.has(m.referenciaId)) continue;
+    totales[m.productoId] = (totales[m.productoId] ?? 0) + Number(m.cantidad);
+  }
+  return totales;
+}
+
 export function lotesDeProducto(productoId: string) {
   return prisma.productoLote.findMany({ where: { productoId }, orderBy: { fechaCaducidad: "asc" } });
 }

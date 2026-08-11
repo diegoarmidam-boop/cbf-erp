@@ -4,6 +4,7 @@ import { api, ApiError } from "../../lib/api";
 import { usePuestos } from "../../lib/usePuestos";
 import { useHuertas } from "../../lib/useHuertas";
 import type { Personal as PersonalT } from "../../lib/types";
+import FechaInput from "../../components/FechaInput";
 
 export default function Personal() {
   const { puestos } = usePuestos();
@@ -115,7 +116,7 @@ export default function Personal() {
           </label>
           <label className="field">
             Fecha de ingreso
-            <input type="date" value={fechaIngreso} onChange={(e) => setFechaIngreso(e.target.value)} />
+            <FechaInput value={fechaIngreso} onChange={setFechaIngreso} />
           </label>
           <label className="field">
             Huerta base

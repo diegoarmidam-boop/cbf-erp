@@ -10,11 +10,23 @@ import {
   registrarEntrada,
   registrarSalidaDirecta,
   stockTotalProducto,
+  stockTotalTodos,
+  stockComprometidoPendienteTodos,
   StockInsuficienteError,
 } from "./movimientos.js";
 
 export const movimientosRouter = Router();
 movimientosRouter.use(requireAuth);
+
+// Debe registrarse antes de "/:productoId" para no ser interpretado como un productoId literal "stock-todos".
+movimientosRouter.get("/stock-todos", requirePermission("almacen", "ver"), async (_req, res) => {
+  res.json(await stockTotalTodos());
+});
+
+// Debe registrarse antes de "/:productoId" por la misma razón que stock-todos.
+movimientosRouter.get("/comprometido-todos", requirePermission("almacen", "ver"), async (_req, res) => {
+  res.json(await stockComprometidoPendienteTodos());
+});
 
 movimientosRouter.get("/:productoId/stock", requirePermission("almacen", "ver"), async (req, res) => {
   const productoId = unoSolo(req.params.productoId);

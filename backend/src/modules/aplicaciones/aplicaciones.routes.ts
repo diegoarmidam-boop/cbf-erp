@@ -1,15 +1,22 @@
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import type { Rol } from "@prisma/client";
-import { requireAuth, requirePermission, huertaIdDeAlcance } from "../../middleware/auth.js";
+import { requireAuth, requirePermission, requirePermissionAny, huertaIdDeAlcance } from "../../middleware/auth.js";
+import { tienePermiso } from "../../core/permissions.js";
 import { unoSolo } from "../../core/http.js";
 import { prisma } from "../../core/db.js";
+import { diaEstaCerrado } from "../nomina/captura.js";
 import {
+  cancelarAplicacionEntregada,
   confirmarEntrega,
+  confirmarRecepcionCancelacion,
+  DiaCerradoRequiereCasoExtraordinarioError,
+  editarRealizada,
   equiposImplementoParaAplicacion,
-  gruposParaAplicacion,
+  equiposTractorParaAplicacion,
   liberarAplicacionVencida,
   listarAplicaciones,
+  NoSePuedeCancelarError,
   obtenerAplicacion,
   productosParaAplicacion,
   programarAplicacion,
@@ -30,6 +37,8 @@ aplicacionesRouter.use(requireAuth);
 const ROLES_PROGRAMAR: Rol[] = ["gerente_tecnico_produccion", "asistente_tecnico_produccion"];
 const ROLES_REALIZADA: Rol[] = ["supervisor_huerta", "ayudante_supervisor"];
 const ROLES_ACCESO_UNIVERSAL: Rol[] = ["director_general", "encargado_sistemas"];
+// Cancelación de aplicación entregada y vencida (9.7): solo Director General/Gerente Técnico — más restringido que programar (sin Asistente Técnico).
+const ROLES_CANCELAR: Rol[] = ["gerente_tecnico_produccion"];
 
 function verificarRol(req: Request, res: Response, permitidos: Rol[]): boolean {
   const rol = req.usuario!.rol;
@@ -65,14 +74,8 @@ aplicacionesRouter.get("/equipos-implemento", requirePermission("aplicaciones", 
   res.json(await equiposImplementoParaAplicacion());
 });
 
-aplicacionesRouter.get("/grupos", requirePermission("aplicaciones", "ver"), async (req, res) => {
-  const huertaId = typeof req.query.huertaId === "string" ? req.query.huertaId : "";
-  if (!huertaId) {
-    res.status(400).json({ error: "huertaId es requerido." });
-    return;
-  }
-  if (!verificarAlcance(req, res, huertaId)) return;
-  res.json(await gruposParaAplicacion(huertaId));
+aplicacionesRouter.get("/equipos-tractor", requirePermission("aplicaciones", "ver"), async (_req, res) => {
+  res.json(await equiposTractorParaAplicacion());
 });
 
 aplicacionesRouter.get("/:id", requirePermission("aplicaciones", "ver"), async (req, res) => {
@@ -85,8 +88,7 @@ const programarSchema = z.object({
   huertaId: z.string().min(1),
   cuadroIds: z.array(z.string().min(1)).min(1),
   productoId: z.string().min(1),
-  recursoTipo: z.enum(["gente", "implemento"]),
-  equipoId: z.string().optional(),
+  recursoSugerido: z.enum(["mochila", "turbina", "aguilon"]),
   concentracionValor: z.number().positive(),
   concentracionUnidad: z.enum(["ml_l", "g_l", "kg_l"]),
   litrosMezclaPorHa: z.number().positive(),
@@ -132,15 +134,29 @@ aplicacionesRouter.post("/:id/entregar", requirePermission("almacen", "capturar"
   }
 });
 
-const realizadaSchema = z.object({
-  personalId: z.string().optional(),
-  grupoId: z.string().optional(),
+const cuadroAvanceSchema = z.object({ cuadroId: z.string().min(1), hectareas: z.number().positive() });
+
+const lineaRealizadaSchema = z.object({
+  modalidad: z.enum(["mochila", "turbina", "aguilon"]),
+  tractorId: z.string().optional(),
+  operadorId: z.string().optional(),
+  implementoId: z.string().optional(),
   horas: z.number().positive(),
-  fechaReal: z.string(),
+  personalIds: z.array(z.string().min(1)).default([]),
 });
 
-aplicacionesRouter.post("/:id/realizada", requirePermission("aplicaciones", "capturar"), async (req, res) => {
-  if (!verificarRol(req, res, ROLES_REALIZADA)) return;
+const realizadaSchema = z.object({
+  fechaReal: z.string(),
+  cuadros: z.array(cuadroAvanceSchema).min(1),
+  lineas: z.array(lineaRealizadaSchema).min(1),
+});
+
+// Se acepta "aplicaciones:capturar" (Supervisor/Ayudante, el caso normal) O
+// "nomina:editar" (Encargado de Nóminas/Director/Gerente Administrativo,
+// solo relevante para el caso extraordinario de un día ya cerrado — ver
+// abajo). Fuera de ese caso, el segundo grupo no tiene por qué usar esta
+// ruta y el chequeo de rol interno los filtra igual.
+aplicacionesRouter.post("/:id/realizada", requirePermissionAny(["aplicaciones", "capturar"], ["nomina", "editar"]), async (req, res) => {
   const id = unoSolo(req.params.id);
   const aplicacion = await prisma.aplicacion.findUnique({ where: { id } });
   if (!aplicacion) {
@@ -154,9 +170,55 @@ aplicacionesRouter.post("/:id/realizada", requirePermission("aplicaciones", "cap
     res.status(400).json({ error: parsed.error.message });
     return;
   }
+
+  const cerrado = await diaEstaCerrado(aplicacion.huertaId, parsed.data.fechaReal);
+  if (cerrado) {
+    // Caso extraordinario (9.11): solo Encargado(s) de Nómina, Director General o Gerente Administrativo.
+    if (!(await tienePermiso(req.usuario!.rol, "nomina", "editar"))) {
+      res.status(423).json({
+        error:
+          "La Huerta ya tiene cerrado el día de Nómina de esta fecha — se necesita autorización de caso extraordinario (Encargado de Nóminas, Director General o Gerente Administrativo).",
+      });
+      return;
+    }
+  } else if (!verificarRol(req, res, ROLES_REALIZADA)) {
+    return;
+  }
+
   try {
-    const realizada = await registrarRealizada(id, parsed.data, req.usuario!.usuarioId);
+    const realizada = await registrarRealizada(id, { ...parsed.data, casoExtraordinario: cerrado }, req.usuario!.usuarioId);
     res.status(201).json(realizada);
+  } catch (err) {
+    if (err instanceof Error) {
+      res.status(400).json({ error: err.message });
+      return;
+    }
+    throw err;
+  }
+});
+
+const editarRealizadaSchema = z.object({
+  cuadros: z.array(cuadroAvanceSchema).min(1),
+  lineas: z.array(lineaRealizadaSchema).min(1),
+});
+
+aplicacionesRouter.patch("/realizada/:realizadaId", requirePermission("aplicaciones", "capturar"), async (req, res) => {
+  if (!verificarRol(req, res, ROLES_REALIZADA)) return;
+  const realizadaId = unoSolo(req.params.realizadaId);
+  const realizada = await prisma.aplicacionRealizada.findUnique({ where: { id: realizadaId }, include: { aplicacion: true } });
+  if (!realizada) {
+    res.status(404).json({ error: "Reporte no encontrado." });
+    return;
+  }
+  if (!verificarAlcance(req, res, realizada.aplicacion.huertaId)) return;
+
+  const parsed = editarRealizadaSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+  try {
+    res.json(await editarRealizada(realizadaId, parsed.data, req.usuario!.usuarioId));
   } catch (err) {
     if (err instanceof Error) {
       res.status(400).json({ error: err.message });
@@ -176,6 +238,35 @@ aplicacionesRouter.post("/:id/liberar", requirePermission("aplicaciones", "captu
     res.json(aplicacion);
   } catch (err) {
     if (err instanceof TransicionAplicacionInvalidaError) {
+      res.status(409).json({ error: err.message });
+      return;
+    }
+    throw err;
+  }
+});
+
+// Protocolo de cancelación de aplicación entregada y vencida a 15 días (9.7) — solo Director/Gerente Técnico.
+aplicacionesRouter.post("/:id/cancelar", requirePermission("aplicaciones", "capturar"), async (req, res) => {
+  if (!verificarRol(req, res, ROLES_CANCELAR)) return;
+  try {
+    const aplicacion = await cancelarAplicacionEntregada(unoSolo(req.params.id), req.usuario!.usuarioId);
+    res.json(aplicacion);
+  } catch (err) {
+    if (err instanceof NoSePuedeCancelarError) {
+      res.status(409).json({ error: err.message });
+      return;
+    }
+    throw err;
+  }
+});
+
+// Firma digital de recepción del Encargado de Bodega — no bloquea el ajuste de inventario, que ya ocurrió al cancelar.
+aplicacionesRouter.post("/:id/confirmar-recepcion-cancelacion", requirePermission("almacen", "capturar"), async (req, res) => {
+  try {
+    const aplicacion = await confirmarRecepcionCancelacion(unoSolo(req.params.id), req.usuario!.usuarioId);
+    res.json(aplicacion);
+  } catch (err) {
+    if (err instanceof NoSePuedeCancelarError) {
       res.status(409).json({ error: err.message });
       return;
     }
