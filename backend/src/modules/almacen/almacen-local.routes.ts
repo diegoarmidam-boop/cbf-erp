@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import { requireAuth, requirePermission, huertaIdDeAlcance } from "../../middleware/auth.js";
-import { unoSolo } from "../../core/http.js";
+import { mensajeErrorValidacion, unoSolo } from "../../core/http.js";
 import { almacenLocalDeHuerta, candadosDeHuerta, reportarConsumo } from "./almacen-local.js";
 
 export const almacenLocalRouter = Router();
@@ -33,7 +33,7 @@ const consumoSchema = z.object({ cantidad: z.number().positive() });
 almacenLocalRouter.post("/:almacenLocalId/reportar-consumo", requirePermission("almacen", "capturar"), async (req, res) => {
   const parsed = consumoSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
     return;
   }
   res.json(await reportarConsumo(unoSolo(req.params.almacenLocalId), parsed.data.cantidad, req.usuario!.usuarioId));

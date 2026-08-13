@@ -2,7 +2,7 @@ import { Router, type Request } from "express";
 import { z } from "zod";
 import { requireAuth, requirePermission } from "../../middleware/auth.js";
 import { tienePermiso } from "../../core/permissions.js";
-import { unoSolo } from "../../core/http.js";
+import { mensajeErrorValidacion, unoSolo } from "../../core/http.js";
 import {
   entregarAHuerta,
   lotesDeProducto,
@@ -47,7 +47,7 @@ const entradaSchema = z.object({
 movimientosRouter.post("/entrada", requirePermission("almacen", "capturar"), async (req, res) => {
   const parsed = entradaSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
     return;
   }
   const { productoId, cantidad, ...opciones } = parsed.data;
@@ -59,7 +59,7 @@ const entregaSchema = z.object({ productoId: z.string().min(1), huertaId: z.stri
 movimientosRouter.post("/entregar-a-huerta", requirePermission("almacen", "capturar"), async (req, res) => {
   const parsed = entregaSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
     return;
   }
   try {
@@ -86,7 +86,7 @@ const salidaSchema = z.object({
 movimientosRouter.post("/salida", requirePermission("almacen", "capturar"), async (req, res) => {
   const parsed = salidaSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
     return;
   }
   if ((parsed.data.tipo === "merma" || parsed.data.tipo === "ajuste_manual") && !(await requiereEditar(req))) {

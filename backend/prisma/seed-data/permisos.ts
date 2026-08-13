@@ -80,16 +80,26 @@ export const PERMISOS_SEED: PermisoSeed[] = [
   { rol: "supervisor_cosecha", modulo: "equipos", ver: true, capturar: true },
   { rol: "supervisor_huerta", modulo: "equipos", ver: true, capturar: true },
 
+  // ---- Actividades (9.4) — puro mano de obra, alcance inicial de 7 actividades ----
+  { rol: "gerente_tecnico_produccion", modulo: "actividades", ver: true, capturar: true },
+  { rol: "supervisor_huerta", modulo: "actividades", ver: true, capturar: true },
+  { rol: "capturista_informacion", modulo: "actividades", ver: true, capturar: true },
+  { rol: "gerente_administrativo", modulo: "actividades", ver: true },
+
   // ---- Aplicaciones — agroquímicos (9.7) ----
   { rol: "gerente_tecnico_produccion", modulo: "aplicaciones", ver: true, capturar: true, autoriza: true },
   { rol: "asistente_tecnico_produccion", modulo: "aplicaciones", ver: true, capturar: true },
   { rol: "supervisor_huerta", modulo: "aplicaciones", ver: true, capturar: true },
   { rol: "ayudante_supervisor", modulo: "aplicaciones", ver: true, capturar: true },
+  // Capturista de información (agregado 10-ago-2026): mismo alcance de captura que Supervisor de Huerta, sin autorizar.
+  { rol: "capturista_informacion", modulo: "aplicaciones", ver: true, capturar: true },
 
   // ---- Fertilizantes — Granular y Fertirriego (9.5) ----
   { rol: "gerente_tecnico_produccion", modulo: "fertilizantes", ver: true, capturar: true, autoriza: true },
   { rol: "asistente_tecnico_produccion", modulo: "fertilizantes", ver: true, capturar: true },
   { rol: "supervisor_huerta", modulo: "fertilizantes", ver: true, capturar: true },
+  // Capturista de información (agregado 10-ago-2026): mismo alcance de captura que Supervisor de Huerta, sin autorizar.
+  { rol: "capturista_informacion", modulo: "fertilizantes", ver: true, capturar: true },
 
   // ---- Riego — ejecución diaria (9.6) ----
   { rol: "regador", modulo: "riego", ver: true, capturar: true },

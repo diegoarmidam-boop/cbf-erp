@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { requireAuth, requirePermission } from "../../middleware/auth.js";
-import { unoSolo } from "../../core/http.js";
+import { mensajeErrorValidacion, unoSolo } from "../../core/http.js";
 import { prisma } from "../../core/db.js";
 import { alertasMantenimiento, crearConcepto, listarConceptos, listarEventos, registrarEvento } from "./mantenimiento.js";
 
@@ -17,7 +17,7 @@ const conceptoSchema = z.object({ nombre: z.string().min(1), umbralHoras: z.numb
 mantenimientoRouter.post("/:equipoId/conceptos", requirePermission("equipos", "capturar"), async (req, res) => {
   const parsed = conceptoSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
     return;
   }
   res.status(201).json(await crearConcepto(unoSolo(req.params.equipoId), parsed.data.nombre, parsed.data.umbralHoras));
@@ -57,7 +57,7 @@ const eventoSchema = z.object({
 mantenimientoRouter.post("/:equipoId/eventos", requirePermission("equipos", "capturar"), async (req, res) => {
   const parsed = eventoSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
     return;
   }
   res.status(201).json(await registrarEvento(unoSolo(req.params.equipoId), parsed.data));

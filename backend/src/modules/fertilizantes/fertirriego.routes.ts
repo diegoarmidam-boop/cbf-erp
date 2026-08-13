@@ -2,7 +2,7 @@ import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import type { Rol } from "@prisma/client";
 import { requireAuth, requirePermission, huertaIdDeAlcance } from "../../middleware/auth.js";
-import { unoSolo } from "../../core/http.js";
+import { mensajeErrorValidacion, unoSolo } from "../../core/http.js";
 import {
   confirmarEntregaFertirriego,
   liberarFertirriegoVencido,
@@ -53,12 +53,16 @@ fertirriegoRouter.get("/:id", requirePermission("fertilizantes", "ver"), async (
   res.json(fertirriego);
 });
 
-const programarSchema = z.object({
-  huertaId: z.string().min(1),
-  seccionIds: z.array(z.string().min(1)).min(1),
+const productoFertirriegoSchema = z.object({
   productoId: z.string().min(1),
   dosisValor: z.number().positive(),
   dosisUnidad: z.enum(["ml_l", "g_l", "kg_l"]),
+});
+
+const programarSchema = z.object({
+  huertaId: z.string().min(1),
+  seccionIds: z.array(z.string().min(1)).min(1),
+  productos: z.array(productoFertirriegoSchema).min(1),
   litrosAguaPorHa: z.number().positive(),
   frecuencia: z.enum(["diario", "cada_2_dias", "cada_3_dias", "patron_2_1"]),
   fechaInicio: z.string(),
@@ -69,7 +73,7 @@ fertirriegoRouter.post("/", requirePermission("fertilizantes", "capturar"), asyn
   if (!verificarRol(req, res, ROLES_PROGRAMAR)) return;
   const parsed = programarSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
     return;
   }
   try {

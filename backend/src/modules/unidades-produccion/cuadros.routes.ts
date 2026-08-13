@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { requireAuth, requirePermission } from "../../middleware/auth.js";
-import { unoSolo } from "../../core/http.js";
+import { mensajeErrorValidacion, unoSolo } from "../../core/http.js";
 import {
   actualizarCamposPersonalizados,
   actualizarConfiguracionCuadro,
@@ -45,7 +45,7 @@ const crearCuadroSchema = z.object({
 cuadrosRouter.post("/", requirePermission("unidades_produccion", "capturar"), async (req, res) => {
   const parsed = crearCuadroSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
     return;
   }
   const { huertaId, nombre, vigenteDesde, version } = parsed.data;
@@ -58,7 +58,7 @@ const nuevaVersionSchema = z.object({ vigenteDesde: z.string(), version: version
 cuadrosRouter.post("/:id/version", requirePermission("unidades_produccion", "editar"), async (req, res) => {
   const parsed = nuevaVersionSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
     return;
   }
   const version = await actualizarConfiguracionCuadro(unoSolo(req.params.id), parsed.data.version, parsed.data.vigenteDesde);
@@ -68,7 +68,7 @@ cuadrosRouter.post("/:id/version", requirePermission("unidades_produccion", "edi
 cuadrosRouter.patch("/:id/campos-personalizados", requirePermission("unidades_produccion", "editar"), async (req, res) => {
   const parsed = z.record(z.string(), z.unknown()).safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
     return;
   }
   res.json(await actualizarCamposPersonalizados(unoSolo(req.params.id), parsed.data));
@@ -79,7 +79,7 @@ const estatusSchema = z.object({ estatus: z.enum(["activo", "en_descanso", "fuer
 cuadrosRouter.patch("/:id/estatus", requirePermission("unidades_produccion", "editar"), async (req, res) => {
   const parsed = estatusSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
     return;
   }
   res.json(await cambiarEstatusCuadro(unoSolo(req.params.id), parsed.data.estatus));

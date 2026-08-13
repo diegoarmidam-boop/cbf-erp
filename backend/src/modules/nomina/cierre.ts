@@ -1,12 +1,8 @@
-import { estadoPlazo, type EstadoPlazo, type FechaISO } from "@cbf/shared";
+import { estadoPlazo, hoyISO, type EstadoPlazo, type FechaISO } from "@cbf/shared";
 import { prisma } from "../../core/db.js";
 import { obtenerConfigNomina } from "./config.js";
 import { diaEstaCerrado, huertasEnAlcance, obtenerCapturaDelDia } from "./captura.js";
 import { miembrosDeGrupoEnFecha } from "./grupos.js";
-
-function hoyISO(): FechaISO {
-  return new Date().toISOString().slice(0, 10);
-}
 
 export async function estadoPlazoDeFecha(fecha: FechaISO): Promise<EstadoPlazo> {
   const { diasGraciaCierre } = await obtenerConfigNomina();

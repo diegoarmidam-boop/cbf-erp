@@ -20,6 +20,14 @@ export function isoDate(d: Date): FechaISO {
   return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
 }
 
+// `new Date().toISOString()` da la fecha en UTC, no la local — de las 18:00
+// a medianoche (hora de México) UTC ya es el día siguiente, así que "hoy"
+// saldría mal calculado durante esas horas. `isoDate` usa los getters
+// locales del Date, por eso es la forma correcta de obtener "hoy".
+export function hoyISO(): FechaISO {
+  return isoDate(new Date());
+}
+
 export function sumarDias(fechaISO: FechaISO, dias: number): FechaISO {
   const d = toDate(fechaISO);
   d.setDate(d.getDate() + dias);

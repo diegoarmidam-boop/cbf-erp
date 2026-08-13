@@ -4,7 +4,7 @@ import path from "node:path";
 import fs from "node:fs";
 import { z } from "zod";
 import { requireAuth, requirePermission } from "../../middleware/auth.js";
-import { unoSolo } from "../../core/http.js";
+import { mensajeErrorValidacion, unoSolo } from "../../core/http.js";
 import { prisma } from "../../core/db.js";
 import { actualizarHuerta, calcularAreaEfectivaHuerta, crearHuerta, listarHuertas } from "./huertas.js";
 
@@ -30,7 +30,7 @@ const crearHuertaSchema = z.object({ nombre: z.string().min(1), hectareasTotales
 huertasRouter.post("/", requirePermission("unidades_produccion", "capturar"), async (req, res) => {
   const parsed = crearHuertaSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
     return;
   }
   const huerta = await crearHuerta(parsed.data.nombre, parsed.data.hectareasTotales);
@@ -46,7 +46,7 @@ const actualizarSchema = z.object({
 huertasRouter.patch("/:id", requirePermission("unidades_produccion", "editar"), async (req, res) => {
   const parsed = actualizarSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
     return;
   }
   res.json(await actualizarHuerta(unoSolo(req.params.id), parsed.data));

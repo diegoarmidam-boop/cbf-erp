@@ -4,7 +4,7 @@ import { prisma } from "../../core/db.js";
 import { requireAuth, requirePermission, requirePermissionAny } from "../../middleware/auth.js";
 import { tienePermiso } from "../../core/permissions.js";
 import { crearSolicitud } from "../../core/solicitudes.js";
-import { unoSolo } from "../../core/http.js";
+import { mensajeErrorValidacion, unoSolo } from "../../core/http.js";
 
 export const actividadesRouter = Router();
 actividadesRouter.use(requireAuth);
@@ -36,7 +36,7 @@ const nuevaActividadSchema = z.object({
 actividadesRouter.post("/", requirePermission("nomina", "capturar"), async (req, res) => {
   const parsed = nuevaActividadSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
     return;
   }
 
@@ -64,7 +64,7 @@ const cambioTarifaSchema = z.object({
 actividadesRouter.patch("/:id/tarifa", requirePermission("nomina", "capturar"), async (req, res) => {
   const parsed = cambioTarifaSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
     return;
   }
   const actividad = await prisma.actividad.findUnique({ where: { id: unoSolo(req.params.id) } });
@@ -98,7 +98,7 @@ const activoSchema = z.object({ activo: z.boolean() });
 actividadesRouter.patch("/:id/activo", requirePermission("nomina", "editar"), async (req, res) => {
   const parsed = activoSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
     return;
   }
   const actividad = await prisma.actividad.update({ where: { id: unoSolo(req.params.id) }, data: { activo: parsed.data.activo } });

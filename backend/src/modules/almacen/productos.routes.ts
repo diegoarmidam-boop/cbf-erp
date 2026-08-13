@@ -4,7 +4,7 @@ import { requireAuth, requirePermission } from "../../middleware/auth.js";
 import { tienePermiso } from "../../core/permissions.js";
 import { crearSolicitud } from "../../core/solicitudes.js";
 import { prisma } from "../../core/db.js";
-import { unoSolo } from "../../core/http.js";
+import { mensajeErrorValidacion, unoSolo } from "../../core/http.js";
 import { crearProductoAutorizado, esCategoriaRegulada, listarProductos, productosAutorizados } from "./productos.js";
 
 export const productosRouter = Router();
@@ -32,7 +32,7 @@ const altaSchema = z.object({
 productosRouter.post("/", requirePermission("almacen", "capturar"), async (req, res) => {
   const parsed = altaSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
     return;
   }
   const regulado = esCategoriaRegulada(parsed.data.categoria);
@@ -63,7 +63,7 @@ const activoSchema = z.object({ activo: z.boolean() });
 productosRouter.patch("/:id/activo", requirePermission("almacen", "capturar"), async (req, res) => {
   const parsed = activoSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
     return;
   }
   const producto = await prisma.producto.findUniqueOrThrow({ where: { id: unoSolo(req.params.id) } });

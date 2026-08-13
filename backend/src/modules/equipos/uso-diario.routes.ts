@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { requireAuth, requirePermission } from "../../middleware/auth.js";
-import { unoSolo } from "../../core/http.js";
+import { mensajeErrorValidacion, unoSolo } from "../../core/http.js";
 import { listarUsoDiario, registrarUsoDiario } from "./uso-diario.js";
 
 export const usoDiarioRouter = Router();
@@ -16,7 +16,7 @@ const usoSchema = z.object({ fecha: z.string(), operadorId: z.string().min(1), h
 usoDiarioRouter.post("/:equipoId", requirePermission("equipos", "capturar"), async (req, res) => {
   const parsed = usoSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
     return;
   }
   const { fecha, operadorId, horas, huertaId } = parsed.data;

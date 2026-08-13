@@ -3,11 +3,17 @@ import { tienePermiso } from "./permissions.js";
 import { solicitudesPendientes } from "./solicitudes.js";
 import { listarOrdenes } from "../modules/compras/ordenes.js";
 import { listarCxP } from "../modules/compras/cxp.js";
-import { listarAplicaciones } from "../modules/aplicaciones/aplicaciones.js";
+import { listarAplicaciones, listarCancelacionesPendientesConfirmar } from "../modules/aplicaciones/aplicaciones.js";
 import { listarGranular } from "../modules/fertilizantes/granular.js";
 import { candadosDeHuerta } from "../modules/almacen/almacen-local.js";
 import { diasPendientesDeCierre } from "../modules/nomina/cierre.js";
 import type { Rol } from "@prisma/client";
+
+// Firma digital de recepción de cancelaciones (9.7): el documento dice
+// "Encargado de Bodega" específicamente — no todo el que tiene permiso de
+// "almacen" (ej. Supervisor de Huerta, por su Almacén Local). Mismo criterio
+// que ROLES_CONFIRMAR_BODEGA en aplicaciones.routes.ts, confirmado 10-ago-2026.
+const ROLES_CONFIRMAR_BODEGA: Rol[] = ["director_general", "encargado_sistemas", "encargado_bodega", "bodeguista"];
 
 // Mismo mapeo que solicitudes.routes.ts — qué módulo gobierna el permiso de autorizar cada tipo.
 const MODULO_POR_TIPO_SOLICITUD: Record<string, string> = {
@@ -97,7 +103,7 @@ export async function obtenerNotificaciones(rol: Rol, huertaIdAlcance: string | 
           id: `aplicacion-vencimiento-${a.id}`,
           tipo: "aplicacion_vencida",
           titulo: "Aplicación con 15+ días sin entregar",
-          detalle: `${a.huerta.nombre} — ${a.producto.nombreComercial}`,
+          detalle: `${a.huerta.nombre} — ${a.productos.map((p) => p.producto.nombreComercial).join(" + ")}`,
           urgente: true,
           fecha: a.fechaCreacion.toISOString(),
           enlace: "/aplicaciones",
@@ -108,7 +114,7 @@ export async function obtenerNotificaciones(rol: Rol, huertaIdAlcance: string | 
           id: `aplicacion-pendiente-${a.id}`,
           tipo: "aplicacion_pendiente",
           titulo: "Aplicación entregada con 15+ días sin terminar",
-          detalle: `${a.huerta.nombre} — ${a.producto.nombreComercial} (${(a.porcentajeAvance ?? 0).toFixed(0)}% avance)`,
+          detalle: `${a.huerta.nombre} — ${a.productos.map((p) => p.producto.nombreComercial).join(" + ")} (${(a.porcentajeAvance ?? 0).toFixed(0)}% avance)`,
           urgente: true,
           fecha: a.fechaCreacion.toISOString(),
           enlace: "/aplicaciones",
@@ -125,7 +131,7 @@ export async function obtenerNotificaciones(rol: Rol, huertaIdAlcance: string | 
           id: `granular-vencimiento-${f.id}`,
           tipo: "fertilizacion_vencida",
           titulo: "Fertilización con 15+ días sin entregar",
-          detalle: `${f.huerta.nombre} — ${f.producto.nombreComercial}`,
+          detalle: `${f.huerta.nombre} — ${f.productos.map((p) => p.producto.nombreComercial).join(" + ")}`,
           urgente: true,
           fecha: f.fechaCreacion.toISOString(),
           enlace: "/fertilizantes/granular",
@@ -136,7 +142,7 @@ export async function obtenerNotificaciones(rol: Rol, huertaIdAlcance: string | 
           id: `granular-pendiente-${f.id}`,
           tipo: "fertilizacion_pendiente",
           titulo: "Fertilización entregada con 15+ días sin terminar",
-          detalle: `${f.huerta.nombre} — ${f.producto.nombreComercial} (${(f.porcentajeAvance ?? 0).toFixed(0)}% avance)`,
+          detalle: `${f.huerta.nombre} — ${f.productos.map((p) => p.producto.nombreComercial).join(" + ")} (${(f.porcentajeAvance ?? 0).toFixed(0)}% avance)`,
           urgente: true,
           fecha: f.fechaCreacion.toISOString(),
           enlace: "/fertilizantes/granular",
@@ -161,6 +167,24 @@ export async function obtenerNotificaciones(rol: Rol, huertaIdAlcance: string | 
           enlace: "/almacen/local",
         });
       }
+    }
+  }
+
+  // 6-bis) Cancelaciones de Aplicaciones (9.7) esperando la firma digital de
+  // recepción del Encargado de Bodega — Bodega no tiene permiso sobre el
+  // módulo de Aplicaciones, así que este es el único lugar donde le llega el aviso.
+  if (ROLES_CONFIRMAR_BODEGA.includes(rol)) {
+    const pendientes = await listarCancelacionesPendientesConfirmar();
+    for (const p of pendientes) {
+      notificaciones.push({
+        id: `cancelacion-bodega-${p.id}`,
+        tipo: "cancelacion_pendiente_bodega",
+        titulo: "Aplicación cancelada — confirmar recepción en Almacén",
+        detalle: `${p.huerta.nombre} — se regresan ${p.productos.map((pr) => `${pr.cantidadRegresada} ${pr.unidad} de ${pr.nombreComercial}`).join(" + ")}`,
+        urgente: false,
+        fecha: (p.fechaCancelacion ?? new Date()).toISOString(),
+        enlace: "/almacen/inventario",
+      });
     }
   }
 

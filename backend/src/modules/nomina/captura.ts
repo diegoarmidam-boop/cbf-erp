@@ -1,8 +1,60 @@
-import { candadoDependeEmpacadoresBloquea, tarifaEfectiva, totalRegistro, type FechaISO } from "@cbf/shared";
+import { candadoDependeEmpacadoresBloquea, montoDependeEmpacadoresPorPersona, tarifaEfectiva, totalRegistro, type FechaISO } from "@cbf/shared";
 import { prisma } from "../../core/db.js";
 import { obtenerConfigNomina } from "./config.js";
 import { miembrosDeGrupoEnFecha } from "./grupos.js";
 import { aActividadCalc } from "./util.js";
+
+// Nombre real de la actividad "Empacador" (individual_caja) — de ahí sale
+// el número de cajas del que dependen los esquemas "Depende de Empacadores"
+// (Lavador, Pasador de fruta, Armador de cajas, Fungicida, Seleccionadoras,
+// etc.). Confirmado con Diego 11-ago-2026: por ahora, sin módulo de Empaque
+// todavía, todo esto se sigue capturando manual aquí en Nómina.
+const NOMBRE_ACTIVIDAD_EMPACADOR = "Empacador";
+
+/**
+ * Monto real de un registro de Nómina. "Depende de Empacadores" es un caso
+ * especial (9.11): lo que la persona capturó en "cantidad" no representa
+ * nada de pago en este esquema (solo marca que trabajó ese día en ese rol)
+ * — el pago real es una bolsa (cajas de "Empacador" ese día/Huerta × tarifa
+ * de ESTA actividad) dividida entre cuántas personas están en ESTA misma
+ * actividad ese día/Huerta. El resto de esquemas usan cantidad×tarifa
+ * normal (totalRegistro).
+ */
+export async function montoRegistroNomina(
+  registro: {
+    huertaId: string;
+    fecha: Date;
+    actividadId: string;
+    personalId?: string | null;
+    grupoId?: string | null;
+    cantidad: unknown;
+    actividad: { tarifa: unknown; usarTarifaGeneral: boolean; esquemaPago: string };
+  },
+  tarifaGeneralHora: number | null
+): Promise<number> {
+  if (registro.actividad.esquemaPago !== "depende_empacadores") {
+    return totalRegistro(Number(registro.cantidad), aActividadCalc(registro.actividad), tarifaGeneralHora);
+  }
+
+  const [cajasAgg, registrosMismaActividad] = await Promise.all([
+    prisma.registroNomina.aggregate({
+      _sum: { cantidad: true },
+      where: { huertaId: registro.huertaId, fecha: registro.fecha, actividad: { nombre: NOMBRE_ACTIVIDAD_EMPACADOR } },
+    }),
+    prisma.registroNomina.findMany({
+      where: { huertaId: registro.huertaId, fecha: registro.fecha, actividadId: registro.actividadId },
+      select: { personalId: true, grupoId: true },
+    }),
+  ]);
+  const cajasTotalesEmpacador = Number(cajasAgg._sum.cantidad ?? 0);
+  // Cada persona/grupo cuenta como una sola unidad al dividir — si el
+  // registro de esta línea es grupal, ese grupo se cuenta una vez aquí, y
+  // su parte se reparte entre los miembros más abajo (mismo patrón que
+  // grupal_remolque, sin dividir dos veces de más).
+  const unidades = new Set(registrosMismaActividad.map((r) => r.personalId ?? `grupo:${r.grupoId}`));
+  const tarifaActividad = tarifaEfectiva(aActividadCalc(registro.actividad), tarifaGeneralHora);
+  return montoDependeEmpacadoresPorPersona({ cajasTotalesEmpacador, tarifaActividad, personasEnActividad: unidades.size });
+}
 
 export interface FilaCapturaInput {
   tipo: "individual" | "grupal";
@@ -160,7 +212,7 @@ export async function gananciaDestajoEnRango(personalId: string, fechaIni: Fecha
   const config = await obtenerConfigNomina();
   let total = 0;
   for (const r of registros) {
-    const montoTotal = totalRegistro(Number(r.cantidad), aActividadCalc(r.actividad), config.tarifaGeneralHora);
+    const montoTotal = await montoRegistroNomina(r, config.tarifaGeneralHora);
     if (r.personalId === personalId) {
       total += montoTotal;
     } else if (r.grupoId) {

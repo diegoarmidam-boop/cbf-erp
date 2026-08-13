@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { api, ApiError } from "../../lib/api";
 import { useProductos } from "../../lib/useProductos";
 import type { ComparacionCalculada, ComparacionResumen, Proveedor } from "../../lib/types";
-import { formatearFecha } from "../../lib/fecha";
+import { formatearInstante } from "../../lib/fecha";
 
 interface CotizacionForm {
   proveedorId: string;
@@ -111,7 +111,7 @@ export default function Comparador() {
           ← Volver al Comparador
         </button>
         <h3 style={{ marginBottom: 4 }}>{detalle.nombre ?? "Comparación sin nombre"}</h3>
-        <div style={{ fontSize: 12, color: "var(--ink-soft)", marginBottom: 16 }}>{formatearFecha(detalle.fechaCreacion)}</div>
+        <div style={{ fontSize: 12, color: "var(--ink-soft)", marginBottom: 16 }}>{formatearInstante(detalle.fechaCreacion)}</div>
 
         {detalle.items.map((item) => (
           <div key={item.id} className="card" style={{ marginBottom: 16 }}>
@@ -320,7 +320,7 @@ export default function Comparador() {
                 </button>
               </td>
               <td>{c.items.map((it) => it.producto.nombreComercial).join(", ")}</td>
-              <td>{formatearFecha(c.fechaCreacion)}</td>
+              <td>{formatearInstante(c.fechaCreacion)}</td>
               <td>
                 <button className="btn-secondary" onClick={() => eliminar(c.id)}>
                   Borrar

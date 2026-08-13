@@ -238,8 +238,13 @@ export async function intentarComprometer(
   referenciaId: string,
   capturadoPorId: string
 ): Promise<boolean> {
+  // El filtro por productoId es necesario (10-ago-2026, varios productos
+  // por Aplicación/Fertilización comparten el mismo referenciaId) — sin
+  // él, comprometer el segundo producto de una misma programación
+  // detectaba el compromiso del PRIMER producto y se daba por hecho sin
+  // revisar su propio stock ni generar su propia orden de compra si faltaba.
   const yaComprometido = await tx.almacenCentralMovimiento.findFirst({
-    where: { referenciaId, tipo: "salida_comprometida" },
+    where: { referenciaId, productoId, tipo: "salida_comprometida" },
   });
   if (yaComprometido) return true;
 

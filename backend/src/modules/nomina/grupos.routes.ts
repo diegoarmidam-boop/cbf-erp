@@ -1,8 +1,9 @@
 import { Router } from "express";
 import { z } from "zod";
+import { hoyISO } from "@cbf/shared";
 import { prisma } from "../../core/db.js";
 import { requireAuth, requirePermission, requirePermissionAny } from "../../middleware/auth.js";
-import { unoSolo } from "../../core/http.js";
+import { mensajeErrorValidacion, unoSolo } from "../../core/http.js";
 import { agregarMiembroAGrupo, checklistDiaDeGrupo, guardarAsistenciaDia, miembrosDeGrupoEnFecha, quitarMiembroDeGrupo } from "./grupos.js";
 
 export const gruposRouter = Router();
@@ -31,7 +32,7 @@ const crearGrupoSchema = z.object({
 gruposRouter.post("/", requirePermission("nomina", "capturar"), async (req, res) => {
   const parsed = crearGrupoSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
     return;
   }
   const { nombre, persistente, fecha, miembros } = parsed.data;
@@ -47,7 +48,7 @@ const miembroSchema = z.object({ personalId: z.string().min(1), fecha: z.string(
 gruposRouter.post("/:id/miembros", requirePermission("nomina", "capturar"), async (req, res) => {
   const parsed = miembroSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
     return;
   }
   await agregarMiembroAGrupo(unoSolo(req.params.id), parsed.data.personalId, parsed.data.fecha);
@@ -55,7 +56,7 @@ gruposRouter.post("/:id/miembros", requirePermission("nomina", "capturar"), asyn
 });
 
 gruposRouter.delete("/:id/miembros/:personalId", requirePermission("nomina", "capturar"), async (req, res) => {
-  const fecha = typeof req.query.fecha === "string" ? req.query.fecha : new Date().toISOString().slice(0, 10);
+  const fecha = typeof req.query.fecha === "string" ? req.query.fecha : hoyISO();
   await quitarMiembroDeGrupo(unoSolo(req.params.id), unoSolo(req.params.personalId), fecha);
   res.status(204).end();
 });
@@ -72,7 +73,7 @@ const asistenciaDiaSchema = z.object({
 gruposRouter.post("/:id/asistencia/:fecha", requirePermission("nomina", "capturar"), async (req, res) => {
   const parsed = asistenciaDiaSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
     return;
   }
   await guardarAsistenciaDia(unoSolo(req.params.id), unoSolo(req.params.fecha), parsed.data.marcas, req.usuario!.usuarioId);

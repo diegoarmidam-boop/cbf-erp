@@ -16,7 +16,9 @@ export class MotivoNoAplicadoRequeridoError extends Error {
 /**
  * El fertirriego vigente de una Sección en una fecha (9.5/9.6): programado
  * por Sección, entregado a la Huerta, y dentro de su rango de fechas. Si
- * hay más de uno vigente (caso raro), se toma el más reciente.
+ * hay más de uno vigente (caso raro), se toma el más reciente. Puede tener
+ * varios productos (10-ago-2026) — todos se inyectan juntos, un solo "¿se
+ * metió?" para toda la mezcla, pero cada uno se lee/descuenta por separado.
  */
 async function fertirriegoVigente(tx: TransactionClient | typeof prisma, seccionId: string, fecha: Date) {
   const vinculo = await tx.fertirriegoSeccion.findFirst({
@@ -24,47 +26,54 @@ async function fertirriegoVigente(tx: TransactionClient | typeof prisma, seccion
       seccionId,
       fertirriego: { estado: "entregada", fechaInicio: { lte: fecha }, fechaFin: { gte: fecha } },
     },
-    include: { fertirriego: { include: { producto: true } } },
+    include: { fertirriego: { include: { productos: { include: { producto: true } } } } },
     orderBy: { fertirriego: { fechaCreacion: "desc" } },
   });
   return vinculo?.fertirriego ?? null;
 }
 
-/** Para que la pantalla sepa si ofrecer la casilla "¿se metió el fertirriego?" (9.6). */
+/** Para que la pantalla sepa si ofrecer la casilla "¿se metió el fertirriego?" (9.6), y con qué producto(s). */
 export async function fertirriegoActivoDeSeccion(seccionId: string, fecha: string) {
   const fertirriego = await fertirriegoVigente(prisma, seccionId, new Date(fecha));
   if (!fertirriego) return null;
-  return { fertirriegoId: fertirriego.id, producto: fertirriego.producto };
+  return { fertirriegoId: fertirriego.id, productos: fertirriego.productos.map((p) => p.producto) };
 }
 
-export function obtenerRiegoDiario(seccionId: string, fecha: string) {
-  return prisma.riegoRegistroDiario.findUnique({ where: { seccionId_fecha: { seccionId, fecha: new Date(fecha) } } });
+export async function obtenerRiegoDiario(seccionId: string, fecha: string) {
+  return prisma.riegoRegistroDiario.findUnique({
+    where: { seccionId_fecha: { seccionId, fecha: new Date(fecha) } },
+    include: { productos: true },
+  });
 }
 
 export function historialRiego(seccionId: string) {
-  return prisma.riegoRegistroDiario.findMany({ where: { seccionId }, orderBy: { fecha: "desc" } });
+  return prisma.riegoRegistroDiario.findMany({ where: { seccionId }, orderBy: { fecha: "desc" }, include: { productos: true } });
+}
+
+export interface CantidadProductoInput {
+  productoId: string;
+  cantidadAplicada: number;
 }
 
 export interface RegistrarRiegoInput {
   horas: number;
   fertirriegoConfirmado: boolean;
-  cantidadAplicada?: number;
+  cantidadesAplicadas?: CantidadProductoInput[];
   motivoNoAplicado?: string;
 }
 
 /**
  * Captura diaria por Sección de Riego (9.6): horas regadas (histórico,
  * nunca genera mano de obra — el Regador es rol fijo) y, si hay un
- * fertirriego vigente ya entregado, cuánto se metió ese día — ese consumo
- * descuenta directo el Almacén Local de la Huerta, mismo mecanismo que
- * Aplicaciones/Fertilización granular. Editar un día ya capturado ajusta
+ * fertirriego vigente ya entregado, cuánto se metió ese día de CADA
+ * producto (10-ago-2026, varios productos) — ese consumo descuenta directo
+ * el Almacén Local de la Huerta, mismo mecanismo que Aplicaciones/
+ * Fertilización granular, por producto. Editar un día ya capturado ajusta
  * el descuento por la diferencia en vez de volver a descontar todo.
  */
 export async function registrarRiegoDiario(seccionId: string, fecha: string, input: RegistrarRiegoInput, capturadoPorId: string) {
   const fechaDate = new Date(fecha);
   const seccion = await prisma.seccionRiego.findUniqueOrThrow({ where: { id: seccionId } });
-
-  const cantidadNueva = input.fertirriegoConfirmado ? (input.cantidadAplicada ?? 0) : 0;
 
   // Candado (9.6): si había un fertirriego programado/entregado ese día y no se metió, exige motivo — no se guarda en silencio.
   const fertirriegoDelDia = await fertirriegoVigente(prisma, seccionId, fechaDate);
@@ -72,37 +81,47 @@ export async function registrarRiegoDiario(seccionId: string, fecha: string, inp
     throw new MotivoNoAplicadoRequeridoError();
   }
   const motivoNoAplicado = fertirriegoDelDia && !input.fertirriegoConfirmado ? input.motivoNoAplicado : undefined;
+  const cantidadesNuevas = input.fertirriegoConfirmado ? input.cantidadesAplicadas ?? [] : [];
 
   return prisma.$transaction(async (tx) => {
-    const anterior = await tx.riegoRegistroDiario.findUnique({ where: { seccionId_fecha: { seccionId, fecha: fechaDate } } });
-    const cantidadAnterior = anterior?.fertirriegoConfirmado ? Number(anterior.cantidadAplicada ?? 0) : 0;
-    const delta = cantidadNueva - cantidadAnterior;
+    const anterior = await tx.riegoRegistroDiario.findUnique({
+      where: { seccionId_fecha: { seccionId, fecha: fechaDate } },
+      include: { productos: true },
+    });
 
-    if (delta !== 0) {
-      const fertirriego = await fertirriegoVigente(tx, seccionId, fechaDate);
-      if (!fertirriego) throw new FertirriegoNoActivoError();
+    if (cantidadesNuevas.length > 0 || (anterior?.fertirriegoConfirmado && anterior.productos.length > 0)) {
+      if (cantidadesNuevas.length > 0 && !fertirriegoDelDia) throw new FertirriegoNoActivoError();
 
-      const local = await tx.almacenLocal.upsert({
-        where: { huertaId_productoId: { huertaId: seccion.huertaId, productoId: fertirriego.productoId } },
-        update: { cantidadReportadaAcumulada: { increment: delta } },
-        create: { huertaId: seccion.huertaId, productoId: fertirriego.productoId, cantidadReportadaAcumulada: Math.max(delta, 0) },
-      });
-      await tx.almacenLocalMovimiento.create({
-        data: {
-          almacenLocalId: local.id,
-          tipo: delta > 0 ? "consumo_reportado" : "ajuste_manual",
-          cantidad: Math.abs(delta),
-          capturadoPorId,
-        },
-      });
+      const productosAnteriores = anterior?.fertirriegoConfirmado ? anterior.productos : [];
+      const todosLosProductoIds = new Set([...cantidadesNuevas.map((c) => c.productoId), ...productosAnteriores.map((p) => p.productoId)]);
+
+      for (const productoId of todosLosProductoIds) {
+        const cantidadNueva = cantidadesNuevas.find((c) => c.productoId === productoId)?.cantidadAplicada ?? 0;
+        const cantidadAnterior = Number(productosAnteriores.find((p) => p.productoId === productoId)?.cantidadAplicada ?? 0);
+        const delta = cantidadNueva - cantidadAnterior;
+        if (delta === 0) continue;
+
+        const local = await tx.almacenLocal.upsert({
+          where: { huertaId_productoId: { huertaId: seccion.huertaId, productoId } },
+          update: { cantidadReportadaAcumulada: { increment: delta } },
+          create: { huertaId: seccion.huertaId, productoId, cantidadReportadaAcumulada: Math.max(delta, 0) },
+        });
+        await tx.almacenLocalMovimiento.create({
+          data: {
+            almacenLocalId: local.id,
+            tipo: delta > 0 ? "consumo_reportado" : "ajuste_manual",
+            cantidad: Math.abs(delta),
+            capturadoPorId,
+          },
+        });
+      }
     }
 
-    return tx.riegoRegistroDiario.upsert({
+    const registro = await tx.riegoRegistroDiario.upsert({
       where: { seccionId_fecha: { seccionId, fecha: fechaDate } },
       update: {
         horas: input.horas,
         fertirriegoConfirmado: input.fertirriegoConfirmado,
-        cantidadAplicada: cantidadNueva,
         motivoNoAplicado: motivoNoAplicado ?? null,
         capturadoPorId,
       },
@@ -111,11 +130,19 @@ export async function registrarRiegoDiario(seccionId: string, fecha: string, inp
         fecha: fechaDate,
         horas: input.horas,
         fertirriegoConfirmado: input.fertirriegoConfirmado,
-        cantidadAplicada: cantidadNueva,
         motivoNoAplicado,
         capturadoPorId,
       },
     });
+
+    await tx.riegoRegistroDiarioProducto.deleteMany({ where: { registroId: registro.id } });
+    if (cantidadesNuevas.length > 0) {
+      await tx.riegoRegistroDiarioProducto.createMany({
+        data: cantidadesNuevas.map((c) => ({ registroId: registro.id, productoId: c.productoId, cantidadAplicada: c.cantidadAplicada })),
+      });
+    }
+
+    return tx.riegoRegistroDiario.findUniqueOrThrow({ where: { id: registro.id }, include: { productos: true } });
   });
 }
 
@@ -137,7 +164,10 @@ export async function estadoRiegoTodasUPs(fecha: string, huertaIdAlcance?: strin
       const filas = await Promise.all(
         secciones.map(async (seccion) => {
           const [registro, fertirriegoActivo] = await Promise.all([
-            prisma.riegoRegistroDiario.findUnique({ where: { seccionId_fecha: { seccionId: seccion.id, fecha: fechaDate } } }),
+            prisma.riegoRegistroDiario.findUnique({
+              where: { seccionId_fecha: { seccionId: seccion.id, fecha: fechaDate } },
+              include: { productos: true },
+            }),
             fertirriegoActivoDeSeccion(seccion.id, fecha),
           ]);
           return { seccion, registro, fertirriegoActivo };

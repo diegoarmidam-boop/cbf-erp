@@ -1,10 +1,10 @@
 import { Router } from "express";
 import { z } from "zod";
 import { requireAuth, requirePermission } from "../../middleware/auth.js";
-import { unoSolo } from "../../core/http.js";
+import { mensajeErrorValidacion, unoSolo } from "../../core/http.js";
 import { prisma } from "../../core/db.js";
 import { obtenerConfigNomina } from "./config.js";
-import { calcularPeriodoNomina } from "@cbf/shared";
+import { calcularPeriodoNomina, hoyISO } from "@cbf/shared";
 import { aplicarDescuento, cancelarPrestamo, crearPrestamo, historialPrestamo, listarPrestamos, PrestamoConDescuentosError } from "./prestamos.js";
 
 export const prestamosRouter = Router();
@@ -28,7 +28,7 @@ const nuevoSchema = z.object({
 prestamosRouter.post("/", requirePermission("nomina", "capturar"), async (req, res) => {
   const parsed = nuevoSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
     return;
   }
   const prestamo = await crearPrestamo(parsed.data);
@@ -44,7 +44,7 @@ prestamosRouter.get("/:id/historial", requirePermission("nomina", "ver"), async 
 // periodo" (neutral), y para saber si aplicar ahora sería adelantar (9.11).
 prestamosRouter.get("/periodo-actual", requirePermission("nomina", "ver"), async (_req, res) => {
   const config = await obtenerConfigNomina();
-  res.json(calcularPeriodoNomina(new Date().toISOString().slice(0, 10), config.diaCorteIndex));
+  res.json(calcularPeriodoNomina(hoyISO(), config.diaCorteIndex));
 });
 
 // Aplicar el descuento exige revisar y confirmar explícitamente — nunca es

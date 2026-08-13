@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import { requireAuth, requirePermission, huertaIdDeAlcance } from "../../middleware/auth.js";
-import { unoSolo } from "../../core/http.js";
+import { mensajeErrorValidacion, unoSolo } from "../../core/http.js";
 import { prisma } from "../../core/db.js";
 import {
   estadoRiegoTodasUPs,
@@ -62,10 +62,15 @@ riegoRouter.get("/:seccionId/:fecha", requirePermission("riego", "ver"), async (
   res.json({ registro, fertirriegoActivo });
 });
 
+const cantidadProductoSchema = z.object({
+  productoId: z.string().min(1),
+  cantidadAplicada: z.number().positive(),
+});
+
 const registrarSchema = z.object({
   horas: z.number().nonnegative(),
   fertirriegoConfirmado: z.boolean(),
-  cantidadAplicada: z.number().positive().optional(),
+  cantidadesAplicadas: z.array(cantidadProductoSchema).optional(),
   motivoNoAplicado: z.string().optional(),
 });
 
@@ -76,7 +81,7 @@ riegoRouter.post("/:seccionId/:fecha", requirePermission("riego", "capturar"), a
 
   const parsed = registrarSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
     return;
   }
   try {

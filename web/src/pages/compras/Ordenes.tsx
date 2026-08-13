@@ -3,7 +3,7 @@ import { api, ApiError } from "../../lib/api";
 import { useProductos } from "../../lib/useProductos";
 import type { MejorProveedor, OrdenCompra, Proveedor } from "../../lib/types";
 import FechaInput from "../../components/FechaInput";
-import { formatearFecha } from "../../lib/fecha";
+import { formatearFecha, formatearInstante } from "../../lib/fecha";
 import { presentacionTexto } from "../../lib/producto";
 
 const ETIQUETAS_ESTADO: Record<string, string> = {
@@ -179,7 +179,7 @@ export default function Ordenes() {
                 {o.motivoRechazo && <div style={{ fontSize: 12, color: "var(--danger)" }}>Motivo: {o.motivoRechazo}</div>}
                 {o.estado === "recibida" && o.recepciones.length > 0 && (
                   <div style={{ fontSize: 12, color: "var(--ink-soft)" }}>
-                    Recibido: {o.recepciones.map((r) => `${r.cantidadRecibida} ${o.producto.unidad} el ${formatearFecha(r.fechaRecepcion)}`).join(" · ")}
+                    Recibido: {o.recepciones.map((r) => `${r.cantidadRecibida} ${o.producto.unidad} el ${formatearInstante(r.fechaRecepcion)}`).join(" · ")}
                   </div>
                 )}
               </div>

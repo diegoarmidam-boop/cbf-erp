@@ -12,12 +12,14 @@ const ROLES_EDITAR_NOMINA = ["director_general", "recursos_humanos", "encargado_
 const ETIQUETAS_ORIGEN: Record<string, string> = {
   automatico_aplicacion: "Automático — Aplicación",
   automatico_fertilizacion: "Automático — Fertilización",
+  automatico_actividad: "Automático — Actividad",
   automatico_cosecha: "Automático — Cosecha",
   automatico_empaque: "Automático — Empaque",
 };
 
 function hoyISO(): string {
-  return new Date().toISOString().slice(0, 10);
+  const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 let contadorKey = 0;

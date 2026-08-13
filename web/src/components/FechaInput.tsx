@@ -70,6 +70,7 @@ export default function FechaInput({ value, onChange, required, disabled, id }: 
       placeholder="DD/MM/AAAA"
       value={texto}
       onChange={alCambiar}
+      onFocus={(e) => e.target.select()}
       required={required}
       disabled={disabled}
       maxLength={10}

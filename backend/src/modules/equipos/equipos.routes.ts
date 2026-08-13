@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { requireAuth, requirePermission } from "../../middleware/auth.js";
 import { prisma } from "../../core/db.js";
-import { unoSolo } from "../../core/http.js";
+import { mensajeErrorValidacion, unoSolo } from "../../core/http.js";
 import { crearEquipo, listarEquipos, sugerirFolio } from "./equipos.js";
 
 export const equiposRouter = Router();
@@ -42,7 +42,7 @@ const altaSchema = z.object({
 equiposRouter.post("/", requirePermission("equipos", "capturar"), async (req, res) => {
   const parsed = altaSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
     return;
   }
   try {
@@ -59,7 +59,7 @@ const activoSchema = z.object({ activo: z.boolean() });
 equiposRouter.patch("/:id/activo", requirePermission("equipos", "editar"), async (req, res) => {
   const parsed = activoSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
     return;
   }
   const equipo = await prisma.equipo.update({ where: { id: unoSolo(req.params.id) }, data: { activo: parsed.data.activo } });

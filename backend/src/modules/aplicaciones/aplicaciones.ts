@@ -24,7 +24,7 @@ const DIAS_VENCIMIENTO = 15;
 
 export class ProductoNoAutorizadoAplicacionError extends Error {
   constructor() {
-    super("Este producto no es un agroquímico autorizado — no se puede programar una aplicación con él.");
+    super("Uno de los productos elegidos no es un agroquímico autorizado — no se puede programar una aplicación con él.");
   }
 }
 
@@ -36,7 +36,7 @@ export class TransicionAplicacionInvalidaError extends Error {
 
 export class StockNoComprometidoError extends Error {
   constructor() {
-    super("Todavía no hay suficiente stock apartado para esta aplicación — espera a que llegue la compra automática.");
+    super("Todavía no hay suficiente stock apartado para todos los productos de esta aplicación — espera a que llegue la compra automática.");
   }
 }
 
@@ -62,31 +62,43 @@ export class NoSePuedeCancelarError extends Error {
 
 export type ModalidadAplicacion = "mochila" | "turbina" | "aguilon";
 
+export interface ProductoAplicacionInput {
+  productoId: string;
+  concentracionValor: number;
+  concentracionUnidad: ConcentracionUnidad;
+}
+
 export interface ProgramarAplicacionInput {
   huertaId: string;
   cuadroIds: string[];
-  productoId: string;
+  productos: ProductoAplicacionInput[];
   recursoSugerido: ModalidadAplicacion;
-  concentracionValor: number;
-  concentracionUnidad: ConcentracionUnidad;
   litrosMezclaPorHa: number;
   fechaInicio: string;
   fechaFin: string;
 }
 
 /**
- * Paso 1, Programar (9.7): calcula la cantidad total, y si el Almacén
+ * Paso 1, Programar (9.7): calcula la cantidad total de cada producto (10-
+ * ago-2026, varios productos en el mismo tanque — comparten litrosMezclaPorHa,
+ * cada uno con su propia concentración), y para cada uno, si el Almacén
  * alcanza la aparta de inmediato ("comprometido"); si no alcanza, no
  * bloquea — genera automático una orden de Compras por el faltante, sin
- * requerir autorización adicional (ya la trae de quien programó).
+ * requerir autorización adicional (ya la trae de quien programó). Cada
+ * producto se autoriza/aparta/compra por separado, aunque se programen juntos.
  */
 export async function programarAplicacion(input: ProgramarAplicacionInput, creadoPorId: string) {
   if (input.cuadroIds.length === 0) {
     throw new Error("Elige al menos un Cuadro.");
   }
-  const producto = await prisma.producto.findUniqueOrThrow({ where: { id: input.productoId } });
-  if (producto.categoria !== "agroquimico" || !producto.autorizado) {
-    throw new ProductoNoAutorizadoAplicacionError();
+  if (!input.productos || input.productos.length === 0) {
+    throw new Error("Elige al menos un producto.");
+  }
+  const productos = await prisma.producto.findMany({ where: { id: { in: input.productos.map((p) => p.productoId) } } });
+  for (const p of productos) {
+    if (p.categoria !== "agroquimico" || !p.autorizado) {
+      throw new ProductoNoAutorizadoAplicacionError();
+    }
   }
 
   let hectareasTotales = 0;
@@ -97,25 +109,14 @@ export async function programarAplicacion(input: ProgramarAplicacionInput, cread
     hectareasTotales += Number(version.hectareas);
   }
 
-  const cantidadTotalCalculada = calcularCantidadTotal(
-    input.concentracionValor,
-    input.concentracionUnidad,
-    input.litrosMezclaPorHa,
-    hectareasTotales
-  );
-
   return prisma.$transaction(async (tx) => {
     const aplicacion = await tx.aplicacion.create({
       data: {
         huertaId: input.huertaId,
-        productoId: input.productoId,
         recursoSugerido: input.recursoSugerido,
-        concentracionValor: input.concentracionValor,
-        concentracionUnidad: input.concentracionUnidad,
         litrosMezclaPorHa: input.litrosMezclaPorHa,
         fechaInicio: fechaRef,
         fechaFin: new Date(input.fechaFin),
-        cantidadTotalCalculada,
         hectareasTotalesProgramadas: hectareasTotales,
         creadoPorId,
       },
@@ -124,20 +125,33 @@ export async function programarAplicacion(input: ProgramarAplicacionInput, cread
       data: input.cuadroIds.map((cuadroId) => ({ aplicacionId: aplicacion.id, cuadroId })),
     });
 
-    const comprometido = await intentarComprometer(tx, input.productoId, cantidadTotalCalculada, aplicacion.id, creadoPorId);
-    if (!comprometido) {
-      const disponible = await stockTotalProductoTx(tx, input.productoId);
-      const faltante = cantidadTotalCalculada - disponible;
-      await tx.ordenCompra.create({
+    for (const p of input.productos) {
+      const cantidadTotalCalculada = calcularCantidadTotal(p.concentracionValor, p.concentracionUnidad, input.litrosMezclaPorHa, hectareasTotales);
+      await tx.aplicacionProducto.create({
         data: {
-          origen: "automatica",
-          productoId: input.productoId,
-          cantidadSolicitada: faltante,
-          estado: "pendiente_cotizar",
-          referenciaAplicacionId: aplicacion.id,
-          creadoPorId,
+          aplicacionId: aplicacion.id,
+          productoId: p.productoId,
+          concentracionValor: p.concentracionValor,
+          concentracionUnidad: p.concentracionUnidad,
+          cantidadTotalCalculada,
         },
       });
+
+      const comprometido = await intentarComprometer(tx, p.productoId, cantidadTotalCalculada, aplicacion.id, creadoPorId);
+      if (!comprometido) {
+        const disponible = await stockTotalProductoTx(tx, p.productoId);
+        const faltante = cantidadTotalCalculada - disponible;
+        await tx.ordenCompra.create({
+          data: {
+            origen: "automatica",
+            productoId: p.productoId,
+            cantidadSolicitada: faltante,
+            estado: "pendiente_cotizar",
+            referenciaAplicacionId: aplicacion.id,
+            creadoPorId,
+          },
+        });
+      }
     }
     return aplicacion;
   });
@@ -154,7 +168,7 @@ const INCLUDE_LINEA = { tractor: true, operador: true, implemento: true, persona
 
 const INCLUDE_APLICACION = {
   huerta: true,
-  producto: true,
+  productos: { include: { producto: true } },
   cuadros: { include: { cuadro: true } },
   realizadas: {
     include: { cuadros: { include: { cuadro: true } }, lineas: { include: INCLUDE_LINEA } },
@@ -176,6 +190,7 @@ type AplicacionConRealizadas = {
   estado: string;
   fechaCreacion: Date;
   hectareasTotalesProgramadas: Prisma.Decimal;
+  productos: { productoId: string; cantidadTotalCalculada: Prisma.Decimal }[];
   cuadros: { cuadroId: string; cuadro: { nombre: string } }[];
   realizadas: { id: string; cuadros: { cuadroId: string; hectareas: Prisma.Decimal }[]; lineas: { horas: Prisma.Decimal }[] }[];
 };
@@ -195,12 +210,18 @@ async function hectareasRestantesPorCuadro(aplicacion: AplicacionConRealizadas, 
 }
 
 async function enriquecerConAlertas<T extends AplicacionConRealizadas>(aplicacion: T, tx: TransactionClient | typeof prisma = prisma) {
-  const comprometido = await tx.almacenCentralMovimiento.findFirst({
+  // Comprometido/entregado a nivel Aplicación = TODOS sus productos lo están
+  // (10-ago-2026, varios productos): si uno todavía espera compra, la
+  // Aplicación completa se queda en "programada" hasta que los demás alcancen.
+  const movimientosComprometido = await tx.almacenCentralMovimiento.findMany({
     where: { referenciaId: aplicacion.id, tipo: "salida_comprometida" },
   });
-  const entrega = await tx.almacenCentralMovimiento.findFirst({
+  const movimientosEntrega = await tx.almacenCentralMovimiento.findMany({
     where: { referenciaId: aplicacion.id, tipo: "salida_real" },
   });
+  const comprometido = aplicacion.productos.every((p) => movimientosComprometido.some((m) => m.productoId === p.productoId));
+  const entrega = movimientosEntrega[0];
+
   const diasSinEntregar = aplicacion.estado === "programada" ? Math.floor((Date.now() - aplicacion.fechaCreacion.getTime()) / 86_400_000) : null;
   const diasSinAplicar =
     (aplicacion.estado === "entregada" || aplicacion.estado === "realizada") && entrega
@@ -214,7 +235,7 @@ async function enriquecerConAlertas<T extends AplicacionConRealizadas>(aplicacio
 
   return {
     ...aplicacion,
-    comprometido: !!comprometido,
+    comprometido,
     diasSinEntregar,
     alertaVencimiento: (diasSinEntregar ?? 0) > DIAS_VENCIMIENTO,
     diasSinAplicar,
@@ -235,28 +256,24 @@ export async function obtenerAplicacion(id: string) {
 }
 
 /**
- * Confirma la entrega física del producto a la Huerta (9.7) — acción de
- * Almacén, no de quien programó. Solo puede pasar si ya hay stock
- * comprometido para esta aplicación.
+ * Confirma la entrega física de TODOS los productos a la Huerta (9.7) —
+ * acción de Almacén, no de quien programó. Solo puede pasar si ya hay stock
+ * comprometido para cada producto de esta aplicación.
  */
 export async function confirmarEntrega(aplicacionId: string, capturadoPorId: string) {
-  const aplicacion = await prisma.aplicacion.findUniqueOrThrow({ where: { id: aplicacionId } });
+  const aplicacion = await prisma.aplicacion.findUniqueOrThrow({ where: { id: aplicacionId }, include: { productos: true } });
   if (aplicacion.estado !== "programada") throw new TransicionAplicacionInvalidaError("programada");
 
   return prisma.$transaction(async (tx) => {
-    const comprometido = await tx.almacenCentralMovimiento.findFirst({
+    const comprometidos = await tx.almacenCentralMovimiento.findMany({
       where: { referenciaId: aplicacionId, tipo: "salida_comprometida" },
     });
-    if (!comprometido) throw new StockNoComprometidoError();
+    const faltaAlguno = aplicacion.productos.some((p) => !comprometidos.some((m) => m.productoId === p.productoId));
+    if (faltaAlguno) throw new StockNoComprometidoError();
 
-    await confirmarEntregaComprometida(
-      tx,
-      aplicacion.productoId,
-      aplicacion.huertaId,
-      Number(aplicacion.cantidadTotalCalculada),
-      aplicacionId,
-      capturadoPorId
-    );
+    for (const p of aplicacion.productos) {
+      await confirmarEntregaComprometida(tx, p.productoId, aplicacion.huertaId, Number(p.cantidadTotalCalculada), aplicacionId, capturadoPorId);
+    }
     return tx.aplicacion.update({ where: { id: aplicacionId }, data: { estado: "entregada" } });
   });
 }
@@ -284,7 +301,7 @@ export interface RegistrarRealizadaInput {
 
 /**
  * Captura de maquinaria y personas por reporte (9.7, confirmado 8-ago-2026):
- * cada línea es una de las 3 modalidades fijas — Turbina/Aguilón exigen
+ * cada línea es una de las 3 modalidades fijas. Turbina/Aguilón exigen
  * Tractor+Operador+Implemento; Aguilón además necesita su propia gente
  * detrás; Mochila solo lleva gente, sin tractor/implemento; Turbina no
  * lleva gente extra (el operador ya está contado aparte).
@@ -354,6 +371,34 @@ async function validarCandadoCuadrosReporte(aplicacionId: string, cuadros: Cuadr
 }
 
 /**
+ * Descuenta el Almacén Local de cada producto de la Aplicación, proporcional
+ * al avance de ESTE reporte (10-ago-2026, varios productos): el avance por
+ * Cuadro/hectáreas es uno solo, compartido para toda la mezcla — pero el
+ * descuento de inventario es individual, cada producto de su propio saldo.
+ */
+async function descontarAlmacenLocalPorProductos(
+  tx: TransactionClient,
+  huertaId: string,
+  productos: { productoId: string; cantidadTotalCalculada: Prisma.Decimal }[],
+  hectareasEsteReporte: number,
+  hectareasTotalesProgramadas: number,
+  referenciaId: string,
+  capturadoPorId: string
+) {
+  for (const p of productos) {
+    const cantidadEsteReporte = (hectareasEsteReporte / hectareasTotalesProgramadas) * Number(p.cantidadTotalCalculada);
+    const local = await tx.almacenLocal.upsert({
+      where: { huertaId_productoId: { huertaId, productoId: p.productoId } },
+      update: { cantidadReportadaAcumulada: { increment: cantidadEsteReporte } },
+      create: { huertaId, productoId: p.productoId, cantidadReportadaAcumulada: cantidadEsteReporte },
+    });
+    await tx.almacenLocalMovimiento.create({
+      data: { almacenLocalId: local.id, tipo: "consumo_reportado", cantidad: cantidadEsteReporte, referenciaId, capturadoPorId },
+    });
+  }
+}
+
+/**
  * Paso 2, Registrar como realizada (9.7) — solo después de la entrega.
  * Cada reporte captura qué Cuadro(s) se avanzaron y cuántas hectáreas de
  * cada uno (corrección de fondo 8-ago-2026): el descuento del Almacén
@@ -365,7 +410,7 @@ export async function registrarRealizada(aplicacionId: string, input: RegistrarR
   validarLineas(input.lineas);
   if (!input.cuadros || input.cuadros.length === 0) throw new Error("Falta capturar qué Cuadro(s) se avanzaron y sus hectáreas en este reporte.");
 
-  const aplicacion = await prisma.aplicacion.findUniqueOrThrow({ where: { id: aplicacionId }, include: { cuadros: true } });
+  const aplicacion = await prisma.aplicacion.findUniqueOrThrow({ where: { id: aplicacionId }, include: { cuadros: true, productos: true } });
   if (aplicacion.estado !== "entregada" && aplicacion.estado !== "realizada") {
     throw new Error(
       "No se ha entregado el producto a esta Huerta todavía — Almacén debe confirmar la entrega antes de registrar la aplicación como realizada."
@@ -388,7 +433,6 @@ export async function registrarRealizada(aplicacionId: string, input: RegistrarR
   const esPrimeraVezRealizada = aplicacion.estado === "entregada";
 
   const hectareasEsteReporte = input.cuadros.reduce((s, c) => s + c.hectareas, 0);
-  const cantidadEsteReporte = (hectareasEsteReporte / Number(aplicacion.hectareasTotalesProgramadas)) * Number(aplicacion.cantidadTotalCalculada);
 
   return prisma.$transaction(async (tx) => {
     const realizada = await tx.aplicacionRealizada.create({
@@ -406,14 +450,15 @@ export async function registrarRealizada(aplicacionId: string, input: RegistrarR
       await tx.aplicacion.update({ where: { id: aplicacionId }, data: { estado: "realizada" } });
     }
 
-    const local = await tx.almacenLocal.upsert({
-      where: { huertaId_productoId: { huertaId: aplicacion.huertaId, productoId: aplicacion.productoId } },
-      update: { cantidadReportadaAcumulada: { increment: cantidadEsteReporte } },
-      create: { huertaId: aplicacion.huertaId, productoId: aplicacion.productoId, cantidadReportadaAcumulada: cantidadEsteReporte },
-    });
-    await tx.almacenLocalMovimiento.create({
-      data: { almacenLocalId: local.id, tipo: "consumo_reportado", cantidad: cantidadEsteReporte, referenciaId: aplicacionId, capturadoPorId: registradoPorId },
-    });
+    await descontarAlmacenLocalPorProductos(
+      tx,
+      aplicacion.huertaId,
+      aplicacion.productos,
+      hectareasEsteReporte,
+      Number(aplicacion.hectareasTotalesProgramadas),
+      aplicacionId,
+      registradoPorId
+    );
 
     return tx.aplicacionRealizada.findUniqueOrThrow({
       where: { id: realizada.id },
@@ -492,7 +537,7 @@ export async function editarRealizada(realizadaId: string, input: EditarRealizad
 
   const realizada = await prisma.aplicacionRealizada.findUniqueOrThrow({
     where: { id: realizadaId },
-    include: { aplicacion: { include: { cuadros: true } }, cuadros: true, lineas: true },
+    include: { aplicacion: { include: { cuadros: true, productos: true } }, cuadros: true, lineas: true },
   });
   const fechaISO = realizada.fechaReal.toISOString().slice(0, 10);
   if (await diaEstaCerrado(realizada.aplicacion.huertaId, fechaISO)) throw new DiaCerradoAplicacionError();
@@ -507,9 +552,6 @@ export async function editarRealizada(realizadaId: string, input: EditarRealizad
   const hectareasAntes = realizada.cuadros.reduce((s, c) => s + Number(c.hectareas), 0);
   const hectareasDespues = input.cuadros.reduce((s, c) => s + c.hectareas, 0);
   const base = Number(aplicacion.hectareasTotalesProgramadas);
-  const cantidadAntes = (hectareasAntes / base) * Number(aplicacion.cantidadTotalCalculada);
-  const cantidadDespues = (hectareasDespues / base) * Number(aplicacion.cantidadTotalCalculada);
-  const delta = cantidadDespues - cantidadAntes;
 
   const actividad = await prisma.actividad.findFirstOrThrow({ where: { nombre: NOMBRE_ACTIVIDAD_APLICACION } });
   const config = await obtenerConfigNomina();
@@ -537,11 +579,16 @@ export async function editarRealizada(realizadaId: string, input: EditarRealizad
       editadoPorId
     );
 
-    if (Math.abs(delta) > 0.0000001) {
+    for (const p of aplicacion.productos) {
+      const cantidadAntes = (hectareasAntes / base) * Number(p.cantidadTotalCalculada);
+      const cantidadDespues = (hectareasDespues / base) * Number(p.cantidadTotalCalculada);
+      const delta = cantidadDespues - cantidadAntes;
+      if (Math.abs(delta) <= 0.0000001) continue;
+
       const local = await tx.almacenLocal.upsert({
-        where: { huertaId_productoId: { huertaId: aplicacion.huertaId, productoId: aplicacion.productoId } },
+        where: { huertaId_productoId: { huertaId: aplicacion.huertaId, productoId: p.productoId } },
         update: { cantidadReportadaAcumulada: { increment: delta } },
-        create: { huertaId: aplicacion.huertaId, productoId: aplicacion.productoId, cantidadReportadaAcumulada: delta },
+        create: { huertaId: aplicacion.huertaId, productoId: p.productoId, cantidadReportadaAcumulada: delta },
       });
       await tx.almacenLocalMovimiento.create({
         data: {
@@ -564,27 +611,29 @@ export async function editarRealizada(realizadaId: string, input: EditarRealizad
 /**
  * Cierra una aplicación programada que nunca se entregó — ya sea porque
  * pasaron los 15 días de vencimiento (9.7) o por cancelación manual de
- * Dirección/Gerencia Técnica. Libera el stock comprometido si lo había.
- * Solo aplica al caso "nunca salió de bodega" — si ya se entregó al rancho,
- * ver `cancelarAplicacionEntregada`.
+ * Dirección/Gerencia Técnica. Libera el stock comprometido de cada
+ * producto que sí llegó a apartarse. Solo aplica al caso "nunca salió de
+ * bodega" — si ya se entregó al rancho, ver `cancelarAplicacionEntregada`.
  */
 export async function liberarAplicacionVencida(aplicacionId: string, capturadoPorId: string) {
-  const aplicacion = await prisma.aplicacion.findUniqueOrThrow({ where: { id: aplicacionId } });
+  const aplicacion = await prisma.aplicacion.findUniqueOrThrow({ where: { id: aplicacionId }, include: { productos: true } });
   if (aplicacion.estado !== "programada") throw new TransicionAplicacionInvalidaError("programada");
 
   return prisma.$transaction(async (tx) => {
-    const comprometido = await tx.almacenCentralMovimiento.findFirst({
-      where: { referenciaId: aplicacionId, tipo: "salida_comprometida" },
-    });
-    if (comprometido) {
-      await liberarComprometido(
-        tx,
-        aplicacion.productoId,
-        Number(aplicacion.cantidadTotalCalculada),
-        aplicacionId,
-        capturadoPorId,
-        "Liberación de aplicación vencida (15 días sin entregar) o cancelada manualmente."
-      );
+    for (const p of aplicacion.productos) {
+      const comprometido = await tx.almacenCentralMovimiento.findFirst({
+        where: { referenciaId: aplicacionId, tipo: "salida_comprometida", productoId: p.productoId },
+      });
+      if (comprometido) {
+        await liberarComprometido(
+          tx,
+          p.productoId,
+          Number(p.cantidadTotalCalculada),
+          aplicacionId,
+          capturadoPorId,
+          "Liberación de aplicación vencida (15 días sin entregar) o cancelada manualmente."
+        );
+      }
     }
     return tx.aplicacion.update({ where: { id: aplicacionId }, data: { estado: "vencida" } });
   });
@@ -595,12 +644,13 @@ export async function liberarAplicacionVencida(aplicacionId: string, capturadoPo
  * (9.7, reemplaza "Liberar" para este caso): el producto ya llegó al
  * rancho pero no se terminó de aplicar. Es el proceso inverso a la salida
  * de Almacén hacia el campo — revierte solo la porción NO aplicada
- * (proporcional a lo que sí quedó reportado como avance real). El ajuste
- * de inventario ocurre de inmediato; la confirmación de Bodega es un paso
- * de registro aparte que no lo bloquea (ver `confirmarRecepcionCancelacion`).
+ * (proporcional a lo que sí quedó reportado como avance real), para CADA
+ * producto de la Aplicación por separado (10-ago-2026, varios productos).
+ * El ajuste de inventario ocurre de inmediato; la confirmación de Bodega es
+ * un paso de registro aparte que no lo bloquea (ver `confirmarRecepcionCancelacion`).
  */
 export async function cancelarAplicacionEntregada(aplicacionId: string, canceladaPorId: string) {
-  const aplicacion = await prisma.aplicacion.findUniqueOrThrow({ where: { id: aplicacionId } });
+  const aplicacion = await prisma.aplicacion.findUniqueOrThrow({ where: { id: aplicacionId }, include: { productos: true } });
   if (aplicacion.estado !== "entregada" && aplicacion.estado !== "realizada") {
     throw new NoSePuedeCancelarError("Solo se puede cancelar una aplicación que ya fue entregada al rancho.");
   }
@@ -622,39 +672,41 @@ export async function cancelarAplicacionEntregada(aplicacionId: string, cancelad
     throw new NoSePuedeCancelarError("Esta aplicación ya quedó completamente aplicada — no hay nada que cancelar.");
   }
 
-  const cantidadARegresar = Number(aplicacion.cantidadTotalCalculada) * (1 - porcentajeAvance);
-
   return prisma.$transaction(async (tx) => {
-    const local = await tx.almacenLocal.update({
-      where: { huertaId_productoId: { huertaId: aplicacion.huertaId, productoId: aplicacion.productoId } },
-      data: { cantidadRecibidaAcumulada: { decrement: cantidadARegresar } },
-    });
-    await tx.almacenLocalMovimiento.create({
-      data: {
-        almacenLocalId: local.id,
-        tipo: "ajuste_manual",
-        cantidad: -cantidadARegresar,
-        referenciaId: aplicacionId,
-        capturadoPorId: canceladaPorId,
-      },
-    });
+    for (const p of aplicacion.productos) {
+      const cantidadARegresar = Number(p.cantidadTotalCalculada) * (1 - porcentajeAvance);
 
-    const lote = await tx.productoLote.findFirst({ where: { productoId: aplicacion.productoId } });
-    if (lote) {
-      await tx.productoLote.update({ where: { id: lote.id }, data: { cantidadActual: { increment: cantidadARegresar } } });
-    } else {
-      await tx.productoLote.create({ data: { productoId: aplicacion.productoId, lote: "ABONO", cantidadActual: cantidadARegresar } });
+      const local = await tx.almacenLocal.update({
+        where: { huertaId_productoId: { huertaId: aplicacion.huertaId, productoId: p.productoId } },
+        data: { cantidadRecibidaAcumulada: { decrement: cantidadARegresar } },
+      });
+      await tx.almacenLocalMovimiento.create({
+        data: {
+          almacenLocalId: local.id,
+          tipo: "ajuste_manual",
+          cantidad: -cantidadARegresar,
+          referenciaId: aplicacionId,
+          capturadoPorId: canceladaPorId,
+        },
+      });
+
+      const lote = await tx.productoLote.findFirst({ where: { productoId: p.productoId } });
+      if (lote) {
+        await tx.productoLote.update({ where: { id: lote.id }, data: { cantidadActual: { increment: cantidadARegresar } } });
+      } else {
+        await tx.productoLote.create({ data: { productoId: p.productoId, lote: "ABONO", cantidadActual: cantidadARegresar } });
+      }
+      await tx.almacenCentralMovimiento.create({
+        data: {
+          productoId: p.productoId,
+          tipo: "abono_sobrante",
+          cantidad: cantidadARegresar,
+          huertaDestinoId: aplicacion.huertaId,
+          referenciaId: aplicacionId,
+          capturadoPorId: canceladaPorId,
+        },
+      });
     }
-    await tx.almacenCentralMovimiento.create({
-      data: {
-        productoId: aplicacion.productoId,
-        tipo: "abono_sobrante",
-        cantidad: cantidadARegresar,
-        huertaDestinoId: aplicacion.huertaId,
-        referenciaId: aplicacionId,
-        capturadoPorId: canceladaPorId,
-      },
-    });
 
     return tx.aplicacion.update({
       where: { id: aplicacionId },
@@ -676,6 +728,46 @@ export async function confirmarRecepcionCancelacion(aplicacionId: string, confir
     where: { id: aplicacionId },
     data: { confirmacionBodegaPorId: confirmadoPorId, fechaConfirmacionBodega: new Date() },
   });
+}
+
+/**
+ * Cancelaciones entregadas y esperando la firma digital de recepción del
+ * Encargado de Bodega (9.7). Vive aparte de `listarAplicaciones` porque
+ * Bodega no tiene permiso sobre el módulo de Aplicaciones (ver matriz de
+ * permisos, 9.7) — el módulo no le aparece en el menú (regla del bloque 4),
+ * así que esta lista se expone bajo el permiso de Almacén en vez del de
+ * Aplicaciones, para que sí le llegue el aviso de que se le va a regresar
+ * producto. Con varios productos (10-ago-2026), el aviso lista cada uno con
+ * su propia cantidad a regresar.
+ */
+export async function listarCancelacionesPendientesConfirmar() {
+  const aplicaciones = await prisma.aplicacion.findMany({
+    where: { estado: "cancelada", confirmacionBodegaPorId: null },
+    include: { huerta: true, productos: { include: { producto: true } } },
+    orderBy: { fechaCancelacion: "asc" },
+  });
+  return Promise.all(
+    aplicaciones.map(async (a) => {
+      const productos = await Promise.all(
+        a.productos.map(async (p) => {
+          const abono = await prisma.almacenCentralMovimiento.findFirst({
+            where: { referenciaId: a.id, tipo: "abono_sobrante", productoId: p.productoId },
+          });
+          return {
+            nombreComercial: p.producto.nombreComercial,
+            unidad: p.producto.unidad,
+            cantidadRegresada: abono ? Number(abono.cantidad) : 0,
+          };
+        })
+      );
+      return {
+        id: a.id,
+        huerta: { nombre: a.huerta.nombre },
+        productos,
+        fechaCancelacion: a.fechaCancelacion,
+      };
+    })
+  );
 }
 
 /** Catálogo de agroquímicos ya autorizados — lo único elegible al programar (9.7). */

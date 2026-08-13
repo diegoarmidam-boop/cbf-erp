@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { requireAuth, requirePermission } from "../../middleware/auth.js";
-import { unoSolo } from "../../core/http.js";
+import { mensajeErrorValidacion, unoSolo } from "../../core/http.js";
 import { registrarFaltaInjustificada, quitarFaltaInjustificada, tiraAsistenciaPersona } from "./asistencia.js";
 
 export const asistenciaRouter = Router();
@@ -21,7 +21,7 @@ const faltaSchema = z.object({ fecha: z.string(), notas: z.string().optional() }
 asistenciaRouter.post("/:personalId/falta", requirePermission("nomina", "editar"), async (req, res) => {
   const parsed = faltaSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
     return;
   }
   const falta = await registrarFaltaInjustificada(

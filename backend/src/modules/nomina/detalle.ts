@@ -1,8 +1,8 @@
-import { totalRegistro, totalRegistroGrupalPorPersona, type FechaISO } from "@cbf/shared";
+import { totalRegistroGrupalPorPersona, type FechaISO } from "@cbf/shared";
 import { prisma } from "../../core/db.js";
 import { obtenerConfigNomina } from "./config.js";
 import { miembrosDeGrupoEnFecha } from "./grupos.js";
-import { aActividadCalc } from "./util.js";
+import { montoRegistroNomina } from "./captura.js";
 
 export interface LineaDetalleActividad {
   fecha: FechaISO;
@@ -29,7 +29,7 @@ export async function detalleActividadesPersonaEnPeriodo(
   const config = await obtenerConfigNomina();
   const lineas: LineaDetalleActividad[] = [];
   for (const r of registros) {
-    const montoTotal = totalRegistro(Number(r.cantidad), aActividadCalc(r.actividad), config.tarifaGeneralHora);
+    const montoTotal = await montoRegistroNomina(r, config.tarifaGeneralHora);
     const fecha = r.fecha.toISOString().slice(0, 10);
     if (r.personalId === personalId) {
       lineas.push({ fecha, actividad: r.actividad.nombre, cantidad: Number(r.cantidad), monto: montoTotal });

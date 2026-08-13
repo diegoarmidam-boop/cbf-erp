@@ -27,12 +27,23 @@ function tagEstado(estado: string) {
 }
 
 function hoyISO(): string {
-  return new Date().toISOString().slice(0, 10);
+  const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 function formaEntero(valor: string): string {
   const n = Number(valor);
   return Number.isFinite(n) ? n.toLocaleString("es-MX", { maximumFractionDigits: 3 }) : valor;
+}
+
+interface ProductoFertirriegoForm {
+  productoId: string;
+  dosisValor: string;
+  dosisUnidad: ConcentracionUnidad;
+}
+
+function productoFertirriegoFormVacio(): ProductoFertirriegoForm {
+  return { productoId: "", dosisValor: "", dosisUnidad: "ml_l" };
 }
 
 export default function Fertirriego() {
@@ -47,9 +58,10 @@ export default function Fertirriego() {
   const [huertaId, setHuertaId] = useState("");
   const [seccionesHuerta, setSeccionesHuerta] = useState<SeccionRiego[]>([]);
   const [seccionIds, setSeccionIds] = useState<string[]>([]);
-  const [productoId, setProductoId] = useState("");
-  const [dosisValor, setDosisValor] = useState("");
-  const [dosisUnidad, setDosisUnidad] = useState<ConcentracionUnidad>("ml_l");
+  // Varios productos en el mismo fertirriego (10-ago-2026): mismo mecanismo
+  // que Aplicaciones — cada uno con su propia concentración, todos
+  // comparten litrosAguaPorHa (abajo).
+  const [productosForm, setProductosForm] = useState<ProductoFertirriegoForm[]>([productoFertirriegoFormVacio()]);
   const [litrosAguaPorHa, setLitrosAguaPorHa] = useState("");
   const [frecuencia, setFrecuencia] = useState<FrecuenciaFertirriego>("diario");
   const [fechaInicio, setFechaInicio] = useState(hoyISO());
@@ -82,6 +94,18 @@ export default function Fertirriego() {
     setSeccionIds((prev) => (prev.includes(id) ? prev.filter((s) => s !== id) : [...prev, id]));
   }
 
+  function actualizarProductoForm(index: number, cambios: Partial<ProductoFertirriegoForm>) {
+    setProductosForm((prev) => prev.map((p, i) => (i !== index ? p : { ...p, ...cambios })));
+  }
+
+  function agregarProductoForm() {
+    setProductosForm((prev) => [...prev, productoFertirriegoFormVacio()]);
+  }
+
+  function quitarProductoForm(index: number) {
+    setProductosForm((prev) => (prev.length === 1 ? prev : prev.filter((_, i) => i !== index)));
+  }
+
   async function programar(e: FormEvent) {
     e.preventDefault();
     setError(null);
@@ -89,9 +113,7 @@ export default function Fertirriego() {
       await api.post("/fertilizantes/fertirriego", {
         huertaId,
         seccionIds,
-        productoId,
-        dosisValor: Number(dosisValor),
-        dosisUnidad,
+        productos: productosForm.map((p) => ({ productoId: p.productoId, dosisValor: Number(p.dosisValor), dosisUnidad: p.dosisUnidad })),
         litrosAguaPorHa: Number(litrosAguaPorHa),
         frecuencia,
         fechaInicio,
@@ -99,9 +121,10 @@ export default function Fertirriego() {
       });
       setMostrarForm(false);
       setSeccionIds([]);
-      setProductoId("");
-      setDosisValor("");
+      setProductosForm([productoFertirriegoFormVacio()]);
       setLitrosAguaPorHa("");
+      setFechaInicio(hoyISO());
+      setFechaFin(hoyISO());
       cargar();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "No se pudo programar el fertirriego.");
@@ -137,7 +160,7 @@ export default function Fertirriego() {
       </div>
 
       <p style={{ fontSize: 12, color: "var(--ink-soft)", marginBottom: 14 }}>
-        La ejecución diaria (¿se metió hoy?, ¿cuánto?) se registra desde Riego una vez entregado — todavía no construido.
+        La ejecución diaria (¿se metió hoy?, ¿cuánto?) se registra desde Riego una vez entregado.
       </p>
 
       {mostrarForm && (
@@ -150,17 +173,6 @@ export default function Fertirriego() {
                 {huertas.map((h) => (
                   <option key={h.id} value={h.id}>
                     {h.nombre}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="field">
-              Producto (fertilizante autorizado)
-              <select value={productoId} onChange={(e) => setProductoId(e.target.value)} required>
-                <option value="">Selecciona…</option>
-                {productos.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.nombreComercial} ({presentacionTexto(p)})
                   </option>
                 ))}
               </select>
@@ -182,19 +194,55 @@ export default function Fertirriego() {
             </div>
           )}
 
+          <div className="field">
+            Productos (mismo fertirriego — cada uno con su propia concentración)
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {productosForm.map((p, i) => (
+                <div key={i} style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+                  <label className="field">
+                    Producto (fertilizante autorizado)
+                    <select value={p.productoId} onChange={(e) => actualizarProductoForm(i, { productoId: e.target.value })} required>
+                      <option value="">Selecciona…</option>
+                      {productos.map((prod) => (
+                        <option key={prod.id} value={prod.id}>
+                          {prod.nombreComercial} ({presentacionTexto(prod)})
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="field">
+                    Dosis
+                    <input
+                      type="number"
+                      step="0.0001"
+                      style={{ width: 100 }}
+                      value={p.dosisValor}
+                      onChange={(e) => actualizarProductoForm(i, { dosisValor: e.target.value })}
+                      required
+                    />
+                  </label>
+                  <label className="field">
+                    Unidad
+                    <select value={p.dosisUnidad} onChange={(e) => actualizarProductoForm(i, { dosisUnidad: e.target.value as ConcentracionUnidad })}>
+                      <option value="ml_l">ml/L</option>
+                      <option value="g_l">g/L</option>
+                      <option value="kg_l">kg/L</option>
+                    </select>
+                  </label>
+                  {productosForm.length > 1 && (
+                    <button type="button" className="btn-secondary" onClick={() => quitarProductoForm(i)}>
+                      Quitar
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+            <button type="button" className="btn-secondary" style={{ marginTop: 8, width: "fit-content" }} onClick={agregarProductoForm}>
+              + Otro producto
+            </button>
+          </div>
+
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-            <label className="field">
-              Dosis
-              <input type="number" step="0.0001" value={dosisValor} onChange={(e) => setDosisValor(e.target.value)} required />
-            </label>
-            <label className="field">
-              Unidad
-              <select value={dosisUnidad} onChange={(e) => setDosisUnidad(e.target.value as ConcentracionUnidad)}>
-                <option value="ml_l">ml/L</option>
-                <option value="g_l">g/L</option>
-                <option value="kg_l">kg/L</option>
-              </select>
-            </label>
             <label className="field">
               Litros de agua / ha
               <input type="number" step="0.0001" value={litrosAguaPorHa} onChange={(e) => setLitrosAguaPorHa(e.target.value)} required />
@@ -240,15 +288,19 @@ export default function Fertirriego() {
                   {!f.comprometido && f.estado === "programada" && <span className="tag tag-neutral">Esperando compra automática</span>}{" "}
                   {f.alertaVencimiento && <span className="tag tag-danger">15+ días sin entregar</span>}
                   <div style={{ fontSize: 13, fontWeight: 600, marginTop: 6 }}>
-                    {f.huerta.nombre} — {f.producto.nombreComercial}
+                    {f.huerta.nombre} — {f.productos.map((p) => p.producto.nombreComercial).join(" + ")}
                   </div>
                   <div style={{ fontSize: 12, color: "var(--ink-soft)" }}>
-                    Secciones: {f.secciones.map((s) => s.seccion.nombre).join(", ") || "—"} · {formaEntero(f.cantidadTotalCalculada)}{" "}
-                    {f.producto.unidad}
+                    Secciones: {f.secciones.map((s) => s.seccion.nombre).join(", ") || "—"}
                   </div>
+                  {f.productos.map((p) => (
+                    <div key={p.id} style={{ fontSize: 12, color: "var(--ink-soft)" }}>
+                      {p.producto.nombreComercial}: {formaEntero(p.cantidadTotalCalculada)} {p.producto.unidad} · {p.dosisValor}{" "}
+                      {p.dosisUnidad.replace("_", "/")}
+                    </div>
+                  ))}
                   <div style={{ fontSize: 12, color: "var(--ink-soft)" }}>
-                    {f.dosisValor} {f.dosisUnidad.replace("_", "/")} · {f.litrosAguaPorHa} L agua/ha · {ETIQUETAS_FRECUENCIA[f.frecuencia]} ·{" "}
-                    {formatearFecha(f.fechaInicio)} a {formatearFecha(f.fechaFin)}
+                    {f.litrosAguaPorHa} L agua/ha · {ETIQUETAS_FRECUENCIA[f.frecuencia]} · {formatearFecha(f.fechaInicio)} a {formatearFecha(f.fechaFin)}
                   </div>
                 </div>
 

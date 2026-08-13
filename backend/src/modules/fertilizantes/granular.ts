@@ -1,6 +1,7 @@
 import { calcularCantidadTotalGranular, plantasTotalesCuadro, tarifaEfectiva, type ModoDosisGranular } from "@cbf/shared";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "../../core/db.js";
+import type { TransactionClient } from "../../core/db.js";
 import {
   confirmarEntregaComprometida,
   intentarComprometer,
@@ -22,7 +23,7 @@ const DIAS_VENCIMIENTO = 15;
 
 export class ProductoNoAutorizadoFertilizanteError extends Error {
   constructor() {
-    super("Este producto no es un fertilizante autorizado — no se puede programar una fertilización con él.");
+    super("Uno de los productos elegidos no es un fertilizante autorizado — no se puede programar una fertilización con él.");
   }
 }
 
@@ -34,7 +35,7 @@ export class TransicionFertilizacionInvalidaError extends Error {
 
 export class StockNoComprometidoError extends Error {
   constructor() {
-    super("Todavía no hay suficiente stock apartado para esta fertilización — espera a que llegue la compra automática.");
+    super("Todavía no hay suficiente stock apartado para todos los productos de esta fertilización — espera a que llegue la compra automática.");
   }
 }
 
@@ -58,14 +59,18 @@ export class NoSePuedeCancelarError extends Error {
   }
 }
 
+export interface ProductoGranularInput {
+  productoId: string;
+  modoDosis: ModoDosisGranular;
+  dosisValor: number;
+}
+
 export interface ProgramarGranularInput {
   huertaId: string;
   cuadroIds: string[];
-  productoId: string;
+  productos: ProductoGranularInput[];
   recursoTipo: "gente" | "implemento";
   equipoId?: string;
-  modoDosis: ModoDosisGranular;
-  dosisValor: number;
   fechaInicio: string;
   fechaFin: string;
 }
@@ -73,8 +78,11 @@ export interface ProgramarGranularInput {
 /**
  * Paso 1, Programar — Camino 1 Granular (9.5, mismo patrón que Aplicaciones
  * 9.7): kg/ha usa hectáreas totales; g/planta usa el total de plantas del
- * Marco de Plantación de cada Cuadro. Aparta stock de inmediato si alcanza;
- * si no, genera automático una orden de Compras por el faltante.
+ * Marco de Plantación de cada Cuadro. Varios productos en polvo (10-ago-
+ * 2026): cada uno conserva su propia dosis (kg/ha o g/planta) de forma
+ * completamente independiente — a diferencia de Aplicaciones, no hay
+ * "litros de mezcla" compartido. Cada producto aparta stock de inmediato si
+ * alcanza; si no, genera automático una orden de Compras por el faltante.
  */
 export async function programarGranular(input: ProgramarGranularInput, creadoPorId: string) {
   if (input.recursoTipo === "implemento" && !input.equipoId) {
@@ -83,19 +91,25 @@ export async function programarGranular(input: ProgramarGranularInput, creadoPor
   if (input.cuadroIds.length === 0) {
     throw new Error("Elige al menos un Cuadro.");
   }
-  const producto = await prisma.producto.findUniqueOrThrow({ where: { id: input.productoId } });
-  if (producto.categoria !== "fertilizante" || !producto.autorizado) {
-    throw new ProductoNoAutorizadoFertilizanteError();
+  if (!input.productos || input.productos.length === 0) {
+    throw new Error("Elige al menos un producto.");
+  }
+  const productos = await prisma.producto.findMany({ where: { id: { in: input.productos.map((p) => p.productoId) } } });
+  for (const p of productos) {
+    if (p.categoria !== "fertilizante" || !p.autorizado) {
+      throw new ProductoNoAutorizadoFertilizanteError();
+    }
   }
 
   let hectareasTotales = 0;
   let plantasTotales = 0;
+  const requierePlantas = input.productos.some((p) => p.modoDosis === "g_planta");
   const fechaRef = new Date(input.fechaInicio);
   for (const cuadroId of input.cuadroIds) {
     const version = await obtenerVersionVigente(cuadroId, fechaRef);
     if (!version) throw new Error("El Cuadro elegido no tiene una configuración vigente para la fecha de inicio.");
     hectareasTotales += Number(version.hectareas);
-    if (input.modoDosis === "g_planta") {
+    if (requierePlantas) {
       if (!version.distSurcosM || !version.distPlantasM) {
         throw new Error("El Cuadro elegido no tiene Marco de Plantación configurado — no se puede calcular g/planta.");
       }
@@ -103,20 +117,14 @@ export async function programarGranular(input: ProgramarGranularInput, creadoPor
     }
   }
 
-  const cantidadTotalCalculada = calcularCantidadTotalGranular(input.modoDosis, input.dosisValor, hectareasTotales, plantasTotales);
-
   return prisma.$transaction(async (tx) => {
     const fertilizacion = await tx.fertilizacionGranular.create({
       data: {
         huertaId: input.huertaId,
-        productoId: input.productoId,
         recursoTipo: input.recursoTipo,
         equipoId: input.recursoTipo === "implemento" ? input.equipoId : undefined,
-        modoDosis: input.modoDosis,
-        dosisValor: input.dosisValor,
         fechaInicio: fechaRef,
         fechaFin: new Date(input.fechaFin),
-        cantidadTotalCalculada,
         hectareasTotalesProgramadas: hectareasTotales,
         creadoPorId,
       },
@@ -125,20 +133,33 @@ export async function programarGranular(input: ProgramarGranularInput, creadoPor
       data: input.cuadroIds.map((cuadroId) => ({ fertilizacionId: fertilizacion.id, cuadroId })),
     });
 
-    const comprometido = await intentarComprometer(tx, input.productoId, cantidadTotalCalculada, fertilizacion.id, creadoPorId);
-    if (!comprometido) {
-      const disponible = await stockTotalProductoTx(tx, input.productoId);
-      const faltante = cantidadTotalCalculada - disponible;
-      await tx.ordenCompra.create({
+    for (const p of input.productos) {
+      const cantidadTotalCalculada = calcularCantidadTotalGranular(p.modoDosis, p.dosisValor, hectareasTotales, plantasTotales);
+      await tx.fertilizacionGranularProducto.create({
         data: {
-          origen: "automatica",
-          productoId: input.productoId,
-          cantidadSolicitada: faltante,
-          estado: "pendiente_cotizar",
-          referenciaAplicacionId: fertilizacion.id,
-          creadoPorId,
+          fertilizacionId: fertilizacion.id,
+          productoId: p.productoId,
+          modoDosis: p.modoDosis,
+          dosisValor: p.dosisValor,
+          cantidadTotalCalculada,
         },
       });
+
+      const comprometido = await intentarComprometer(tx, p.productoId, cantidadTotalCalculada, fertilizacion.id, creadoPorId);
+      if (!comprometido) {
+        const disponible = await stockTotalProductoTx(tx, p.productoId);
+        const faltante = cantidadTotalCalculada - disponible;
+        await tx.ordenCompra.create({
+          data: {
+            origen: "automatica",
+            productoId: p.productoId,
+            cantidadSolicitada: faltante,
+            estado: "pendiente_cotizar",
+            referenciaAplicacionId: fertilizacion.id,
+            creadoPorId,
+          },
+        });
+      }
     }
     return fertilizacion;
   });
@@ -146,7 +167,7 @@ export async function programarGranular(input: ProgramarGranularInput, creadoPor
 
 const INCLUDE_GRANULAR = {
   huerta: true,
-  producto: true,
+  productos: { include: { producto: true } },
   equipo: true,
   cuadros: { include: { cuadro: true } },
   realizadas: { include: { cuadros: { include: { cuadro: true } } }, orderBy: { fechaReal: "desc" as const } },
@@ -157,14 +178,22 @@ type GranularConRealizadas = {
   estado: string;
   fechaCreacion: Date;
   hectareasTotalesProgramadas: Prisma.Decimal;
+  productos: { productoId: string; cantidadTotalCalculada: Prisma.Decimal }[];
   realizadas: { cuadros: { hectareas: Prisma.Decimal }[]; horas: Prisma.Decimal }[];
 };
 
 async function enriquecerConAlertas<T extends GranularConRealizadas>(fertilizacion: T) {
-  const comprometido = await prisma.almacenCentralMovimiento.findFirst({
+  // Comprometido/entregado a nivel fertilización = TODOS sus productos lo
+  // están (10-ago-2026, varios productos) — mismo criterio que Aplicaciones.
+  const movimientosComprometido = await prisma.almacenCentralMovimiento.findMany({
     where: { referenciaId: fertilizacion.id, tipo: "salida_comprometida" },
   });
-  const entrega = await prisma.almacenCentralMovimiento.findFirst({ where: { referenciaId: fertilizacion.id, tipo: "salida_real" } });
+  const movimientosEntrega = await prisma.almacenCentralMovimiento.findMany({
+    where: { referenciaId: fertilizacion.id, tipo: "salida_real" },
+  });
+  const comprometido = fertilizacion.productos.every((p) => movimientosComprometido.some((m) => m.productoId === p.productoId));
+  const entrega = movimientosEntrega[0];
+
   const diasSinEntregar = fertilizacion.estado === "programada" ? Math.floor((Date.now() - fertilizacion.fechaCreacion.getTime()) / 86_400_000) : null;
   const diasSinAplicar =
     (fertilizacion.estado === "entregada" || fertilizacion.estado === "realizada") && entrega
@@ -178,7 +207,7 @@ async function enriquecerConAlertas<T extends GranularConRealizadas>(fertilizaci
 
   return {
     ...fertilizacion,
-    comprometido: !!comprometido,
+    comprometido,
     diasSinEntregar,
     alertaVencimiento: (diasSinEntregar ?? 0) > DIAS_VENCIMIENTO,
     diasSinAplicar,
@@ -211,23 +240,19 @@ export async function obtenerGranular(id: string) {
   return enriquecerConAlertas(fertilizacion);
 }
 
-/** Confirma la entrega física — acción de Almacén (Bodega), no de quien programó. */
+/** Confirma la entrega física de TODOS los productos — acción de Almacén (Bodega), no de quien programó. */
 export async function confirmarEntregaGranular(id: string, capturadoPorId: string) {
-  const fertilizacion = await prisma.fertilizacionGranular.findUniqueOrThrow({ where: { id } });
+  const fertilizacion = await prisma.fertilizacionGranular.findUniqueOrThrow({ where: { id }, include: { productos: true } });
   if (fertilizacion.estado !== "programada") throw new TransicionFertilizacionInvalidaError("programada");
 
   return prisma.$transaction(async (tx) => {
-    const comprometido = await tx.almacenCentralMovimiento.findFirst({ where: { referenciaId: id, tipo: "salida_comprometida" } });
-    if (!comprometido) throw new StockNoComprometidoError();
+    const comprometidos = await tx.almacenCentralMovimiento.findMany({ where: { referenciaId: id, tipo: "salida_comprometida" } });
+    const faltaAlguno = fertilizacion.productos.some((p) => !comprometidos.some((m) => m.productoId === p.productoId));
+    if (faltaAlguno) throw new StockNoComprometidoError();
 
-    await confirmarEntregaComprometida(
-      tx,
-      fertilizacion.productoId,
-      fertilizacion.huertaId,
-      Number(fertilizacion.cantidadTotalCalculada),
-      id,
-      capturadoPorId
-    );
+    for (const p of fertilizacion.productos) {
+      await confirmarEntregaComprometida(tx, p.productoId, fertilizacion.huertaId, Number(p.cantidadTotalCalculada), id, capturadoPorId);
+    }
     return tx.fertilizacionGranular.update({ where: { id }, data: { estado: "entregada" } });
   });
 }
@@ -274,17 +299,44 @@ async function validarCandadoCuadrosReporte(fertilizacionId: string, cuadros: Cu
 }
 
 /**
+ * Descuenta el Almacén Local de cada producto de la fertilización,
+ * proporcional al avance de ESTE reporte (10-ago-2026, varios productos):
+ * el avance por Cuadro/hectáreas es uno solo, compartido — el descuento de
+ * inventario es individual, cada producto de su propio saldo.
+ */
+async function descontarAlmacenLocalPorProductos(
+  tx: TransactionClient,
+  huertaId: string,
+  productos: { productoId: string; cantidadTotalCalculada: Prisma.Decimal }[],
+  hectareasEsteReporte: number,
+  hectareasTotalesProgramadas: number,
+  referenciaId: string,
+  capturadoPorId: string
+) {
+  for (const p of productos) {
+    const cantidadEsteReporte = (hectareasEsteReporte / hectareasTotalesProgramadas) * Number(p.cantidadTotalCalculada);
+    const local = await tx.almacenLocal.upsert({
+      where: { huertaId_productoId: { huertaId, productoId: p.productoId } },
+      update: { cantidadReportadaAcumulada: { increment: cantidadEsteReporte } },
+      create: { huertaId, productoId: p.productoId, cantidadReportadaAcumulada: cantidadEsteReporte },
+    });
+    await tx.almacenLocalMovimiento.create({
+      data: { almacenLocalId: local.id, tipo: "consumo_reportado", cantidad: cantidadEsteReporte, referenciaId, capturadoPorId },
+    });
+  }
+}
+
+/**
  * Paso 2, Registrar como realizada (Supervisor) — solo después de entregada.
  * Mismo rediseño que Aplicaciones (9.7/9.5): captura Cuadro(s)+hectáreas por
- * reporte, con descuento proporcional del Almacén Local en cada reporte
- * (pendiente de confirmar en pruebas reales de este módulo específico al
- * momento de documentarse, ver historial).
+ * reporte, con descuento proporcional del Almacén Local en cada reporte,
+ * ahora por cada producto de la fertilización (10-ago-2026).
  */
 export async function registrarRealizadaGranular(id: string, input: RegistrarRealizadaGranularInput, registradoPorId: string) {
   if (!input.personalId && !input.grupoId) throw new Error("Falta quién hizo la fertilización (persona o grupo).");
   if (!input.cuadros || input.cuadros.length === 0) throw new Error("Falta capturar qué Cuadro(s) se avanzaron y sus hectáreas en este reporte.");
 
-  const fertilizacion = await prisma.fertilizacionGranular.findUniqueOrThrow({ where: { id }, include: { cuadros: true } });
+  const fertilizacion = await prisma.fertilizacionGranular.findUniqueOrThrow({ where: { id }, include: { cuadros: true, productos: true } });
   if (fertilizacion.estado !== "entregada" && fertilizacion.estado !== "realizada") {
     throw new Error(
       "No se ha entregado el producto a esta Huerta todavía — Almacén debe confirmar la entrega antes de registrar la fertilización como realizada."
@@ -307,7 +359,6 @@ export async function registrarRealizadaGranular(id: string, input: RegistrarRea
   const esPrimeraVezRealizada = fertilizacion.estado === "entregada";
 
   const hectareasEsteReporte = input.cuadros.reduce((s, c) => s + c.hectareas, 0);
-  const cantidadEsteReporte = (hectareasEsteReporte / Number(fertilizacion.hectareasTotalesProgramadas)) * Number(fertilizacion.cantidadTotalCalculada);
 
   return prisma.$transaction(async (tx) => {
     const realizada = await tx.fertilizacionGranularRealizada.create({
@@ -343,14 +394,15 @@ export async function registrarRealizadaGranular(id: string, input: RegistrarRea
       await tx.fertilizacionGranular.update({ where: { id }, data: { estado: "realizada" } });
     }
 
-    const local = await tx.almacenLocal.upsert({
-      where: { huertaId_productoId: { huertaId: fertilizacion.huertaId, productoId: fertilizacion.productoId } },
-      update: { cantidadReportadaAcumulada: { increment: cantidadEsteReporte } },
-      create: { huertaId: fertilizacion.huertaId, productoId: fertilizacion.productoId, cantidadReportadaAcumulada: cantidadEsteReporte },
-    });
-    await tx.almacenLocalMovimiento.create({
-      data: { almacenLocalId: local.id, tipo: "consumo_reportado", cantidad: cantidadEsteReporte, referenciaId: id, capturadoPorId: registradoPorId },
-    });
+    await descontarAlmacenLocalPorProductos(
+      tx,
+      fertilizacion.huertaId,
+      fertilizacion.productos,
+      hectareasEsteReporte,
+      Number(fertilizacion.hectareasTotalesProgramadas),
+      id,
+      registradoPorId
+    );
 
     return realizada;
   });
@@ -370,7 +422,7 @@ export async function editarRealizadaGranular(realizadaId: string, input: Editar
 
   const realizada = await prisma.fertilizacionGranularRealizada.findUniqueOrThrow({
     where: { id: realizadaId },
-    include: { fertilizacion: { include: { cuadros: true } }, cuadros: true },
+    include: { fertilizacion: { include: { cuadros: true, productos: true } }, cuadros: true },
   });
   const fechaISO = realizada.fechaReal.toISOString().slice(0, 10);
   if (await diaEstaCerrado(realizada.fertilizacion.huertaId, fechaISO)) throw new DiaCerradoFertilizacionError();
@@ -385,9 +437,6 @@ export async function editarRealizadaGranular(realizadaId: string, input: Editar
   const hectareasAntes = realizada.cuadros.reduce((s, c) => s + Number(c.hectareas), 0);
   const hectareasDespues = input.cuadros.reduce((s, c) => s + c.hectareas, 0);
   const base = Number(fertilizacion.hectareasTotalesProgramadas);
-  const cantidadAntes = (hectareasAntes / base) * Number(fertilizacion.cantidadTotalCalculada);
-  const cantidadDespues = (hectareasDespues / base) * Number(fertilizacion.cantidadTotalCalculada);
-  const delta = cantidadDespues - cantidadAntes;
 
   return prisma.$transaction(async (tx) => {
     await tx.fertilizacionGranularRealizadaCuadro.deleteMany({ where: { realizadaId } });
@@ -408,11 +457,16 @@ export async function editarRealizadaGranular(realizadaId: string, input: Editar
       },
     });
 
-    if (Math.abs(delta) > 0.0000001) {
+    for (const p of fertilizacion.productos) {
+      const cantidadAntes = (hectareasAntes / base) * Number(p.cantidadTotalCalculada);
+      const cantidadDespues = (hectareasDespues / base) * Number(p.cantidadTotalCalculada);
+      const delta = cantidadDespues - cantidadAntes;
+      if (Math.abs(delta) <= 0.0000001) continue;
+
       const local = await tx.almacenLocal.upsert({
-        where: { huertaId_productoId: { huertaId: fertilizacion.huertaId, productoId: fertilizacion.productoId } },
+        where: { huertaId_productoId: { huertaId: fertilizacion.huertaId, productoId: p.productoId } },
         update: { cantidadReportadaAcumulada: { increment: delta } },
-        create: { huertaId: fertilizacion.huertaId, productoId: fertilizacion.productoId, cantidadReportadaAcumulada: delta },
+        create: { huertaId: fertilizacion.huertaId, productoId: p.productoId, cantidadReportadaAcumulada: delta },
       });
       await tx.almacenLocalMovimiento.create({
         data: {
@@ -431,32 +485,37 @@ export async function editarRealizadaGranular(realizadaId: string, input: Editar
 
 /**
  * Cierra una fertilización programada que nunca se entregó (vencida a 15
- * días, o cancelación manual). Solo aplica al caso "nunca salió de bodega"
- * — si ya se entregó al rancho, ver `cancelarGranularEntregada`.
+ * días, o cancelación manual). Libera el stock comprometido de cada
+ * producto que sí llegó a apartarse. Solo aplica al caso "nunca salió de
+ * bodega" — si ya se entregó al rancho, ver `cancelarGranularEntregada`.
  */
 export async function liberarGranularVencida(id: string, capturadoPorId: string) {
-  const fertilizacion = await prisma.fertilizacionGranular.findUniqueOrThrow({ where: { id } });
+  const fertilizacion = await prisma.fertilizacionGranular.findUniqueOrThrow({ where: { id }, include: { productos: true } });
   if (fertilizacion.estado !== "programada") throw new TransicionFertilizacionInvalidaError("programada");
 
   return prisma.$transaction(async (tx) => {
-    const comprometido = await tx.almacenCentralMovimiento.findFirst({ where: { referenciaId: id, tipo: "salida_comprometida" } });
-    if (comprometido) {
-      await liberarComprometido(
-        tx,
-        fertilizacion.productoId,
-        Number(fertilizacion.cantidadTotalCalculada),
-        id,
-        capturadoPorId,
-        "Liberación de fertilización granular vencida (15 días sin entregar) o cancelada manualmente."
-      );
+    for (const p of fertilizacion.productos) {
+      const comprometido = await tx.almacenCentralMovimiento.findFirst({
+        where: { referenciaId: id, tipo: "salida_comprometida", productoId: p.productoId },
+      });
+      if (comprometido) {
+        await liberarComprometido(
+          tx,
+          p.productoId,
+          Number(p.cantidadTotalCalculada),
+          id,
+          capturadoPorId,
+          "Liberación de fertilización granular vencida (15 días sin entregar) o cancelada manualmente."
+        );
+      }
     }
     return tx.fertilizacionGranular.update({ where: { id }, data: { estado: "vencida" } });
   });
 }
 
-/** Protocolo de cancelación de fertilización granular entregada y vencida a 15 días — mismo mecanismo que Aplicaciones (9.7/9.5). */
+/** Protocolo de cancelación de fertilización granular entregada y vencida a 15 días — mismo mecanismo que Aplicaciones (9.7/9.5), por cada producto. */
 export async function cancelarGranularEntregada(id: string, canceladaPorId: string) {
-  const fertilizacion = await prisma.fertilizacionGranular.findUniqueOrThrow({ where: { id } });
+  const fertilizacion = await prisma.fertilizacionGranular.findUniqueOrThrow({ where: { id }, include: { productos: true } });
   if (fertilizacion.estado !== "entregada" && fertilizacion.estado !== "realizada") {
     throw new NoSePuedeCancelarError("Solo se puede cancelar una fertilización que ya fue entregada al rancho.");
   }
@@ -478,39 +537,41 @@ export async function cancelarGranularEntregada(id: string, canceladaPorId: stri
     throw new NoSePuedeCancelarError("Esta fertilización ya quedó completamente aplicada — no hay nada que cancelar.");
   }
 
-  const cantidadARegresar = Number(fertilizacion.cantidadTotalCalculada) * (1 - porcentajeAvance);
-
   return prisma.$transaction(async (tx) => {
-    const local = await tx.almacenLocal.update({
-      where: { huertaId_productoId: { huertaId: fertilizacion.huertaId, productoId: fertilizacion.productoId } },
-      data: { cantidadRecibidaAcumulada: { decrement: cantidadARegresar } },
-    });
-    await tx.almacenLocalMovimiento.create({
-      data: {
-        almacenLocalId: local.id,
-        tipo: "ajuste_manual",
-        cantidad: -cantidadARegresar,
-        referenciaId: id,
-        capturadoPorId: canceladaPorId,
-      },
-    });
+    for (const p of fertilizacion.productos) {
+      const cantidadARegresar = Number(p.cantidadTotalCalculada) * (1 - porcentajeAvance);
 
-    const lote = await tx.productoLote.findFirst({ where: { productoId: fertilizacion.productoId } });
-    if (lote) {
-      await tx.productoLote.update({ where: { id: lote.id }, data: { cantidadActual: { increment: cantidadARegresar } } });
-    } else {
-      await tx.productoLote.create({ data: { productoId: fertilizacion.productoId, lote: "ABONO", cantidadActual: cantidadARegresar } });
+      const local = await tx.almacenLocal.update({
+        where: { huertaId_productoId: { huertaId: fertilizacion.huertaId, productoId: p.productoId } },
+        data: { cantidadRecibidaAcumulada: { decrement: cantidadARegresar } },
+      });
+      await tx.almacenLocalMovimiento.create({
+        data: {
+          almacenLocalId: local.id,
+          tipo: "ajuste_manual",
+          cantidad: -cantidadARegresar,
+          referenciaId: id,
+          capturadoPorId: canceladaPorId,
+        },
+      });
+
+      const lote = await tx.productoLote.findFirst({ where: { productoId: p.productoId } });
+      if (lote) {
+        await tx.productoLote.update({ where: { id: lote.id }, data: { cantidadActual: { increment: cantidadARegresar } } });
+      } else {
+        await tx.productoLote.create({ data: { productoId: p.productoId, lote: "ABONO", cantidadActual: cantidadARegresar } });
+      }
+      await tx.almacenCentralMovimiento.create({
+        data: {
+          productoId: p.productoId,
+          tipo: "abono_sobrante",
+          cantidad: cantidadARegresar,
+          huertaDestinoId: fertilizacion.huertaId,
+          referenciaId: id,
+          capturadoPorId: canceladaPorId,
+        },
+      });
     }
-    await tx.almacenCentralMovimiento.create({
-      data: {
-        productoId: fertilizacion.productoId,
-        tipo: "abono_sobrante",
-        cantidad: cantidadARegresar,
-        huertaDestinoId: fertilizacion.huertaId,
-        referenciaId: id,
-        capturadoPorId: canceladaPorId,
-      },
-    });
 
     return tx.fertilizacionGranular.update({
       where: { id },

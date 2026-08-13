@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { Rol } from "@prisma/client";
 import { requireAuth, requirePermission, requirePermissionAny, huertaIdDeAlcance } from "../../middleware/auth.js";
 import { tienePermiso } from "../../core/permissions.js";
-import { unoSolo } from "../../core/http.js";
+import { mensajeErrorValidacion, unoSolo } from "../../core/http.js";
 import { prisma } from "../../core/db.js";
 import { diaEstaCerrado } from "../nomina/captura.js";
 import {
@@ -33,7 +33,7 @@ granularRouter.use(requireAuth);
 // (programar)" de "Capturar (realizada)" como roles distintos, algo que la
 // matriz booleana de PermisoModulo no expresa dentro de un mismo módulo.
 const ROLES_PROGRAMAR: Rol[] = ["gerente_tecnico_produccion", "asistente_tecnico_produccion"];
-const ROLES_REALIZADA: Rol[] = ["supervisor_huerta"];
+const ROLES_REALIZADA: Rol[] = ["supervisor_huerta", "capturista_informacion"];
 const ROLES_ACCESO_UNIVERSAL: Rol[] = ["director_general", "encargado_sistemas"];
 // Cancelación de fertilización entregada y vencida (9.5/9.7): mismo criterio restringido que Aplicaciones.
 const ROLES_CANCELAR: Rol[] = ["gerente_tecnico_produccion"];
@@ -83,14 +83,18 @@ granularRouter.get("/:id", requirePermission("fertilizantes", "ver"), async (req
   res.json(fertilizacion);
 });
 
+const productoGranularSchema = z.object({
+  productoId: z.string().min(1),
+  modoDosis: z.enum(["kg_ha", "g_planta"]),
+  dosisValor: z.number().positive(),
+});
+
 const programarSchema = z.object({
   huertaId: z.string().min(1),
   cuadroIds: z.array(z.string().min(1)).min(1),
-  productoId: z.string().min(1),
+  productos: z.array(productoGranularSchema).min(1),
   recursoTipo: z.enum(["gente", "implemento"]),
   equipoId: z.string().optional(),
-  modoDosis: z.enum(["kg_ha", "g_planta"]),
-  dosisValor: z.number().positive(),
   fechaInicio: z.string(),
   fechaFin: z.string(),
 });
@@ -99,7 +103,7 @@ granularRouter.post("/", requirePermission("fertilizantes", "capturar"), async (
   if (!verificarRol(req, res, ROLES_PROGRAMAR)) return;
   const parsed = programarSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
     return;
   }
   try {
@@ -155,7 +159,7 @@ granularRouter.post("/:id/realizada", requirePermissionAny(["fertilizantes", "ca
 
   const parsed = realizadaSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
     return;
   }
 
@@ -203,7 +207,7 @@ granularRouter.patch("/realizada/:realizadaId", requirePermission("fertilizantes
 
   const parsed = editarRealizadaSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
     return;
   }
   try {

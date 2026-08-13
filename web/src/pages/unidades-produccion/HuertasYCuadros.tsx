@@ -6,7 +6,8 @@ import type { AreaEfectiva, EstatusCuadro, Huerta } from "../../lib/types";
 import { useHuertaSeleccionada } from "./HuertaSeleccionadaContext";
 
 function hoyISO(): string {
-  return new Date().toISOString().slice(0, 10);
+  const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 const ETIQUETAS_ESTATUS_CUADRO: Record<EstatusCuadro, string> = {
@@ -132,6 +133,8 @@ export default function HuertasYCuadros() {
         </form>
       )}
 
+      {error && <div className="tag tag-danger" style={{ display: "block", padding: "8px 12px", marginBottom: 12 }}>{error}</div>}
+
       {huertaId && (
         <>
           {area && (
@@ -184,8 +187,6 @@ export default function HuertasYCuadros() {
               </button>
             </form>
           )}
-
-          {error && <div className="tag tag-danger" style={{ display: "block", padding: "8px 12px", marginBottom: 12 }}>{error}</div>}
 
           {cargando ? (
             <p>Cargando…</p>

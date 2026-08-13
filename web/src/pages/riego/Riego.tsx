@@ -4,13 +4,16 @@ import type { RiegoHuertaTodasUPs } from "../../lib/types";
 import FechaInput from "../../components/FechaInput";
 
 function hoyISO(): string {
-  return new Date().toISOString().slice(0, 10);
+  const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 interface FilaEdit {
   horas: string;
   fertirriegoConfirmado: boolean;
-  cantidadAplicada: string;
+  // Cantidad aplicada ese día, por producto (10-ago-2026, varios productos
+  // en el mismo fertirriego) — cada uno se lee en su propio medidor/inyector.
+  cantidades: Record<string, string>;
   motivoNoAplicado: string;
 }
 
@@ -32,10 +35,12 @@ export default function Riego() {
         const nuevas: Record<string, FilaEdit> = {};
         for (const h of r) {
           for (const fila of h.secciones) {
+            const cantidades: Record<string, string> = {};
+            for (const p of fila.registro?.productos ?? []) cantidades[p.productoId] = p.cantidadAplicada;
             nuevas[fila.seccion.id] = {
               horas: fila.registro ? fila.registro.horas : "",
               fertirriegoConfirmado: fila.registro?.fertirriegoConfirmado ?? false,
-              cantidadAplicada: fila.registro?.cantidadAplicada ?? "",
+              cantidades,
               motivoNoAplicado: fila.registro?.motivoNoAplicado ?? "",
             };
           }
@@ -48,11 +53,18 @@ export default function Riego() {
 
   useEffect(cargar, [fecha]);
 
-  function actualizarFila(seccionId: string, campo: keyof FilaEdit, valor: string | boolean) {
+  function actualizarFila(seccionId: string, campo: "horas" | "fertirriegoConfirmado" | "motivoNoAplicado", valor: string | boolean) {
     setEdiciones((prev) => ({ ...prev, [seccionId]: { ...prev[seccionId]!, [campo]: valor } }));
   }
 
-  async function guardarFila(seccionId: string) {
+  function actualizarCantidad(seccionId: string, productoId: string, valor: string) {
+    setEdiciones((prev) => ({
+      ...prev,
+      [seccionId]: { ...prev[seccionId]!, cantidades: { ...prev[seccionId]!.cantidades, [productoId]: valor } },
+    }));
+  }
+
+  async function guardarFila(seccionId: string, productoIds: string[]) {
     const fila = ediciones[seccionId];
     if (!fila) return;
     setError(null);
@@ -61,7 +73,9 @@ export default function Riego() {
       await api.post(`/riego/${seccionId}/${fecha}`, {
         horas: Number(fila.horas),
         fertirriegoConfirmado: fila.fertirriegoConfirmado,
-        cantidadAplicada: fila.fertirriegoConfirmado ? Number(fila.cantidadAplicada) : undefined,
+        cantidadesAplicadas: fila.fertirriegoConfirmado
+          ? productoIds.map((productoId) => ({ productoId, cantidadAplicada: Number(fila.cantidades[productoId] ?? 0) }))
+          : undefined,
         motivoNoAplicado: !fila.fertirriegoConfirmado ? fila.motivoNoAplicado || undefined : undefined,
       });
       cargar();
@@ -126,17 +140,20 @@ export default function Riego() {
                                     checked={fila.fertirriegoConfirmado}
                                     onChange={(e) => actualizarFila(seccion.id, "fertirriegoConfirmado", e.target.checked)}
                                   />
-                                  ¿Se metió? ({fertirriegoActivo.producto.nombreComercial})
+                                  ¿Se metió? ({fertirriegoActivo.productos.map((p) => p.nombreComercial).join(" + ")})
                                 </label>
                                 {fila.fertirriegoConfirmado ? (
-                                  <input
-                                    type="number"
-                                    step="0.0001"
-                                    placeholder={`Cantidad (${fertirriegoActivo.producto.unidad})`}
-                                    style={{ width: 160 }}
-                                    value={fila.cantidadAplicada}
-                                    onChange={(e) => actualizarFila(seccion.id, "cantidadAplicada", e.target.value)}
-                                  />
+                                  fertirriegoActivo.productos.map((p) => (
+                                    <input
+                                      key={p.id}
+                                      type="number"
+                                      step="0.0001"
+                                      placeholder={`${p.nombreComercial} (${p.unidad})`}
+                                      style={{ width: 160 }}
+                                      value={fila.cantidades[p.id] ?? ""}
+                                      onChange={(e) => actualizarCantidad(seccion.id, p.id, e.target.value)}
+                                    />
+                                  ))
                                 ) : (
                                   <input
                                     placeholder="Motivo por el que no se metió (obligatorio)"
@@ -151,7 +168,11 @@ export default function Riego() {
                             )}
                           </td>
                           <td>
-                            <button className="btn-primary" onClick={() => guardarFila(seccion.id)} disabled={guardandoId === seccion.id}>
+                            <button
+                              className="btn-primary"
+                              onClick={() => guardarFila(seccion.id, fertirriegoActivo?.productos.map((p) => p.id) ?? [])}
+                              disabled={guardandoId === seccion.id}
+                            >
                               Guardar
                             </button>
                           </td>

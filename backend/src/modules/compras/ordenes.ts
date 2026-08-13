@@ -130,17 +130,20 @@ export async function recibirOrden(
     // apuntar a cualquiera de los tres orígenes; se prueban en orden.
     if (orden.referenciaAplicacionId) {
       const refId = orden.referenciaAplicacionId;
-      const aplicacion = await tx.aplicacion.findUnique({ where: { id: refId } });
-      if (aplicacion) {
-        await intentarComprometer(tx, orden.productoId, Number(aplicacion.cantidadTotalCalculada), refId, recibidoPorId);
+      // Varios productos por programación (10-ago-2026): la cantidad a
+      // comprometer es la de ESTE producto específico dentro de la
+      // Aplicación/Fertilización/Fertirriego, no la de toda la programación.
+      const aplicacionProducto = await tx.aplicacionProducto.findFirst({ where: { aplicacionId: refId, productoId: orden.productoId } });
+      if (aplicacionProducto) {
+        await intentarComprometer(tx, orden.productoId, Number(aplicacionProducto.cantidadTotalCalculada), refId, recibidoPorId);
       } else {
-        const granular = await tx.fertilizacionGranular.findUnique({ where: { id: refId } });
-        if (granular) {
-          await intentarComprometer(tx, orden.productoId, Number(granular.cantidadTotalCalculada), refId, recibidoPorId);
+        const granularProducto = await tx.fertilizacionGranularProducto.findFirst({ where: { fertilizacionId: refId, productoId: orden.productoId } });
+        if (granularProducto) {
+          await intentarComprometer(tx, orden.productoId, Number(granularProducto.cantidadTotalCalculada), refId, recibidoPorId);
         } else {
-          const fertirriego = await tx.fertirriegoProgramacion.findUnique({ where: { id: refId } });
-          if (fertirriego) {
-            await intentarComprometer(tx, orden.productoId, Number(fertirriego.cantidadTotalCalculada), refId, recibidoPorId);
+          const fertirriegoProducto = await tx.fertirriegoProgramacionProducto.findFirst({ where: { fertirriegoId: refId, productoId: orden.productoId } });
+          if (fertirriegoProducto) {
+            await intentarComprometer(tx, orden.productoId, Number(fertirriegoProducto.cantidadTotalCalculada), refId, recibidoPorId);
           }
         }
       }

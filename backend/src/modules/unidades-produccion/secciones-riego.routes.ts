@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { requireAuth, requirePermission } from "../../middleware/auth.js";
-import { unoSolo } from "../../core/http.js";
+import { mensajeErrorValidacion, unoSolo } from "../../core/http.js";
 import { prisma } from "../../core/db.js";
 import { actualizarCuadrosSeccion, crearSeccionRiego, listarSeccionesRiego } from "./secciones-riego.js";
 
@@ -22,7 +22,7 @@ const crearSchema = z.object({ huertaId: z.string().min(1), nombre: z.string().m
 seccionesRiegoRouter.post("/", requirePermission("unidades_produccion", "capturar"), async (req, res) => {
   const parsed = crearSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
     return;
   }
   const seccion = await crearSeccionRiego(parsed.data.huertaId, parsed.data.nombre, parsed.data.cuadroIds);
@@ -34,7 +34,7 @@ const cuadrosSchema = z.object({ cuadroIds: z.array(z.string().min(1)) });
 seccionesRiegoRouter.patch("/:id/cuadros", requirePermission("unidades_produccion", "editar"), async (req, res) => {
   const parsed = cuadrosSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
     return;
   }
   await actualizarCuadrosSeccion(unoSolo(req.params.id), parsed.data.cuadroIds);

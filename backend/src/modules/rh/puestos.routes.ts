@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../../core/db.js";
 import { requireAuth, requirePermission } from "../../middleware/auth.js";
-import { unoSolo } from "../../core/http.js";
+import { mensajeErrorValidacion, unoSolo } from "../../core/http.js";
 
 export const puestosRouter = Router();
 puestosRouter.use(requireAuth);
@@ -22,7 +22,7 @@ const puestoSchema = z.object({
 puestosRouter.post("/", requirePermission("rh", "capturar"), async (req, res) => {
   const parsed = puestoSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
     return;
   }
   const puesto = await prisma.puesto.create({ data: parsed.data });
@@ -32,7 +32,7 @@ puestosRouter.post("/", requirePermission("rh", "capturar"), async (req, res) =>
 puestosRouter.patch("/:id", requirePermission("rh", "editar"), async (req, res) => {
   const parsed = puestoSchema.partial().safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
     return;
   }
   const puesto = await prisma.puesto.update({ where: { id: unoSolo(req.params.id) }, data: parsed.data });

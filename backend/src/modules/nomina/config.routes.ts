@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
+import { mensajeErrorValidacion } from "../../core/http.js";
 import { requireAuth, requirePermission } from "../../middleware/auth.js";
 import { actualizarConfigNomina, obtenerConfigNomina } from "./config.js";
 import { NOMBRES_DIAS } from "@cbf/shared";
@@ -20,7 +21,7 @@ const actualizarSchema = z.object({
 configRouter.put("/", requirePermission("nomina", "editar"), async (req, res) => {
   const parsed = actualizarSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
     return;
   }
   await actualizarConfigNomina(parsed.data);

@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
+import { mensajeErrorValidacion } from "../../core/http.js";
 import { requireAuth, requirePermission, huertaIdDeAlcance } from "../../middleware/auth.js";
 import { tienePermiso } from "../../core/permissions.js";
 import {
@@ -56,7 +57,7 @@ capturaRouter.post("/:huertaId/:fecha", requirePermission("nomina", "capturar"),
 
   const parsed = guardarSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
     return;
   }
 

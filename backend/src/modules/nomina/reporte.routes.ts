@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { desglosarMonto, sumarDesgloses } from "@cbf/shared";
+import { desglosarMonto, hoyISO, sumarDesgloses } from "@cbf/shared";
 import { requireAuth, requirePermission } from "../../middleware/auth.js";
 import { confirmarNominaSemanal, generarReporteNominaSemanal } from "./reporte.js";
 import { detalleActividadesPersonaEnPeriodo } from "./detalle.js";
@@ -9,7 +9,7 @@ export const reporteRouter = Router();
 reporteRouter.use(requireAuth);
 
 function hoyQuery(req: { query: Record<string, unknown> }): string {
-  return typeof req.query.hoy === "string" ? req.query.hoy : new Date().toISOString().slice(0, 10);
+  return typeof req.query.hoy === "string" ? req.query.hoy : hoyISO();
 }
 
 reporteRouter.get("/semanal", requirePermission("nomina", "ver"), async (req, res) => {

@@ -15,7 +15,8 @@ export const ACTIVIDADES_SEED: Array<{ nombre: string }> = [
   { nombre: "Vivero" },
   { nombre: "Chapeo" },
   { nombre: "Riego" },
-  { nombre: "Riego Tirar Cinta" },
+  // Renombrada de "Riego Tirar Cinta" el 10-ago-2026, al mudarse al módulo de Actividades (9.4) — ya no lleva el prefijo "Riego" al vivir ahí.
+  { nombre: "Tirar Cinta" },
   { nombre: "Fumigación" },
   { nombre: "Limpieza" },
   { nombre: "Virosis" },

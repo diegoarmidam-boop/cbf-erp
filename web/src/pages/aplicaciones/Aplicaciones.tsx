@@ -5,7 +5,7 @@ import { useHuertas } from "../../lib/useHuertas";
 import { usePersonal } from "../../lib/usePersonal";
 import type { Aplicacion, AplicacionRealizadaLinea, ConcentracionUnidad, Cuadro, Equipo, ModalidadAplicacion, Producto } from "../../lib/types";
 import FechaInput from "../../components/FechaInput";
-import { formatearFecha } from "../../lib/fecha";
+import { formatearFecha, formatearInstante } from "../../lib/fecha";
 import { presentacionTexto } from "../../lib/producto";
 
 const ETIQUETAS_ESTADO: Record<string, string> = {
@@ -30,7 +30,8 @@ function tagEstado(estado: string) {
 }
 
 function hoyISO(): string {
-  return new Date().toISOString().slice(0, 10);
+  const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 function formaEntero(valor: string): string {
@@ -42,6 +43,16 @@ let contadorKey = 0;
 function nuevaKey(): string {
   contadorKey += 1;
   return `linea-${Date.now()}-${contadorKey}`;
+}
+
+interface ProductoForm {
+  productoId: string;
+  concentracionValor: string;
+  concentracionUnidad: ConcentracionUnidad;
+}
+
+function productoFormVacio(): ProductoForm {
+  return { productoId: "", concentracionValor: "", concentracionUnidad: "ml_l" };
 }
 
 interface LineaForm {
@@ -103,10 +114,10 @@ export default function Aplicaciones() {
   const [huertaId, setHuertaId] = useState("");
   const [cuadrosHuerta, setCuadrosHuerta] = useState<Cuadro[]>([]);
   const [cuadroIds, setCuadroIds] = useState<string[]>([]);
-  const [productoId, setProductoId] = useState("");
+  // Varios productos en el mismo tanque (10-ago-2026): cada uno con su
+  // propia concentración, todos comparten litrosMezclaPorHa (abajo).
+  const [productosForm, setProductosForm] = useState<ProductoForm[]>([productoFormVacio()]);
   const [recursoSugerido, setRecursoSugerido] = useState<ModalidadAplicacion>("mochila");
-  const [concentracionValor, setConcentracionValor] = useState("");
-  const [concentracionUnidad, setConcentracionUnidad] = useState<ConcentracionUnidad>("ml_l");
   const [litrosMezclaPorHa, setLitrosMezclaPorHa] = useState("");
   const [fechaInicio, setFechaInicio] = useState(hoyISO());
   const [fechaFin, setFechaFin] = useState(hoyISO());
@@ -155,6 +166,18 @@ export default function Aplicaciones() {
     setCuadroIds((prev) => (prev.includes(id) ? prev.filter((c) => c !== id) : [...prev, id]));
   }
 
+  function actualizarProductoForm(index: number, cambios: Partial<ProductoForm>) {
+    setProductosForm((prev) => prev.map((p, i) => (i !== index ? p : { ...p, ...cambios })));
+  }
+
+  function agregarProductoForm() {
+    setProductosForm((prev) => [...prev, productoFormVacio()]);
+  }
+
+  function quitarProductoForm(index: number) {
+    setProductosForm((prev) => (prev.length === 1 ? prev : prev.filter((_, i) => i !== index)));
+  }
+
   async function programar(e: FormEvent) {
     e.preventDefault();
     setError(null);
@@ -162,19 +185,22 @@ export default function Aplicaciones() {
       await api.post("/aplicaciones", {
         huertaId,
         cuadroIds,
-        productoId,
+        productos: productosForm.map((p) => ({
+          productoId: p.productoId,
+          concentracionValor: Number(p.concentracionValor),
+          concentracionUnidad: p.concentracionUnidad,
+        })),
         recursoSugerido,
-        concentracionValor: Number(concentracionValor),
-        concentracionUnidad,
         litrosMezclaPorHa: Number(litrosMezclaPorHa),
         fechaInicio,
         fechaFin,
       });
       setMostrarForm(false);
       setCuadroIds([]);
-      setProductoId("");
-      setConcentracionValor("");
+      setProductosForm([productoFormVacio()]);
       setLitrosMezclaPorHa("");
+      setFechaInicio(hoyISO());
+      setFechaFin(hoyISO());
       cargar();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "No se pudo programar la aplicación.");
@@ -201,11 +227,18 @@ export default function Aplicaciones() {
     }
   }
 
+  // Precarga (9.7, 10-ago-2026): el reporte de un nuevo día se pre-llena con
+  // las mismas líneas del reporte anterior de esta misma Aplicación (mismas
+  // personas en Mochila/Aguilón, mismo Tractor+Operador+Implemento en
+  // Turbina/Aguilón) — el Supervisor solo ajusta lo que cambió (quitar a
+  // quien no vino, cambiar de tractorista, horas, etc.), sin afectar el
+  // registro de días anteriores.
   function abrirRegistrar(a: Aplicacion) {
     setRegistrando(a.id);
     setFechaReal(hoyISO());
     setAvanceCuadros({});
-    setLineas([lineaVacia()]);
+    const ultimo = a.realizadas[0];
+    setLineas(ultimo ? lineasDesdeExistentes(ultimo.lineas) : [lineaVacia()]);
   }
 
   function cuadrosDesdeMapa(mapa: Record<string, string>, restantes: Record<string, number> | undefined): { cuadroId: string; hectareas: number }[] {
@@ -340,17 +373,6 @@ export default function Aplicaciones() {
                 ))}
               </select>
             </label>
-            <label className="field">
-              Producto (agroquímico autorizado)
-              <select value={productoId} onChange={(e) => setProductoId(e.target.value)} required>
-                <option value="">Selecciona…</option>
-                {productos.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.nombreComercial} ({presentacionTexto(p)})
-                  </option>
-                ))}
-              </select>
-            </label>
           </div>
 
           {huertaId && (
@@ -382,21 +404,57 @@ export default function Aplicaciones() {
             </span>
           </div>
 
+          <div className="field">
+            Productos (mismo tanque — cada uno con su propia concentración)
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {productosForm.map((p, i) => (
+                <div key={i} style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+                  <label className="field">
+                    Producto (agroquímico autorizado)
+                    <select value={p.productoId} onChange={(e) => actualizarProductoForm(i, { productoId: e.target.value })} required>
+                      <option value="">Selecciona…</option>
+                      {productos.map((prod) => (
+                        <option key={prod.id} value={prod.id}>
+                          {prod.nombreComercial} ({presentacionTexto(prod)})
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="field">
+                    Concentración
+                    <input
+                      type="number"
+                      step="0.0001"
+                      style={{ width: 100 }}
+                      value={p.concentracionValor}
+                      onChange={(e) => actualizarProductoForm(i, { concentracionValor: e.target.value })}
+                      required
+                    />
+                  </label>
+                  <label className="field">
+                    Unidad
+                    <select value={p.concentracionUnidad} onChange={(e) => actualizarProductoForm(i, { concentracionUnidad: e.target.value as ConcentracionUnidad })}>
+                      <option value="ml_l">ml/L</option>
+                      <option value="g_l">g/L</option>
+                      <option value="kg_l">kg/L</option>
+                    </select>
+                  </label>
+                  {productosForm.length > 1 && (
+                    <button type="button" className="btn-secondary" onClick={() => quitarProductoForm(i)}>
+                      Quitar
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+            <button type="button" className="btn-secondary" style={{ marginTop: 8, width: "fit-content" }} onClick={agregarProductoForm}>
+              + Otro producto
+            </button>
+          </div>
+
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
             <label className="field">
-              Concentración
-              <input type="number" step="0.0001" value={concentracionValor} onChange={(e) => setConcentracionValor(e.target.value)} required />
-            </label>
-            <label className="field">
-              Unidad
-              <select value={concentracionUnidad} onChange={(e) => setConcentracionUnidad(e.target.value as ConcentracionUnidad)}>
-                <option value="ml_l">ml/L</option>
-                <option value="g_l">g/L</option>
-                <option value="kg_l">kg/L</option>
-              </select>
-            </label>
-            <label className="field">
-              Litros de mezcla / ha
+              Litros de mezcla / ha (un solo tanque para toda la mezcla)
               <input type="number" step="0.0001" value={litrosMezclaPorHa} onChange={(e) => setLitrosMezclaPorHa(e.target.value)} required />
             </label>
             <label className="field">
@@ -429,14 +487,20 @@ export default function Aplicaciones() {
                   {a.alertaVencimiento && <span className="tag tag-danger">15+ días sin entregar</span>}{" "}
                   {a.alertaPendienteAplicar && <span className="tag tag-danger">15+ días entregada sin aplicar</span>}
                   <div style={{ fontSize: 13, fontWeight: 600, marginTop: 6 }}>
-                    {a.huerta.nombre} — {a.producto.nombreComercial}
+                    {a.huerta.nombre} — {a.productos.map((p) => p.producto.nombreComercial).join(" + ")}
                   </div>
                   <div style={{ fontSize: 12, color: "var(--ink-soft)" }}>
-                    Cuadros: {a.cuadros.map((c) => c.cuadro.nombre).join(", ") || "—"} · {formaEntero(a.cantidadTotalCalculada)} {a.producto.unidad}
+                    Cuadros: {a.cuadros.map((c) => c.cuadro.nombre).join(", ") || "—"}
                   </div>
+                  {a.productos.map((p) => (
+                    <div key={p.id} style={{ fontSize: 12, color: "var(--ink-soft)" }}>
+                      {p.producto.nombreComercial}: {formaEntero(p.cantidadTotalCalculada)} {p.producto.unidad} · {p.concentracionValor}{" "}
+                      {p.concentracionUnidad.replace("_", "/")}
+                    </div>
+                  ))}
                   <div style={{ fontSize: 12, color: "var(--ink-soft)" }}>
-                    {a.concentracionValor} {a.concentracionUnidad.replace("_", "/")} · {a.litrosMezclaPorHa} L mezcla/ha · Sugerido:{" "}
-                    {ETIQUETAS_MODALIDAD[a.recursoSugerido]} · {formatearFecha(a.fechaInicio)} a {formatearFecha(a.fechaFin)}
+                    {a.litrosMezclaPorHa} L mezcla/ha · Sugerido: {ETIQUETAS_MODALIDAD[a.recursoSugerido]} · {formatearFecha(a.fechaInicio)} a{" "}
+                    {formatearFecha(a.fechaFin)}
                   </div>
                   {a.realizadas.length > 0 && (
                     <div style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: 4 }}>
@@ -446,9 +510,9 @@ export default function Aplicaciones() {
                   )}
                   {a.estado === "cancelada" && (
                     <div style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: 4 }}>
-                      Cancelada el {formatearFecha(a.fechaCancelacion)}
+                      Cancelada el {formatearInstante(a.fechaCancelacion)}
                       {a.confirmacionBodegaPorId
-                        ? ` · Bodega confirmó recepción el ${formatearFecha(a.fechaConfirmacionBodega)}`
+                        ? ` · Bodega confirmó recepción el ${formatearInstante(a.fechaConfirmacionBodega)}`
                         : " · Pendiente de confirmación de Bodega"}
                     </div>
                   )}

@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { requireAuth, requirePermission } from "../../middleware/auth.js";
-import { unoSolo } from "../../core/http.js";
+import { mensajeErrorValidacion, unoSolo } from "../../core/http.js";
 import { calcularAlertaRendimiento, historialCargas, OdometroRetrocedeError, registrarCarga } from "./combustible.js";
 
 export const combustibleRouter = Router();
@@ -28,7 +28,7 @@ const cargaSchema = z.object({
 combustibleRouter.post("/:equipoId", requirePermission("equipos", "capturar"), async (req, res) => {
   const parsed = cargaSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
     return;
   }
   try {

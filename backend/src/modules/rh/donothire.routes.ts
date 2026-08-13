@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../../core/db.js";
 import { requireAuth, requirePermission } from "../../middleware/auth.js";
-import { unoSolo } from "../../core/http.js";
+import { mensajeErrorValidacion, unoSolo } from "../../core/http.js";
 
 export const doNotHireRouter = Router();
 doNotHireRouter.use(requireAuth);
@@ -20,7 +20,7 @@ const altaSchema = z.object({
 doNotHireRouter.post("/", requirePermission("do_not_hire", "capturar"), async (req, res) => {
   const parsed = altaSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
     return;
   }
   const entrada = await prisma.doNotHire.create({

@@ -171,6 +171,7 @@ export type OrigenRegistroNomina =
   | "manual"
   | "automatico_aplicacion"
   | "automatico_fertilizacion"
+  | "automatico_actividad"
   | "automatico_cosecha"
   | "automatico_empaque";
 
@@ -358,6 +359,14 @@ export interface CandadoAlmacenLocal {
   alertaActiva: boolean;
 }
 
+export interface CancelacionPendienteBodega {
+  id: string;
+  huerta: { nombre: string };
+  producto: { nombreComercial: string; unidad: string };
+  cantidadRegresada: number;
+  fechaCancelacion: string | null;
+}
+
 export interface SolicitudPendiente {
   id: string;
   tipo: string;
@@ -538,6 +547,51 @@ export interface EquipoUsoDiario {
   huerta: { nombre: string };
 }
 
+// ---- Actividades (9.4) — mismo patrón de dos pasos que Aplicaciones, sin
+// insumo ni maquinaria (alcance inicial de puro mano de obra). ----
+export interface ActividadRealizadaCuadro {
+  id: string;
+  cuadroId: string;
+  cuadro: Cuadro;
+  hectareas: string;
+}
+
+export interface ActividadRealizadaPersona {
+  id: string;
+  personalId: string;
+  personal: Personal;
+  horas: string;
+}
+
+export interface ActividadRealizada {
+  id: string;
+  actividadProgramadaId: string;
+  fechaReal: string;
+  registradoPorId: string;
+  cuadros: ActividadRealizadaCuadro[];
+  personas: ActividadRealizadaPersona[];
+}
+
+export interface ActividadProgramada {
+  id: string;
+  huertaId: string;
+  huerta: Huerta;
+  actividadId: string;
+  actividad: Actividad;
+  fechaInicio: string;
+  fechaFin: string;
+  hectareasTotalesProgramadas: string;
+  creadoPorId: string;
+  fechaCreacion: string;
+  cuadros: { cuadro: Cuadro }[];
+  realizadas: ActividadRealizada[];
+  hectareasAvanzadas?: number;
+  horasHombreTotales?: number;
+  porcentajeAvance?: number;
+  costoTotal?: number;
+  restantesPorCuadro?: Record<string, number>;
+}
+
 export type RecursoTipo = "gente" | "implemento";
 export type ConcentracionUnidad = "ml_l" | "g_l" | "kg_l";
 export type EstadoAplicacion = "programada" | "entregada" | "realizada" | "vencida" | "cancelada";
@@ -581,19 +635,24 @@ export interface AplicacionRealizada {
   lineas: AplicacionRealizadaLinea[];
 }
 
+export interface AplicacionProducto {
+  id: string;
+  productoId: string;
+  producto: Producto;
+  concentracionValor: string;
+  concentracionUnidad: ConcentracionUnidad;
+  cantidadTotalCalculada: string;
+}
+
 export interface Aplicacion {
   id: string;
   huertaId: string;
   huerta: Huerta;
-  productoId: string;
-  producto: Producto;
+  productos: AplicacionProducto[];
   recursoSugerido: ModalidadAplicacion;
-  concentracionValor: string;
-  concentracionUnidad: ConcentracionUnidad;
   litrosMezclaPorHa: string;
   fechaInicio: string;
   fechaFin: string;
-  cantidadTotalCalculada: string;
   hectareasTotalesProgramadas: string;
   estado: EstadoAplicacion;
   fechaCreacion: string;
@@ -627,20 +686,25 @@ export interface FertilizacionGranularRealizada {
   cuadros: RealizadaCuadro[];
 }
 
+export interface FertilizacionGranularProducto {
+  id: string;
+  productoId: string;
+  producto: Producto;
+  modoDosis: ModoDosisGranular;
+  dosisValor: string;
+  cantidadTotalCalculada: string;
+}
+
 export interface FertilizacionGranular {
   id: string;
   huertaId: string;
   huerta: Huerta;
-  productoId: string;
-  producto: Producto;
+  productos: FertilizacionGranularProducto[];
   recursoTipo: RecursoTipo;
   equipoId: string | null;
   equipo: Equipo | null;
-  modoDosis: ModoDosisGranular;
-  dosisValor: string;
   fechaInicio: string;
   fechaFin: string;
-  cantidadTotalCalculada: string;
   hectareasTotalesProgramadas: string;
   estado: EstadoAplicacion;
   fechaCreacion: string;
@@ -662,20 +726,26 @@ export interface FertilizacionGranular {
 
 export type FrecuenciaFertirriego = "diario" | "cada_2_dias" | "cada_3_dias" | "patron_2_1";
 
+export interface RiegoRegistroDiarioProducto {
+  id: string;
+  productoId: string;
+  cantidadAplicada: string;
+}
+
 export interface RiegoRegistroDiario {
   id: string;
   seccionId: string;
   fecha: string;
   horas: string;
   fertirriegoConfirmado: boolean;
-  cantidadAplicada: string | null;
+  productos: RiegoRegistroDiarioProducto[];
   motivoNoAplicado: string | null;
   capturadoPorId: string;
 }
 
 export interface FertirriegoActivo {
   fertirriegoId: string;
-  producto: Producto;
+  productos: Producto[];
 }
 
 export interface RiegoDiaResponse {
@@ -705,19 +775,24 @@ export interface RiegoHistorialSemanal {
   secciones: { seccion: SeccionRiego; dias: RiegoHistorialSemanalDia[] }[];
 }
 
-export interface FertirriegoProgramacion {
+export interface FertirriegoProgramacionProducto {
   id: string;
-  huertaId: string;
-  huerta: Huerta;
   productoId: string;
   producto: Producto;
   dosisValor: string;
   dosisUnidad: ConcentracionUnidad;
+  cantidadTotalCalculada: string;
+}
+
+export interface FertirriegoProgramacion {
+  id: string;
+  huertaId: string;
+  huerta: Huerta;
+  productos: FertirriegoProgramacionProducto[];
   litrosAguaPorHa: string;
   frecuencia: FrecuenciaFertirriego;
   fechaInicio: string;
   fechaFin: string;
-  cantidadTotalCalculada: string;
   estado: EstadoAplicacion;
   fechaCreacion: string;
   secciones: { seccion: SeccionRiego }[];

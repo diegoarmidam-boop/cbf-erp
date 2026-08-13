@@ -4,7 +4,7 @@ import { useHuertas } from "../../lib/useHuertas";
 import { usePersonal } from "../../lib/usePersonal";
 import type { Cuadro, Equipo, FertilizacionGranular, GrupoPago, ModoDosisGranular, Producto, RecursoTipo } from "../../lib/types";
 import FechaInput from "../../components/FechaInput";
-import { formatearFecha } from "../../lib/fecha";
+import { formatearFecha, formatearInstante } from "../../lib/fecha";
 import { presentacionTexto } from "../../lib/producto";
 
 const ETIQUETAS_ESTADO: Record<string, string> = {
@@ -23,12 +23,23 @@ function tagEstado(estado: string) {
 }
 
 function hoyISO(): string {
-  return new Date().toISOString().slice(0, 10);
+  const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 function formaEntero(valor: string): string {
   const n = Number(valor);
   return Number.isFinite(n) ? n.toLocaleString("es-MX", { maximumFractionDigits: 3 }) : valor;
+}
+
+interface ProductoGranularForm {
+  productoId: string;
+  modoDosis: ModoDosisGranular;
+  dosisValor: string;
+}
+
+function productoGranularFormVacio(): ProductoGranularForm {
+  return { productoId: "", modoDosis: "kg_ha", dosisValor: "" };
 }
 
 export default function Granular() {
@@ -45,11 +56,12 @@ export default function Granular() {
   const [huertaId, setHuertaId] = useState("");
   const [cuadrosHuerta, setCuadrosHuerta] = useState<Cuadro[]>([]);
   const [cuadroIds, setCuadroIds] = useState<string[]>([]);
-  const [productoId, setProductoId] = useState("");
+  // Varios productos revueltos antes de esparcir (10-ago-2026): cada uno
+  // con su propia dosis independiente — a diferencia de Aplicaciones, aquí
+  // no hay "litros de mezcla" compartido.
+  const [productosForm, setProductosForm] = useState<ProductoGranularForm[]>([productoGranularFormVacio()]);
   const [recursoTipo, setRecursoTipo] = useState<RecursoTipo>("gente");
   const [equipoId, setEquipoId] = useState("");
-  const [modoDosis, setModoDosis] = useState<ModoDosisGranular>("kg_ha");
-  const [dosisValor, setDosisValor] = useState("");
   const [fechaInicio, setFechaInicio] = useState(hoyISO());
   const [fechaFin, setFechaFin] = useState(hoyISO());
 
@@ -93,6 +105,18 @@ export default function Granular() {
     setCuadroIds((prev) => (prev.includes(id) ? prev.filter((c) => c !== id) : [...prev, id]));
   }
 
+  function actualizarProductoForm(index: number, cambios: Partial<ProductoGranularForm>) {
+    setProductosForm((prev) => prev.map((p, i) => (i !== index ? p : { ...p, ...cambios })));
+  }
+
+  function agregarProductoForm() {
+    setProductosForm((prev) => [...prev, productoGranularFormVacio()]);
+  }
+
+  function quitarProductoForm(index: number) {
+    setProductosForm((prev) => (prev.length === 1 ? prev : prev.filter((_, i) => i !== index)));
+  }
+
   async function programar(e: FormEvent) {
     e.preventDefault();
     setError(null);
@@ -100,19 +124,18 @@ export default function Granular() {
       await api.post("/fertilizantes/granular", {
         huertaId,
         cuadroIds,
-        productoId,
+        productos: productosForm.map((p) => ({ productoId: p.productoId, modoDosis: p.modoDosis, dosisValor: Number(p.dosisValor) })),
         recursoTipo,
         equipoId: recursoTipo === "implemento" ? equipoId : undefined,
-        modoDosis,
-        dosisValor: Number(dosisValor),
         fechaInicio,
         fechaFin,
       });
       setMostrarForm(false);
       setCuadroIds([]);
-      setProductoId("");
+      setProductosForm([productoGranularFormVacio()]);
       setEquipoId("");
-      setDosisValor("");
+      setFechaInicio(hoyISO());
+      setFechaFin(hoyISO());
       cargar();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "No se pudo programar la fertilización.");
@@ -139,10 +162,14 @@ export default function Granular() {
     }
   }
 
+  // Precarga (9.5, 10-ago-2026): el reporte de un nuevo día se pre-llena con
+  // quién y cuántas horas del reporte anterior de esta misma Fertilización
+  // — el Supervisor solo ajusta lo que cambió, sin afectar días anteriores.
   async function abrirRegistrar(f: FertilizacionGranular) {
     setRegistrando(f.id);
-    setQuien("");
-    setHoras("");
+    const ultimo = f.realizadas[0];
+    setQuien(ultimo ? (ultimo.personalId ? `p:${ultimo.personalId}` : ultimo.grupoId ? `g:${ultimo.grupoId}` : "") : "");
+    setHoras(ultimo ? ultimo.horas : "");
     setFechaReal(hoyISO());
     setAvanceCuadros({});
     const grupos = await api.get<GrupoPago[]>("/fertilizantes/granular/grupos");
@@ -260,17 +287,6 @@ export default function Granular() {
                 ))}
               </select>
             </label>
-            <label className="field">
-              Producto (fertilizante autorizado)
-              <select value={productoId} onChange={(e) => setProductoId(e.target.value)} required>
-                <option value="">Selecciona…</option>
-                {productos.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.nombreComercial} ({presentacionTexto(p)})
-                  </option>
-                ))}
-              </select>
-            </label>
           </div>
 
           {huertaId && (
@@ -311,18 +327,54 @@ export default function Granular() {
             )}
           </div>
 
+          <div className="field">
+            Productos (se revuelven antes de esparcir — cada uno con su propia dosis)
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {productosForm.map((p, i) => (
+                <div key={i} style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+                  <label className="field">
+                    Producto (fertilizante autorizado)
+                    <select value={p.productoId} onChange={(e) => actualizarProductoForm(i, { productoId: e.target.value })} required>
+                      <option value="">Selecciona…</option>
+                      {productos.map((prod) => (
+                        <option key={prod.id} value={prod.id}>
+                          {prod.nombreComercial} ({presentacionTexto(prod)})
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="field">
+                    Modo de dosis
+                    <select value={p.modoDosis} onChange={(e) => actualizarProductoForm(i, { modoDosis: e.target.value as ModoDosisGranular })}>
+                      <option value="kg_ha">kg/hectárea</option>
+                      <option value="g_planta">g/planta</option>
+                    </select>
+                  </label>
+                  <label className="field">
+                    Dosis ({p.modoDosis === "kg_ha" ? "kg/ha" : "g/planta"})
+                    <input
+                      type="number"
+                      step="0.0001"
+                      style={{ width: 100 }}
+                      value={p.dosisValor}
+                      onChange={(e) => actualizarProductoForm(i, { dosisValor: e.target.value })}
+                      required
+                    />
+                  </label>
+                  {productosForm.length > 1 && (
+                    <button type="button" className="btn-secondary" onClick={() => quitarProductoForm(i)}>
+                      Quitar
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+            <button type="button" className="btn-secondary" style={{ marginTop: 8, width: "fit-content" }} onClick={agregarProductoForm}>
+              + Otro producto
+            </button>
+          </div>
+
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-            <label className="field">
-              Modo de dosis
-              <select value={modoDosis} onChange={(e) => setModoDosis(e.target.value as ModoDosisGranular)}>
-                <option value="kg_ha">kg/hectárea</option>
-                <option value="g_planta">g/planta</option>
-              </select>
-            </label>
-            <label className="field">
-              Dosis ({modoDosis === "kg_ha" ? "kg/ha" : "g/planta"})
-              <input type="number" step="0.0001" value={dosisValor} onChange={(e) => setDosisValor(e.target.value)} required />
-            </label>
             <label className="field">
               Fecha inicio
               <FechaInput value={fechaInicio} onChange={setFechaInicio} required />
@@ -353,13 +405,18 @@ export default function Granular() {
                   {f.alertaVencimiento && <span className="tag tag-danger">15+ días sin entregar</span>}{" "}
                   {f.alertaPendienteAplicar && <span className="tag tag-danger">15+ días entregada sin aplicar</span>}
                   <div style={{ fontSize: 13, fontWeight: 600, marginTop: 6 }}>
-                    {f.huerta.nombre} — {f.producto.nombreComercial}
+                    {f.huerta.nombre} — {f.productos.map((p) => p.producto.nombreComercial).join(" + ")}
                   </div>
                   <div style={{ fontSize: 12, color: "var(--ink-soft)" }}>
-                    Cuadros: {f.cuadros.map((c) => c.cuadro.nombre).join(", ") || "—"} · {formaEntero(f.cantidadTotalCalculada)} {f.producto.unidad}
+                    Cuadros: {f.cuadros.map((c) => c.cuadro.nombre).join(", ") || "—"}
                   </div>
+                  {f.productos.map((p) => (
+                    <div key={p.id} style={{ fontSize: 12, color: "var(--ink-soft)" }}>
+                      {p.producto.nombreComercial}: {formaEntero(p.cantidadTotalCalculada)} {p.producto.unidad} · {p.dosisValor}{" "}
+                      {p.modoDosis === "kg_ha" ? "kg/ha" : "g/planta"}
+                    </div>
+                  ))}
                   <div style={{ fontSize: 12, color: "var(--ink-soft)" }}>
-                    {f.dosisValor} {f.modoDosis === "kg_ha" ? "kg/ha" : "g/planta"} ·{" "}
                     {f.recursoTipo === "implemento" ? `Con implemento (${f.equipo?.folio ?? "—"})` : "Con gente"} · {formatearFecha(f.fechaInicio)} a{" "}
                     {formatearFecha(f.fechaFin)}
                   </div>
@@ -371,9 +428,9 @@ export default function Granular() {
                   )}
                   {f.estado === "cancelada" && (
                     <div style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: 4 }}>
-                      Cancelada el {formatearFecha(f.fechaCancelacion)}
+                      Cancelada el {formatearInstante(f.fechaCancelacion)}
                       {f.confirmacionBodegaPorId
-                        ? ` · Bodega confirmó recepción el ${formatearFecha(f.fechaConfirmacionBodega)}`
+                        ? ` · Bodega confirmó recepción el ${formatearInstante(f.fechaConfirmacionBodega)}`
                         : " · Pendiente de confirmación de Bodega"}
                     </div>
                   )}

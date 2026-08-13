@@ -3,7 +3,7 @@ import { z } from "zod";
 import { Rol } from "@prisma/client";
 import { prisma } from "../../core/db.js";
 import { requireAuth } from "../../middleware/auth.js";
-import { unoSolo } from "../../core/http.js";
+import { mensajeErrorValidacion, unoSolo } from "../../core/http.js";
 import { hashPassword } from "../../core/auth.js";
 import { invalidarMatrizPermisos } from "../../core/permissions.js";
 
@@ -43,7 +43,7 @@ const crearUsuarioSchema = z.object({
 usuariosRouter.post("/", async (req, res) => {
   const parsed = crearUsuarioSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
     return;
   }
   const { password, ...datos } = parsed.data;
@@ -62,7 +62,7 @@ const actualizarSchema = z.object({
 usuariosRouter.patch("/:id", async (req, res) => {
   const parsed = actualizarSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
     return;
   }
   const usuario = await prisma.usuario.update({ where: { id: unoSolo(req.params.id) }, data: parsed.data });
@@ -77,7 +77,7 @@ const resetPasswordSchema = z.object({ password: z.string().min(6) });
 usuariosRouter.post("/:id/resetear-password", async (req, res) => {
   const parsed = resetPasswordSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
     return;
   }
   await prisma.usuario.update({

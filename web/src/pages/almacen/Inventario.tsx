@@ -5,7 +5,7 @@ import { useCatalogoAbierto } from "../../lib/useCatalogoAbierto";
 import SelectConAgregar from "../../components/SelectConAgregar";
 import { presentacionTexto } from "../../lib/producto";
 import { formatearFecha } from "../../lib/fecha";
-import type { MovimientoAlmacenCentral, Producto, ProductoLote, TipoMovimientoAlmacenCentral } from "../../lib/types";
+import type { CancelacionPendienteBodega, MovimientoAlmacenCentral, Producto, ProductoLote, TipoMovimientoAlmacenCentral } from "../../lib/types";
 
 const UNIDADES = ["L", "kg", "g", "ml", "pieza", "bulto", "garrafa"];
 
@@ -47,6 +47,28 @@ export default function Inventario() {
     api.get<Record<string, number>>("/almacen/movimientos/stock-todos").then(setStock).catch(() => {});
     api.get<Record<string, number>>("/almacen/movimientos/comprometido-todos").then(setComprometido).catch(() => {});
   }, [productos]);
+
+  // Protocolo de cancelación de Aplicaciones (9.7): Bodega no tiene acceso al
+  // módulo de Aplicaciones, así que el aviso de "se te va a regresar
+  // producto" y la firma digital de recepción viven aquí, en su propio módulo.
+  const [cancelacionesPendientes, setCancelacionesPendientes] = useState<CancelacionPendienteBodega[]>([]);
+  function cargarCancelacionesPendientes() {
+    api
+      .get<CancelacionPendienteBodega[]>("/aplicaciones/cancelaciones-pendientes-bodega")
+      .then(setCancelacionesPendientes)
+      .catch(() => setCancelacionesPendientes([]));
+  }
+  useEffect(cargarCancelacionesPendientes, []);
+
+  async function confirmarRecepcionCancelacion(id: string) {
+    setError(null);
+    try {
+      await api.post(`/aplicaciones/${id}/confirmar-recepcion-cancelacion`);
+      cargarCancelacionesPendientes();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "No se pudo confirmar.");
+    }
+  }
 
   const [error, setError] = useState<string | null>(null);
   const [mensaje, setMensaje] = useState<string | null>(null);
@@ -146,6 +168,28 @@ export default function Inventario() {
 
   return (
     <div>
+      {cancelacionesPendientes.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
+          {cancelacionesPendientes.map((c) => (
+            <div
+              key={c.id}
+              className="card"
+              style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}
+            >
+              <div>
+                <span className="tag tag-warning">Aplicación cancelada — se te va a regresar producto</span>
+                <div style={{ fontSize: 12.5, marginTop: 4 }}>
+                  {c.huerta.nombre} — {c.cantidadRegresada} {c.producto.unidad} de {c.producto.nombreComercial}
+                </div>
+              </div>
+              <button className="btn-primary" onClick={() => confirmarRecepcionCancelacion(c.id)}>
+                Ya llegó — confirmar recepción
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
       <div style={{ marginBottom: 14 }}>
         <button className="btn-primary" onClick={() => setMostrarForm((v) => !v)}>
           {mostrarForm ? "Cancelar" : "+ Nuevo producto"}

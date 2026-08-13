@@ -1,9 +1,9 @@
 import { Router } from "express";
 import { z } from "zod";
-import { calcularPeriodoNomina } from "@cbf/shared";
+import { calcularPeriodoNomina, hoyISO } from "@cbf/shared";
 import { prisma } from "../../core/db.js";
 import { requireAuth, requirePermission } from "../../middleware/auth.js";
-import { unoSolo } from "../../core/http.js";
+import { mensajeErrorValidacion, unoSolo } from "../../core/http.js";
 import { obtenerConfigNomina } from "./config.js";
 import { autorizarBono, generarBonosPendientes, rechazarBono } from "./bonos.js";
 
@@ -25,7 +25,7 @@ const crearBonoSchema = z.object({ nombre: z.string().min(1) }).and(paramsPorTip
 bonosRouter.post("/", requirePermission("nomina", "editar"), async (req, res) => {
   const parsed = crearBonoSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
     return;
   }
   const { nombre, tipo, ...parametros } = parsed.data;
@@ -47,7 +47,7 @@ bonosRouter.post("/", requirePermission("nomina", "editar"), async (req, res) =>
 // para que Gerencia los revise antes de autorizar — nunca se pagan solos.
 bonosRouter.post("/generar-pendientes", requirePermission("nomina", "editar"), async (_req, res) => {
   const config = await obtenerConfigNomina();
-  const hoy = new Date().toISOString().slice(0, 10);
+  const hoy = hoyISO();
   const periodo = calcularPeriodoNomina(hoy, config.diaCorteIndex);
   const generados = await generarBonosPendientes(periodo.inicio, periodo.fin, hoy);
   res.json({ generados });
@@ -77,7 +77,7 @@ const activoSchema = z.object({ activo: z.boolean() });
 bonosRouter.patch("/:id/activo", requirePermission("nomina", "editar"), async (req, res) => {
   const parsed = activoSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
     return;
   }
   const bono = await prisma.bonoConfig.update({ where: { id: unoSolo(req.params.id) }, data: { activo: parsed.data.activo } });

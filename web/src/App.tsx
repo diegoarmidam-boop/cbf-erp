@@ -36,6 +36,7 @@ import EquiposCatalogo from "./pages/equipos/Catalogo";
 import Combustible from "./pages/equipos/Combustible";
 import Mantenimiento from "./pages/equipos/Mantenimiento";
 import UsoDiario from "./pages/equipos/UsoDiario";
+import Actividades from "./pages/actividades/Actividades";
 import Aplicaciones from "./pages/aplicaciones/Aplicaciones";
 import FertilizantesLayout from "./pages/fertilizantes/FertilizantesLayout";
 import Granular from "./pages/fertilizantes/Granular";
@@ -116,6 +117,8 @@ export default function App() {
               <Route path="mantenimiento" element={<Mantenimiento />} />
               <Route path="uso-diario" element={<UsoDiario />} />
             </Route>
+
+            <Route path="/actividades" element={<Actividades />} />
 
             <Route path="/aplicaciones" element={<Aplicaciones />} />
 

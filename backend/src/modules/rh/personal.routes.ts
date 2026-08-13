@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { requireAuth, requirePermission } from "../../middleware/auth.js";
-import { unoSolo } from "../../core/http.js";
+import { mensajeErrorValidacion, unoSolo } from "../../core/http.js";
 import { tienePermiso, type Accion } from "../../core/permissions.js";
 import { actualizarPersonal, crearPersonal, darDeBaja, listarPersonal, obtenerPersonal } from "./personal.js";
 
@@ -62,7 +62,7 @@ const altaSchemaBase = z.object({
 personalRouter.post("/", requirePermission("rh", "capturar"), async (req, res) => {
   const parsed = altaSchemaBase.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
     return;
   }
   const persona = await crearPersonal(parsed.data);
@@ -72,7 +72,7 @@ personalRouter.post("/", requirePermission("rh", "capturar"), async (req, res) =
 personalRouter.patch("/:id", requirePermission("rh", "editar"), async (req, res) => {
   const parsed = altaSchemaBase.partial().safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
     return;
   }
   const persona = await actualizarPersonal(unoSolo(req.params.id), parsed.data);
@@ -84,7 +84,7 @@ const bajaSchema = z.object({ motivo: z.string().min(1, "El motivo de baja es ob
 personalRouter.post("/:id/baja", requirePermission("rh", "editar"), async (req, res) => {
   const parsed = bajaSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
     return;
   }
   const persona = await darDeBaja(unoSolo(req.params.id), parsed.data.motivo, req.usuario!.usuarioId);

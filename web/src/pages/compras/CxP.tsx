@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, ApiError } from "../../lib/api";
 import type { OrdenCxP } from "../../lib/types";
-import { formatearFecha } from "../../lib/fecha";
+import { formatearFecha, formatearInstante } from "../../lib/fecha";
 
 export default function CxP() {
   const [ordenes, setOrdenes] = useState<OrdenCxP[]>([]);
@@ -59,7 +59,7 @@ export default function CxP() {
               <tr key={o.id} style={o.alertaVisible ? { background: "var(--pink-soft, #fdeef1)" } : undefined}>
                 <td>{o.proveedor.nombre}</td>
                 <td>{o.producto.nombreComercial}</td>
-                <td>{formatearFecha(o.fechaFormalizacion)}</td>
+                <td>{formatearInstante(o.fechaFormalizacion)}</td>
                 <td>{o.proveedor.diasCredito}</td>
                 <td>{formatearFecha(o.fechaLimitePago)}</td>
                 <td>

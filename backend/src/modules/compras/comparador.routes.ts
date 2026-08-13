@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { requireAuth, requirePermission } from "../../middleware/auth.js";
-import { unoSolo } from "../../core/http.js";
+import { mensajeErrorValidacion, unoSolo } from "../../core/http.js";
 import { crearComparacion, eliminarComparacion, listarComparaciones, obtenerComparacionCalculada } from "./comparador.js";
 
 export const comparadorRouter = Router();
@@ -43,7 +43,7 @@ const crearSchema = z.object({
 comparadorRouter.post("/", requirePermission("compras", "ver"), async (req, res) => {
   const parsed = crearSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
     return;
   }
   const comparacion = await crearComparacion(parsed.data.nombre, req.usuario!.usuarioId, parsed.data.items);

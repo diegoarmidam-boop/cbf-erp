@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { Rol } from "@prisma/client";
 import { requireAuth, requirePermission, requirePermissionAny, huertaIdDeAlcance } from "../../middleware/auth.js";
 import { tienePermiso } from "../../core/permissions.js";
-import { unoSolo } from "../../core/http.js";
+import { mensajeErrorValidacion, unoSolo } from "../../core/http.js";
 import { prisma } from "../../core/db.js";
 import { diaEstaCerrado } from "../nomina/captura.js";
 import {
@@ -16,6 +16,7 @@ import {
   equiposTractorParaAplicacion,
   liberarAplicacionVencida,
   listarAplicaciones,
+  listarCancelacionesPendientesConfirmar,
   NoSePuedeCancelarError,
   obtenerAplicacion,
   productosParaAplicacion,
@@ -35,10 +36,15 @@ aplicacionesRouter.use(requireAuth);
 // (ambos grupos comparten capturar=true en "aplicaciones"), así que se
 // verifica aquí por rol explícito, además del permiso de módulo.
 const ROLES_PROGRAMAR: Rol[] = ["gerente_tecnico_produccion", "asistente_tecnico_produccion"];
-const ROLES_REALIZADA: Rol[] = ["supervisor_huerta", "ayudante_supervisor"];
+const ROLES_REALIZADA: Rol[] = ["supervisor_huerta", "ayudante_supervisor", "capturista_informacion"];
 const ROLES_ACCESO_UNIVERSAL: Rol[] = ["director_general", "encargado_sistemas"];
 // Cancelación de aplicación entregada y vencida (9.7): solo Director General/Gerente Técnico — más restringido que programar (sin Asistente Técnico).
 const ROLES_CANCELAR: Rol[] = ["gerente_tecnico_produccion"];
+// Firma digital de recepción (9.7): el documento dice "Encargado de Bodega"
+// específicamente — sin esta lista, cualquiera con permiso de "almacen"
+// (incluye Supervisor de Huerta, por su Almacén Local) también podría
+// confirmar, que no es lo que dice el documento. Confirmado 10-ago-2026.
+const ROLES_CONFIRMAR_BODEGA: Rol[] = ["encargado_bodega", "bodeguista"];
 
 function verificarRol(req: Request, res: Response, permitidos: Rol[]): boolean {
   const rol = req.usuario!.rol;
@@ -78,19 +84,34 @@ aplicacionesRouter.get("/equipos-tractor", requirePermission("aplicaciones", "ve
   res.json(await equiposTractorParaAplicacion());
 });
 
+// Bodega no tiene permiso sobre "aplicaciones" (9.7) — se expone bajo el
+// permiso de Almacén para que el aviso de "se te va a regresar producto" sí le
+// llegue. Restringido a Encargado de Bodega/Bodeguista (10-ago-2026): otros
+// roles con "almacen" (ej. Supervisor, por su Almacén Local) no deben ver ni
+// poder actuar sobre esta lista — la firma es específicamente de Bodega.
+// Va antes de "/:id" para que Express no la confunda con un id.
+aplicacionesRouter.get("/cancelaciones-pendientes-bodega", requirePermission("almacen", "ver"), async (req, res) => {
+  if (!verificarRol(req, res, ROLES_CONFIRMAR_BODEGA)) return;
+  res.json(await listarCancelacionesPendientesConfirmar());
+});
+
 aplicacionesRouter.get("/:id", requirePermission("aplicaciones", "ver"), async (req, res) => {
   const aplicacion = await obtenerAplicacion(unoSolo(req.params.id));
   if (!verificarAlcance(req, res, aplicacion.huertaId)) return;
   res.json(aplicacion);
 });
 
+const productoAplicacionSchema = z.object({
+  productoId: z.string().min(1),
+  concentracionValor: z.number().positive(),
+  concentracionUnidad: z.enum(["ml_l", "g_l", "kg_l"]),
+});
+
 const programarSchema = z.object({
   huertaId: z.string().min(1),
   cuadroIds: z.array(z.string().min(1)).min(1),
-  productoId: z.string().min(1),
+  productos: z.array(productoAplicacionSchema).min(1),
   recursoSugerido: z.enum(["mochila", "turbina", "aguilon"]),
-  concentracionValor: z.number().positive(),
-  concentracionUnidad: z.enum(["ml_l", "g_l", "kg_l"]),
   litrosMezclaPorHa: z.number().positive(),
   fechaInicio: z.string(),
   fechaFin: z.string(),
@@ -100,7 +121,7 @@ aplicacionesRouter.post("/", requirePermission("aplicaciones", "capturar"), asyn
   if (!verificarRol(req, res, ROLES_PROGRAMAR)) return;
   const parsed = programarSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
     return;
   }
   try {
@@ -167,7 +188,7 @@ aplicacionesRouter.post("/:id/realizada", requirePermissionAny(["aplicaciones", 
 
   const parsed = realizadaSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
     return;
   }
 
@@ -214,7 +235,7 @@ aplicacionesRouter.patch("/realizada/:realizadaId", requirePermission("aplicacio
 
   const parsed = editarRealizadaSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
     return;
   }
   try {
@@ -260,8 +281,12 @@ aplicacionesRouter.post("/:id/cancelar", requirePermission("aplicaciones", "capt
   }
 });
 
-// Firma digital de recepción del Encargado de Bodega — no bloquea el ajuste de inventario, que ya ocurrió al cancelar.
+// Firma digital de recepción del Encargado de Bodega — no bloquea el ajuste
+// de inventario, que ya ocurrió al cancelar. Restringido a Encargado de
+// Bodega/Bodeguista (10-ago-2026) — antes cualquiera con permiso de
+// "almacen" (ej. Supervisor de Huerta) podía confirmarla.
 aplicacionesRouter.post("/:id/confirmar-recepcion-cancelacion", requirePermission("almacen", "capturar"), async (req, res) => {
+  if (!verificarRol(req, res, ROLES_CONFIRMAR_BODEGA)) return;
   try {
     const aplicacion = await confirmarRecepcionCancelacion(unoSolo(req.params.id), req.usuario!.usuarioId);
     res.json(aplicacion);

@@ -10,7 +10,8 @@ import { formatearFecha } from "../../lib/fecha";
 const ROLES_EDITAR_NOMINA = ["director_general", "recursos_humanos", "encargado_nominas", "gerente_administrativo"];
 
 function hoyISO(): string {
-  return new Date().toISOString().slice(0, 10);
+  const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 function tagEstadoPlazo(estado: ResumenCierreHuerta["estadoPlazo"]) {
