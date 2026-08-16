@@ -31,6 +31,11 @@ export function crearProductoAutorizado(input: AltaProductoInput, autorizadoPorI
   });
 }
 
+/** Editar un producto ya dado de alta — corrige nombre/presentación/ingrediente activo sin perder lotes/movimientos históricos (misma fila, no se recrea). */
+export function editarProducto(id: string, input: AltaProductoInput) {
+  return prisma.producto.update({ where: { id }, data: input });
+}
+
 /** Catálogo de compra: solo productos ya autorizados y activos pueden elegirse (bloque 4/9.5/9.7). */
 export function productosAutorizados(categoria?: string) {
   return prisma.producto.findMany({ where: { categoria, autorizado: true, activo: true }, orderBy: { nombreComercial: "asc" } });

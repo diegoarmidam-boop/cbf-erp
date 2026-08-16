@@ -4,6 +4,7 @@ import { prisma } from "../../core/db.js";
 import type { TransactionClient } from "../../core/db.js";
 import { productosAutorizados } from "../almacen/productos.js";
 import {
+  ajustarCantidadProducto,
   confirmarEntregaComprometida,
   intentarComprometer,
   liberarComprometido,
@@ -154,6 +155,112 @@ export async function programarAplicacion(input: ProgramarAplicacionInput, cread
       }
     }
     return aplicacion;
+  });
+}
+
+export class YaHayAvanceReportadoError extends Error {
+  constructor() {
+    super("Esta Aplicación ya tiene reportes de avance — no se puede editar la dosis, cancélala y reprograma con los datos correctos.");
+  }
+}
+
+/**
+ * Editar el Paso 1 de una Aplicación ya programada/entregada (9.7,
+ * 15-ago-2026, reabre decisión previa): permitido mientras no exista ningún
+ * reporte de avance todavía (nada se ha usado de verdad, así que se puede
+ * ajustar el 100% de cada producto sin cálculos proporcionales). Por
+ * producto, según cómo cambia la cantidad total:
+ * - Sube: intenta apartar la diferencia del Almacén Central; si no alcanza,
+ *   genera automático el pendiente en Compras por la diferencia completa
+ *   (mismo criterio que programar por primera vez). Si la Aplicación ya
+ *   estaba "entregada", la diferencia apartada se entrega de inmediato
+ *   también — no se deja a medio entregar.
+ * - Baja: el sobrante se libera. Si todavía no se había entregado, basta
+ *   con liberar el compromiso (el producto nunca salió de la bodega). Si ya
+ *   se había entregado, el sobrante se regresa del Almacén Local de la
+ *   Huerta al Central como abono — mismo mecanismo que la cancelación,
+ *   pero queda marcado `confirmado: false` hasta que Bodega confirme que
+ *   ya le llegó físicamente de vuelta.
+ * Productos quitados de la edición se tratan como baja completa; productos
+ * nuevos, como alta completa.
+ */
+export async function editarAplicacionProgramada(aplicacionId: string, input: Omit<ProgramarAplicacionInput, "huertaId">, editadoPorId: string) {
+  if (input.cuadroIds.length === 0) throw new Error("Elige al menos un Cuadro.");
+  if (!input.productos || input.productos.length === 0) throw new Error("Elige al menos un producto.");
+
+  const aplicacion = await prisma.aplicacion.findUniqueOrThrow({
+    where: { id: aplicacionId },
+    include: { productos: true, realizadas: true },
+  });
+  if (aplicacion.estado !== "programada" && aplicacion.estado !== "entregada") {
+    throw new TransicionAplicacionInvalidaError("programada o entregada");
+  }
+  if (aplicacion.realizadas.length > 0) throw new YaHayAvanceReportadoError();
+
+  const productosNuevos = await prisma.producto.findMany({ where: { id: { in: input.productos.map((p) => p.productoId) } } });
+  for (const p of productosNuevos) {
+    if (p.categoria !== "agroquimico" || !p.autorizado) throw new ProductoNoAutorizadoAplicacionError();
+  }
+
+  let hectareasTotales = 0;
+  const fechaRef = new Date(input.fechaInicio);
+  for (const cuadroId of input.cuadroIds) {
+    const version = await obtenerVersionVigente(cuadroId, fechaRef);
+    if (!version) throw new Error("El Cuadro elegido no tiene una configuración vigente para la fecha de inicio.");
+    hectareasTotales += Number(version.hectareas);
+  }
+
+  const entregada = aplicacion.estado === "entregada";
+
+  return prisma.$transaction(async (tx) => {
+    const productosAnteriores = new Map(aplicacion.productos.map((p) => [p.productoId, p]));
+    const productoIdsNuevos = new Set(input.productos.map((p) => p.productoId));
+
+    // Productos quitados por completo de la edición: baja de 100% de lo apartado.
+    for (const anterior of aplicacion.productos) {
+      if (productoIdsNuevos.has(anterior.productoId)) continue;
+      await ajustarCantidadProducto(tx, aplicacion.huertaId, aplicacionId, anterior.productoId, Number(anterior.cantidadTotalCalculada), 0, entregada, editadoPorId);
+      await tx.aplicacionProducto.delete({ where: { id: anterior.id } });
+    }
+
+    for (const p of input.productos) {
+      const cantidadNueva = calcularCantidadTotal(p.concentracionValor, p.concentracionUnidad, input.litrosMezclaPorHa, hectareasTotales);
+      const anterior = productosAnteriores.get(p.productoId);
+      const cantidadAnterior = anterior ? Number(anterior.cantidadTotalCalculada) : 0;
+
+      await ajustarCantidadProducto(tx, aplicacion.huertaId, aplicacionId, p.productoId, cantidadAnterior, cantidadNueva, entregada, editadoPorId);
+
+      if (anterior) {
+        await tx.aplicacionProducto.update({
+          where: { id: anterior.id },
+          data: { concentracionValor: p.concentracionValor, concentracionUnidad: p.concentracionUnidad, cantidadTotalCalculada: cantidadNueva },
+        });
+      } else {
+        await tx.aplicacionProducto.create({
+          data: {
+            aplicacionId,
+            productoId: p.productoId,
+            concentracionValor: p.concentracionValor,
+            concentracionUnidad: p.concentracionUnidad,
+            cantidadTotalCalculada: cantidadNueva,
+          },
+        });
+      }
+    }
+
+    await tx.aplicacionCuadro.deleteMany({ where: { aplicacionId } });
+    await tx.aplicacionCuadro.createMany({ data: input.cuadroIds.map((cuadroId) => ({ aplicacionId, cuadroId })) });
+
+    return tx.aplicacion.update({
+      where: { id: aplicacionId },
+      data: {
+        recursoSugerido: input.recursoSugerido,
+        litrosMezclaPorHa: input.litrosMezclaPorHa,
+        fechaInicio: fechaRef,
+        fechaFin: new Date(input.fechaFin),
+        hectareasTotalesProgramadas: hectareasTotales,
+      },
+    });
   });
 }
 
@@ -746,29 +853,43 @@ export async function listarCancelacionesPendientesConfirmar() {
     include: { huerta: true, productos: { include: { producto: true } } },
     orderBy: { fechaCancelacion: "asc" },
   });
-  return Promise.all(
-    aplicaciones.map(async (a) => {
-      const productos = await Promise.all(
-        a.productos.map(async (p) => {
-          const abono = await prisma.almacenCentralMovimiento.findFirst({
-            where: { referenciaId: a.id, tipo: "abono_sobrante", productoId: p.productoId },
-          });
-          return {
-            nombreComercial: p.producto.nombreComercial,
-            unidad: p.producto.unidad,
-            cantidadRegresada: abono ? Number(abono.cantidad) : 0,
-          };
-        })
-      );
-      return {
+  // Aplanado uno por producto (corregido 15-ago-2026: esta función devolvía
+  // `productos: [...]` agrupado, pero el tipo/pantalla del frontend siempre
+  // esperó un renglón por producto — con más de un producto por cancelación
+  // el acceso a `.producto.nombreComercial` habría tronado en tiempo real).
+  const filas: {
+    id: string;
+    tipo: "cancelacion";
+    origen: "aplicacion";
+    huerta: { nombre: string };
+    producto: { nombreComercial: string; unidad: string };
+    cantidadRegresada: number;
+    fecha: string | null;
+  }[] = [];
+  for (const a of aplicaciones) {
+    for (const p of a.productos) {
+      const abono = await prisma.almacenCentralMovimiento.findFirst({
+        where: { referenciaId: a.id, tipo: "abono_sobrante", productoId: p.productoId },
+      });
+      const cantidadRegresada = abono ? Number(abono.cantidad) : 0;
+      if (cantidadRegresada <= 0) continue;
+      filas.push({
         id: a.id,
+        tipo: "cancelacion",
+        origen: "aplicacion",
         huerta: { nombre: a.huerta.nombre },
-        productos,
-        fechaCancelacion: a.fechaCancelacion,
-      };
-    })
-  );
+        producto: { nombreComercial: p.producto.nombreComercial, unidad: p.producto.unidad },
+        cantidadRegresada,
+        fecha: a.fechaCancelacion ? a.fechaCancelacion.toISOString() : null,
+      });
+    }
+  }
+  return filas;
 }
+
+// listarAjustesPendientesConfirmar y confirmarRecepcionAjuste (15-ago-2026)
+// viven en almacen/movimientos.ts — son genéricas por movimiento, no
+// dependen de si el origen fue una Aplicación o una Fertilización Granular.
 
 /** Catálogo de agroquímicos ya autorizados — lo único elegible al programar (9.7). */
 export function productosParaAplicacion() {

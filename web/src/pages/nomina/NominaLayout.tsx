@@ -7,6 +7,7 @@ const TABS = [
   { to: "asistencia", label: "Asistencia" },
   { to: "prestamos", label: "Préstamos" },
   { to: "bonos", label: "Bonos" },
+  { to: "liquidaciones", label: "Liquidaciones" },
   { to: "reporte", label: "Reporte semanal" },
   { to: "catalogos", label: "Catálogos" },
 ];

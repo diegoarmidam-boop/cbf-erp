@@ -259,6 +259,30 @@ export async function intentarComprometer(
 }
 
 /**
+ * Aparta una cantidad ADICIONAL sobre un compromiso que ya existía (9.7/9.5,
+ * 15-ago-2026: edición de dosis después de programar/entregar) — a
+ * diferencia de `intentarComprometer`, no es idempotente por diseño: cada
+ * llamada aparta más, porque la dosis subió de verdad. Devuelve false sin
+ * tocar nada si no alcanza (quien llama decide, ej. generar compra automática).
+ */
+export async function comprometerAdicional(
+  tx: TransactionClient,
+  productoId: string,
+  cantidadAdicional: number,
+  referenciaId: string,
+  capturadoPorId: string
+): Promise<boolean> {
+  const disponible = await stockTotalProductoTx(tx, productoId);
+  if (disponible + 0.0001 < cantidadAdicional) return false;
+
+  await descontarFIFO(tx, productoId, cantidadAdicional);
+  await tx.almacenCentralMovimiento.create({
+    data: { productoId, tipo: "salida_comprometida", cantidad: cantidadAdicional, referenciaId, capturadoPorId },
+  });
+  return true;
+}
+
+/**
  * Libera un compromiso que nunca llegó a entregarse (vencimiento de 15
  * días sin salir de bodega, o cancelación manual — 9.7) — regresa la
  * cantidad al primer lote del producto; la precisión de a qué lote exacto
@@ -277,6 +301,127 @@ export async function liberarComprometido(
   await tx.productoLote.update({ where: { id: lote.id }, data: { cantidadActual: { increment: cantidad } } });
   await tx.almacenCentralMovimiento.create({
     data: { productoId, tipo: "ajuste_manual", cantidad, referenciaId, capturadoPorId, motivoAjuste: motivo },
+  });
+}
+
+/**
+ * Ajusta lo apartado/entregado de un producto de `cantidadAnterior` a
+ * `cantidadNueva` (9.7/9.5, 15-ago-2026: edición de dosis después de
+ * programar/entregar, compartido entre Aplicaciones y Fertilización
+ * Granular — misma mecánica en ambas). Sube: aparta la diferencia si
+ * alcanza, si no genera compra automática; si ya estaba entregada, la
+ * diferencia apartada se entrega de inmediato también. Baja: si no se
+ * había entregado, libera el compromiso; si ya se entregó, regresa el
+ * sobrante del Almacén Local al Central como abono, marcado sin confirmar
+ * hasta que Bodega registre que ya le llegó físicamente de vuelta.
+ */
+export async function ajustarCantidadProducto(
+  tx: TransactionClient,
+  huertaId: string,
+  referenciaId: string,
+  productoId: string,
+  cantidadAnterior: number,
+  cantidadNueva: number,
+  entregada: boolean,
+  editadoPorId: string
+): Promise<void> {
+  const delta = cantidadNueva - cantidadAnterior;
+  if (Math.abs(delta) < 0.0001) return;
+
+  if (delta > 0) {
+    const comprometido = await comprometerAdicional(tx, productoId, delta, referenciaId, editadoPorId);
+    if (!comprometido) {
+      await tx.ordenCompra.create({
+        data: {
+          origen: "automatica",
+          productoId,
+          cantidadSolicitada: delta,
+          estado: "pendiente_cotizar",
+          referenciaAplicacionId: referenciaId,
+          creadoPorId: editadoPorId,
+        },
+      });
+    } else if (entregada) {
+      await confirmarEntregaComprometida(tx, productoId, huertaId, delta, referenciaId, editadoPorId);
+    }
+    return;
+  }
+
+  const sobrante = -delta;
+  if (!entregada) {
+    await liberarComprometido(tx, productoId, sobrante, referenciaId, editadoPorId, "Ajuste de dosis — sobrante liberado antes de entregar.");
+    return;
+  }
+
+  const local = await tx.almacenLocal.update({
+    where: { huertaId_productoId: { huertaId, productoId } },
+    data: { cantidadRecibidaAcumulada: { decrement: sobrante } },
+  });
+  await tx.almacenLocalMovimiento.create({
+    data: { almacenLocalId: local.id, tipo: "ajuste_manual", cantidad: -sobrante, referenciaId, capturadoPorId: editadoPorId },
+  });
+  const lote = await tx.productoLote.findFirst({ where: { productoId } });
+  if (lote) {
+    await tx.productoLote.update({ where: { id: lote.id }, data: { cantidadActual: { increment: sobrante } } });
+  } else {
+    await tx.productoLote.create({ data: { productoId, lote: "ABONO", cantidadActual: sobrante } });
+  }
+  await tx.almacenCentralMovimiento.create({
+    data: {
+      productoId,
+      tipo: "abono_sobrante",
+      cantidad: sobrante,
+      huertaDestinoId: huertaId,
+      referenciaId,
+      capturadoPorId: editadoPorId,
+      confirmado: false,
+    },
+  });
+}
+
+/**
+ * Ajustes de dosis pendientes de confirmar por Bodega (9.7/9.5, 15-ago-2026)
+ * — mismo tipo de aviso que una cancelación completa (bloque 6/9.15: "se te
+ * va a regresar tal producto"), pero por movimiento individual (no por
+ * Aplicación/Fertilización completa), porque una misma programación puede
+ * ajustarse más de una vez. `huertaDestinoId`/`producto` ya viven en el
+ * propio movimiento, así que esto sirve por igual sin importar si el
+ * origen fue Aplicaciones o Fertilizantes.
+ */
+export async function listarAjustesPendientesConfirmar() {
+  const movimientos = await prisma.almacenCentralMovimiento.findMany({
+    where: { tipo: "abono_sobrante", confirmado: false },
+    include: { producto: true },
+    orderBy: { fecha: "asc" },
+  });
+  return Promise.all(
+    movimientos.map(async (m) => {
+      const huerta = m.huertaDestinoId ? await prisma.huerta.findUnique({ where: { id: m.huertaDestinoId } }) : null;
+      return {
+        id: m.id,
+        tipo: "ajuste_dosis" as const,
+        huerta: { nombre: huerta?.nombre ?? "—" },
+        producto: { nombreComercial: m.producto.nombreComercial, unidad: m.producto.unidad },
+        cantidadRegresada: Number(m.cantidad),
+        fecha: m.fecha.toISOString(),
+      };
+    })
+  );
+}
+
+export class AjusteInvalidoError extends Error {}
+
+export async function confirmarRecepcionAjuste(movimientoId: string, confirmadoPorId: string) {
+  const movimiento = await prisma.almacenCentralMovimiento.findUniqueOrThrow({ where: { id: movimientoId } });
+  if (movimiento.tipo !== "abono_sobrante") {
+    throw new AjusteInvalidoError("Este movimiento no es un abono por sobrante.");
+  }
+  if (movimiento.confirmado) {
+    throw new AjusteInvalidoError("Ya se había confirmado la recepción de este ajuste.");
+  }
+  return prisma.almacenCentralMovimiento.update({
+    where: { id: movimientoId },
+    data: { confirmado: true, confirmadoPorId, fechaConfirmado: new Date() },
   });
 }
 

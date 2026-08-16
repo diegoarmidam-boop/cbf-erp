@@ -82,6 +82,7 @@ export interface Personal {
   imssOSeguro?: string | null;
   fechaBaja?: string | null;
   motivoBaja?: string | null;
+  noDisponibleDesde?: string | null;
   documentos?: PersonalDocumento[];
 }
 
@@ -122,6 +123,7 @@ export interface UsuarioAcceso {
 }
 
 export type EsquemaPago = "individual_hora" | "individual_caja" | "grupal_remolque" | "depende_empacadores";
+export type TipoRecursoActividad = "gente" | "tractor" | "mixta";
 
 export interface Actividad {
   id: string;
@@ -131,6 +133,7 @@ export interface Actividad {
   usarTarifaGeneral: boolean;
   esquemaPago: EsquemaPago;
   requiereCuadro: boolean;
+  tipoRecurso: TipoRecursoActividad;
   activo: boolean;
 }
 
@@ -278,6 +281,38 @@ export interface ReporteNominaSemanal {
   filas: FilaReporteSemanal[];
 }
 
+// ---- Liquidaciones (9.11, 15-ago-2026) — pago fuera de ciclo para
+// personal eventual/destajo que deja de venir a mitad del periodo. ----
+export interface PrestamoPendienteLiquidacion {
+  prestamoId: string;
+  motivo: string;
+  saldoPendiente: number;
+  montoSugerido: number;
+}
+
+export interface LiquidacionCalculada {
+  personalId: string;
+  nombreCompleto: string;
+  bruto: number;
+  bonos: number;
+  neto: number;
+  prestamosPendientes: PrestamoPendienteLiquidacion[];
+}
+
+export interface Liquidacion {
+  id: string;
+  personalId: string;
+  personal: { nombreCompleto: string };
+  fechaInicio: string;
+  fechaFin: string;
+  bruto: string;
+  bonos: string;
+  descuentoPrestamos: string;
+  neto: string;
+  liquidadoPorId: string;
+  fechaLiquidacion: string;
+}
+
 export interface ConfigNomina {
   diaCorteSemanal: string;
   diaCorteIndex: number;
@@ -361,10 +396,12 @@ export interface CandadoAlmacenLocal {
 
 export interface CancelacionPendienteBodega {
   id: string;
+  tipo: "cancelacion" | "ajuste_dosis";
+  origen?: "aplicacion" | "granular";
   huerta: { nombre: string };
   producto: { nombreComercial: string; unidad: string };
   cantidadRegresada: number;
-  fechaCancelacion: string | null;
+  fecha: string | null;
 }
 
 export interface SolicitudPendiente {
@@ -489,6 +526,7 @@ export interface Equipo {
   modelo: string | null;
   anio: number | null;
   placas: string | null;
+  operadorDesignadoId: string | null;
   activo: boolean;
 }
 
@@ -547,8 +585,10 @@ export interface EquipoUsoDiario {
   huerta: { nombre: string };
 }
 
-// ---- Actividades (9.4) — mismo patrón de dos pasos que Aplicaciones, sin
-// insumo ni maquinaria (alcance inicial de puro mano de obra). ----
+// ---- Actividades (9.4) — mismo patrón de dos pasos que Aplicaciones.
+// Desde 15-ago-2026 sí maneja maquinaria (líneas de tractor/mixta/gente),
+// con horas por persona (no compartidas por línea, a diferencia de
+// Aplicaciones). ----
 export interface ActividadRealizadaCuadro {
   id: string;
   cuadroId: string;
@@ -556,11 +596,23 @@ export interface ActividadRealizadaCuadro {
   hectareas: string;
 }
 
-export interface ActividadRealizadaPersona {
-  id: string;
+export interface ActividadRealizadaLineaPersona {
   personalId: string;
   personal: Personal;
   horas: string;
+}
+
+export interface ActividadRealizadaLinea {
+  id: string;
+  tipo: TipoRecursoActividad;
+  tractorId: string | null;
+  tractor: Equipo | null;
+  operadorId: string | null;
+  operador: Personal | null;
+  operadorHoras: string | null;
+  implementoId: string | null;
+  implemento: Equipo | null;
+  personas: ActividadRealizadaLineaPersona[];
 }
 
 export interface ActividadRealizada {
@@ -569,7 +621,7 @@ export interface ActividadRealizada {
   fechaReal: string;
   registradoPorId: string;
   cuadros: ActividadRealizadaCuadro[];
-  personas: ActividadRealizadaPersona[];
+  lineas: ActividadRealizadaLinea[];
 }
 
 export interface ActividadProgramada {

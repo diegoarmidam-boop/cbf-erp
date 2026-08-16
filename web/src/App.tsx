@@ -11,6 +11,7 @@ import Prestamos from "./pages/nomina/Prestamos";
 import Bonos from "./pages/nomina/Bonos";
 import ReporteSemanal from "./pages/nomina/ReporteSemanal";
 import Catalogos from "./pages/nomina/Catalogos";
+import Liquidaciones from "./pages/nomina/Liquidaciones";
 import UPLayout from "./pages/unidades-produccion/UPLayout";
 import HuertasYCuadros from "./pages/unidades-produccion/HuertasYCuadros";
 import Ciclos from "./pages/unidades-produccion/Ciclos";
@@ -36,7 +37,9 @@ import EquiposCatalogo from "./pages/equipos/Catalogo";
 import Combustible from "./pages/equipos/Combustible";
 import Mantenimiento from "./pages/equipos/Mantenimiento";
 import UsoDiario from "./pages/equipos/UsoDiario";
+import ActividadesLayout from "./pages/actividades/ActividadesLayout";
 import Actividades from "./pages/actividades/Actividades";
+import CatalogoActividades from "./pages/actividades/CatalogoActividades";
 import Aplicaciones from "./pages/aplicaciones/Aplicaciones";
 import FertilizantesLayout from "./pages/fertilizantes/FertilizantesLayout";
 import Granular from "./pages/fertilizantes/Granular";
@@ -75,6 +78,7 @@ export default function App() {
               <Route path="asistencia" element={<Asistencia />} />
               <Route path="prestamos" element={<Prestamos />} />
               <Route path="bonos" element={<Bonos />} />
+              <Route path="liquidaciones" element={<Liquidaciones />} />
               <Route path="reporte" element={<ReporteSemanal />} />
               <Route path="catalogos" element={<Catalogos />} />
             </Route>
@@ -118,7 +122,11 @@ export default function App() {
               <Route path="uso-diario" element={<UsoDiario />} />
             </Route>
 
-            <Route path="/actividades" element={<Actividades />} />
+            <Route path="/actividades" element={<ActividadesLayout />}>
+              <Route index element={<Navigate to="programar" replace />} />
+              <Route path="programar" element={<Actividades />} />
+              <Route path="catalogo" element={<CatalogoActividades />} />
+            </Route>
 
             <Route path="/aplicaciones" element={<Aplicaciones />} />
 

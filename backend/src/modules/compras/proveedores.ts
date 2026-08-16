@@ -28,6 +28,19 @@ export function actualizarDiasCredito(id: string, diasCredito: number) {
   return prisma.proveedor.update({ where: { id }, data: { diasCredito } });
 }
 
+export function editarProveedor(id: string, input: AltaProveedorInput) {
+  return prisma.proveedor.update({
+    where: { id },
+    data: {
+      nombre: input.nombre,
+      creditoMonto: input.creditoMonto,
+      creditoVencimiento: input.creditoVencimiento ? new Date(input.creditoVencimiento) : undefined,
+      diasCredito: input.diasCredito,
+      datosFacturacion: input.datosFacturacion,
+    },
+  });
+}
+
 /**
  * El sistema no compara precios en tiempo real, pero sí muestra el
  * histórico de los mejores 3 proveedores anteriores por producto,

@@ -3,7 +3,7 @@ import { z } from "zod";
 import { requireAuth, requirePermission } from "../../middleware/auth.js";
 import { prisma } from "../../core/db.js";
 import { mensajeErrorValidacion, unoSolo } from "../../core/http.js";
-import { crearEquipo, listarEquipos, sugerirFolio } from "./equipos.js";
+import { crearEquipo, editarEquipo, listarEquipos, sugerirFolio } from "./equipos.js";
 
 export const equiposRouter = Router();
 equiposRouter.use(requireAuth);
@@ -37,6 +37,7 @@ const altaSchema = z.object({
   modelo: z.string().optional(),
   anio: z.number().int().optional(),
   placas: z.string().optional(),
+  operadorDesignadoId: z.string().optional(),
 });
 
 equiposRouter.post("/", requirePermission("equipos", "capturar"), async (req, res) => {
@@ -50,6 +51,23 @@ equiposRouter.post("/", requirePermission("equipos", "capturar"), async (req, re
   } catch (err) {
     res.status(400).json({ error: err instanceof Error ? err.message : "No se pudo crear." });
   }
+});
+
+const editarSchema = z.object({
+  marca: z.string().optional(),
+  modelo: z.string().optional(),
+  anio: z.number().int().optional(),
+  placas: z.string().optional(),
+  operadorDesignadoId: z.string().nullable().optional(),
+});
+
+equiposRouter.patch("/:id", requirePermission("equipos", "editar"), async (req, res) => {
+  const parsed = editarSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
+    return;
+  }
+  res.json(await editarEquipo(unoSolo(req.params.id), parsed.data));
 });
 
 const activoSchema = z.object({ activo: z.boolean() });

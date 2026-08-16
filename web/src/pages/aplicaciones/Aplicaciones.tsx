@@ -121,6 +121,9 @@ export default function Aplicaciones() {
   const [litrosMezclaPorHa, setLitrosMezclaPorHa] = useState("");
   const [fechaInicio, setFechaInicio] = useState(hoyISO());
   const [fechaFin, setFechaFin] = useState(hoyISO());
+  // Editar Paso 1 (15-ago-2026): solo mientras no haya reportes de avance —
+  // reutiliza el mismo formulario de arriba, sin poder cambiar de Huerta.
+  const [editandoProgramadaId, setEditandoProgramadaId] = useState<string | null>(null);
 
   // ---- Equipos para líneas de Turbina/Aguilón ----
   const [tractores, setTractores] = useState<Equipo[]>([]);
@@ -181,21 +184,26 @@ export default function Aplicaciones() {
   async function programar(e: FormEvent) {
     e.preventDefault();
     setError(null);
+    const payload = {
+      cuadroIds,
+      productos: productosForm.map((p) => ({
+        productoId: p.productoId,
+        concentracionValor: Number(p.concentracionValor),
+        concentracionUnidad: p.concentracionUnidad,
+      })),
+      recursoSugerido,
+      litrosMezclaPorHa: Number(litrosMezclaPorHa),
+      fechaInicio,
+      fechaFin,
+    };
     try {
-      await api.post("/aplicaciones", {
-        huertaId,
-        cuadroIds,
-        productos: productosForm.map((p) => ({
-          productoId: p.productoId,
-          concentracionValor: Number(p.concentracionValor),
-          concentracionUnidad: p.concentracionUnidad,
-        })),
-        recursoSugerido,
-        litrosMezclaPorHa: Number(litrosMezclaPorHa),
-        fechaInicio,
-        fechaFin,
-      });
+      if (editandoProgramadaId) {
+        await api.patch(`/aplicaciones/${editandoProgramadaId}`, payload);
+      } else {
+        await api.post("/aplicaciones", { huertaId, ...payload });
+      }
       setMostrarForm(false);
+      setEditandoProgramadaId(null);
       setCuadroIds([]);
       setProductosForm([productoFormVacio()]);
       setLitrosMezclaPorHa("");
@@ -203,8 +211,23 @@ export default function Aplicaciones() {
       setFechaFin(hoyISO());
       cargar();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "No se pudo programar la aplicación.");
+      setError(err instanceof ApiError ? err.message : "No se pudo guardar la aplicación.");
     }
+  }
+
+  function iniciarEdicionProgramada(a: Aplicacion) {
+    setEditandoProgramadaId(a.id);
+    setHuertaId(a.huertaId);
+    setCuadroIds(a.cuadros.map((c) => c.cuadro.id));
+    setProductosForm(
+      a.productos.map((p) => ({ productoId: p.productoId, concentracionValor: String(p.concentracionValor), concentracionUnidad: p.concentracionUnidad }))
+    );
+    setRecursoSugerido(a.recursoSugerido);
+    setLitrosMezclaPorHa(String(a.litrosMezclaPorHa));
+    setFechaInicio(a.fechaInicio.slice(0, 10));
+    setFechaFin(a.fechaFin.slice(0, 10));
+    setError(null);
+    setMostrarForm(true);
   }
 
   async function entregar(id: string) {
@@ -354,7 +377,18 @@ export default function Aplicaciones() {
       <h2 style={{ marginBottom: 16 }}>Aplicaciones</h2>
 
       <div style={{ marginBottom: 14 }}>
-        <button className="btn-primary" onClick={() => setMostrarForm((v) => !v)}>
+        <button
+          className="btn-primary"
+          onClick={() => {
+            if (mostrarForm) {
+              setEditandoProgramadaId(null);
+              setCuadroIds([]);
+              setProductosForm([productoFormVacio()]);
+              setLitrosMezclaPorHa("");
+            }
+            setMostrarForm((v) => !v);
+          }}
+        >
           {mostrarForm ? "Cancelar" : "+ Programar aplicación"}
         </button>
       </div>
@@ -364,7 +398,12 @@ export default function Aplicaciones() {
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
             <label className="field">
               Huerta
-              <select value={huertaId} onChange={(e) => { setHuertaId(e.target.value); setCuadroIds([]); }} required>
+              <select
+                value={huertaId}
+                onChange={(e) => { setHuertaId(e.target.value); setCuadroIds([]); }}
+                required
+                disabled={!!editandoProgramadaId}
+              >
                 <option value="">Selecciona…</option>
                 {huertas.map((h) => (
                   <option key={h.id} value={h.id}>
@@ -466,7 +505,7 @@ export default function Aplicaciones() {
               <FechaInput value={fechaFin} onChange={setFechaFin} required />
             </label>
             <button className="btn-primary" type="submit">
-              Programar
+              {editandoProgramadaId ? "Guardar cambios" : "Programar"}
             </button>
           </div>
         </form>
@@ -519,6 +558,11 @@ export default function Aplicaciones() {
                 </div>
 
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  {(a.estado === "programada" || a.estado === "entregada") && a.realizadas.length === 0 && (
+                    <button className="btn-secondary" onClick={() => iniciarEdicionProgramada(a)}>
+                      Editar
+                    </button>
+                  )}
                   {a.estado === "programada" && a.comprometido && (
                     <button className="btn-primary" onClick={() => entregar(a.id)}>
                       Confirmar entrega
@@ -737,6 +781,13 @@ function LineasEditor({
     setLineas((prev) => prev.map((l) => (l.key !== key ? l : { ...l, personalIds: l.personalIds.filter((id) => id !== personalId) })));
   }
 
+  function elegirTractor(key: string, tractorId: string) {
+    // Precarga del operador designado (9.13, 15-ago-2026) — solo sugiere,
+    // editable libremente sin afectar el default guardado en la ficha.
+    const designado = tractores.find((t) => t.id === tractorId)?.operadorDesignadoId ?? "";
+    actualizar(key, { tractorId, operadorId: designado });
+  }
+
   function agregarLinea() {
     setLineas((prev) => [...prev, lineaVacia()]);
   }
@@ -777,7 +828,7 @@ function LineasEditor({
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 8 }}>
                 <label className="field">
                   Tractor
-                  <select value={l.tractorId} onChange={(e) => actualizar(l.key, { tractorId: e.target.value })}>
+                  <select value={l.tractorId} onChange={(e) => elegirTractor(l.key, e.target.value)}>
                     <option value="">Selecciona…</option>
                     {tractores.map((eq) => (
                       <option key={eq.id} value={eq.id}>

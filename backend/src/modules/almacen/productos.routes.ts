@@ -5,7 +5,7 @@ import { tienePermiso } from "../../core/permissions.js";
 import { crearSolicitud } from "../../core/solicitudes.js";
 import { prisma } from "../../core/db.js";
 import { mensajeErrorValidacion, unoSolo } from "../../core/http.js";
-import { crearProductoAutorizado, esCategoriaRegulada, listarProductos, productosAutorizados } from "./productos.js";
+import { crearProductoAutorizado, editarProducto, esCategoriaRegulada, listarProductos, productosAutorizados } from "./productos.js";
 
 export const productosRouter = Router();
 productosRouter.use(requireAuth);
@@ -52,6 +52,29 @@ productosRouter.post("/", requirePermission("almacen", "capturar"), async (req, 
     propuestoPorId: req.usuario!.usuarioId,
   });
   res.status(202).json({ mensaje: "Propuesta enviada — pendiente de autorización.", solicitud });
+});
+
+// Editar datos ya capturados (bloque 4: el Director General siempre puede
+// editar) — misma regla de autorización que dar de alta/desactivar: para
+// categorías reguladas (agroquímico/fertilizante) hace falta el permiso de
+// "autoriza" del módulo correspondiente, para el resto basta "editar".
+productosRouter.patch("/:id", requirePermission("almacen", "editar"), async (req, res) => {
+  const parsed = altaSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
+    return;
+  }
+  const producto = await prisma.producto.findUniqueOrThrow({ where: { id: unoSolo(req.params.id) } });
+  const reguladoAntes = esCategoriaRegulada(producto.categoria);
+  const reguladoDespues = esCategoriaRegulada(parsed.data.categoria);
+  if (reguladoAntes || reguladoDespues) {
+    const puedeAutorizar = await tienePermiso(req.usuario!.rol, "almacen_regulado", "autoriza");
+    if (!puedeAutorizar) {
+      res.status(403).json({ error: "Editar un producto agroquímico/fertilizante requiere el mismo permiso que autorizarlo." });
+      return;
+    }
+  }
+  res.json(await editarProducto(producto.id, parsed.data));
 });
 
 const activoSchema = z.object({ activo: z.boolean() });

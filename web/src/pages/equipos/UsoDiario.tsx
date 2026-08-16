@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { api, ApiError } from "../../lib/api";
 import { usePersonal } from "../../lib/usePersonal";
 import { useHuertas } from "../../lib/useHuertas";
+import { useEquipos } from "../../lib/useEquipos";
 import { useEquipoSeleccionado } from "./EquipoSeleccionadoContext";
 import type { EquipoUsoDiario } from "../../lib/types";
 import FechaInput from "../../components/FechaInput";
@@ -16,6 +17,7 @@ export default function UsoDiario() {
   const { equipoId } = useEquipoSeleccionado();
   const { personal } = usePersonal();
   const { huertas } = useHuertas();
+  const { equipos } = useEquipos(undefined, true);
   const [registros, setRegistros] = useState<EquipoUsoDiario[]>([]);
   const [error, setError] = useState<string | null>(null);
 
@@ -30,6 +32,14 @@ export default function UsoDiario() {
   }
 
   useEffect(cargar, [equipoId]);
+
+  // Precarga del operador designado (9.13, 15-ago-2026) — solo sugiere,
+  // sigue siendo editable en esta captura sin afectar el default guardado
+  // en la ficha del equipo.
+  useEffect(() => {
+    const designado = equipos.find((e) => e.id === equipoId)?.operadorDesignadoId;
+    if (designado) setOperadorId(designado);
+  }, [equipoId, equipos]);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();

@@ -74,7 +74,7 @@ function construirTarjetas(datos: CapturaHuertaTodasUPs[]): Tarjeta[] {
 export default function CapturaDelDia() {
   const { usuario } = useAuth();
   const { actividades } = useActividades();
-  const { personal } = usePersonal();
+  const { personal } = usePersonal(true);
   const puedeEditarCerrado = usuario ? ROLES_EDITAR_NOMINA.includes(usuario.rol) : false;
 
   const [searchParams] = useSearchParams();

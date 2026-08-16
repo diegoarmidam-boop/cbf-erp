@@ -3,6 +3,7 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "../../core/db.js";
 import type { TransactionClient } from "../../core/db.js";
 import {
+  ajustarCantidadProducto,
   confirmarEntregaComprometida,
   intentarComprometer,
   liberarComprometido,
@@ -162,6 +163,104 @@ export async function programarGranular(input: ProgramarGranularInput, creadoPor
       }
     }
     return fertilizacion;
+  });
+}
+
+export class YaHayAvanceReportadoGranularError extends Error {
+  constructor() {
+    super("Esta Fertilización ya tiene reportes de avance — no se puede editar la dosis, cancélala y reprograma con los datos correctos.");
+  }
+}
+
+/**
+ * Editar el Paso 1 ya programado/entregado (9.5, 15-ago-2026, reabre
+ * decisión previa) — mismo criterio que Aplicaciones (9.7): permitido
+ * mientras no exista ningún reporte de avance todavía. Cada producto
+ * conserva su propia dosis independiente (sin litros de mezcla
+ * compartidos), así que el ajuste se calcula producto por producto igual
+ * que en la programación original.
+ */
+export async function editarGranularProgramada(id: string, input: Omit<ProgramarGranularInput, "huertaId">, editadoPorId: string) {
+  if (input.recursoTipo === "implemento" && !input.equipoId) {
+    throw new Error("Falta el equipo — el recurso 'Con implemento' requiere elegir un equipo.");
+  }
+  if (input.cuadroIds.length === 0) throw new Error("Elige al menos un Cuadro.");
+  if (!input.productos || input.productos.length === 0) throw new Error("Elige al menos un producto.");
+
+  const fertilizacion = await prisma.fertilizacionGranular.findUniqueOrThrow({
+    where: { id },
+    include: { productos: true, realizadas: true },
+  });
+  if (fertilizacion.estado !== "programada" && fertilizacion.estado !== "entregada") {
+    throw new TransicionFertilizacionInvalidaError("programada o entregada");
+  }
+  if (fertilizacion.realizadas.length > 0) throw new YaHayAvanceReportadoGranularError();
+
+  const productosNuevos = await prisma.producto.findMany({ where: { id: { in: input.productos.map((p) => p.productoId) } } });
+  for (const p of productosNuevos) {
+    if (p.categoria !== "fertilizante" || !p.autorizado) throw new ProductoNoAutorizadoFertilizanteError();
+  }
+
+  let hectareasTotales = 0;
+  let plantasTotales = 0;
+  const requierePlantas = input.productos.some((p) => p.modoDosis === "g_planta");
+  const fechaRef = new Date(input.fechaInicio);
+  for (const cuadroId of input.cuadroIds) {
+    const version = await obtenerVersionVigente(cuadroId, fechaRef);
+    if (!version) throw new Error("El Cuadro elegido no tiene una configuración vigente para la fecha de inicio.");
+    hectareasTotales += Number(version.hectareas);
+    if (requierePlantas) {
+      if (!version.distSurcosM || !version.distPlantasM) {
+        throw new Error("El Cuadro elegido no tiene Marco de Plantación configurado — no se puede calcular g/planta.");
+      }
+      plantasTotales += plantasTotalesCuadro(Number(version.hectareas), Number(version.distSurcosM), Number(version.distPlantasM));
+    }
+  }
+
+  const entregada = fertilizacion.estado === "entregada";
+
+  return prisma.$transaction(async (tx) => {
+    const productosAnteriores = new Map(fertilizacion.productos.map((p) => [p.productoId, p]));
+    const productoIdsNuevos = new Set(input.productos.map((p) => p.productoId));
+
+    for (const anterior of fertilizacion.productos) {
+      if (productoIdsNuevos.has(anterior.productoId)) continue;
+      await ajustarCantidadProducto(tx, fertilizacion.huertaId, id, anterior.productoId, Number(anterior.cantidadTotalCalculada), 0, entregada, editadoPorId);
+      await tx.fertilizacionGranularProducto.delete({ where: { id: anterior.id } });
+    }
+
+    for (const p of input.productos) {
+      const cantidadNueva = calcularCantidadTotalGranular(p.modoDosis, p.dosisValor, hectareasTotales, plantasTotales);
+      const anterior = productosAnteriores.get(p.productoId);
+      const cantidadAnterior = anterior ? Number(anterior.cantidadTotalCalculada) : 0;
+
+      await ajustarCantidadProducto(tx, fertilizacion.huertaId, id, p.productoId, cantidadAnterior, cantidadNueva, entregada, editadoPorId);
+
+      if (anterior) {
+        await tx.fertilizacionGranularProducto.update({
+          where: { id: anterior.id },
+          data: { modoDosis: p.modoDosis, dosisValor: p.dosisValor, cantidadTotalCalculada: cantidadNueva },
+        });
+      } else {
+        await tx.fertilizacionGranularProducto.create({
+          data: { fertilizacionId: id, productoId: p.productoId, modoDosis: p.modoDosis, dosisValor: p.dosisValor, cantidadTotalCalculada: cantidadNueva },
+        });
+      }
+    }
+
+    await tx.fertilizacionGranularCuadro.deleteMany({ where: { fertilizacionId: id } });
+    await tx.fertilizacionGranularCuadro.createMany({ data: input.cuadroIds.map((cuadroId) => ({ fertilizacionId: id, cuadroId })) });
+
+    return tx.fertilizacionGranular.update({
+      where: { id },
+      data: {
+        recursoTipo: input.recursoTipo,
+        equipoId: input.recursoTipo === "implemento" ? input.equipoId : null,
+        fechaInicio: fechaRef,
+        fechaFin: new Date(input.fechaFin),
+        hectareasTotalesProgramadas: hectareasTotales,
+      },
+    });
   });
 }
 
@@ -593,6 +692,49 @@ export async function confirmarRecepcionCancelacionGranular(id: string, confirma
     where: { id },
     data: { confirmacionBodegaPorId: confirmadoPorId, fechaConfirmacionBodega: new Date() },
   });
+}
+
+/**
+ * Cancelaciones de Fertilización Granular pendientes de confirmar por
+ * Bodega (15-ago-2026) — mismo mecanismo que Aplicaciones (9.7), agregado
+ * aquí porque nunca existió una lista para que Bodega las encontrara: la
+ * función de confirmar ya existía, pero no había manera de descubrir cuáles
+ * fertilizaciones canceladas seguían esperando la firma digital.
+ */
+export async function listarCancelacionesPendientesConfirmarGranular() {
+  const fertilizaciones = await prisma.fertilizacionGranular.findMany({
+    where: { estado: "cancelada", confirmacionBodegaPorId: null },
+    include: { huerta: true, productos: { include: { producto: true } } },
+    orderBy: { fechaCancelacion: "asc" },
+  });
+  const filas: {
+    id: string;
+    tipo: "cancelacion";
+    origen: "granular";
+    huerta: { nombre: string };
+    producto: { nombreComercial: string; unidad: string };
+    cantidadRegresada: number;
+    fecha: string | null;
+  }[] = [];
+  for (const f of fertilizaciones) {
+    for (const p of f.productos) {
+      const abono = await prisma.almacenCentralMovimiento.findFirst({
+        where: { referenciaId: f.id, tipo: "abono_sobrante", productoId: p.productoId },
+      });
+      const cantidadRegresada = abono ? Number(abono.cantidad) : 0;
+      if (cantidadRegresada <= 0) continue;
+      filas.push({
+        id: f.id,
+        tipo: "cancelacion",
+        origen: "granular",
+        huerta: { nombre: f.huerta.nombre },
+        producto: { nombreComercial: p.producto.nombreComercial, unidad: p.producto.unidad },
+        cantidadRegresada,
+        fecha: f.fechaCancelacion ? f.fechaCancelacion.toISOString() : null,
+      });
+    }
+  }
+  return filas;
 }
 
 /** Catálogo de fertilizantes ya autorizados — lo único elegible al programar (9.5). */

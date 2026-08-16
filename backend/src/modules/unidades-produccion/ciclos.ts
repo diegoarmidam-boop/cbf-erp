@@ -47,6 +47,33 @@ async function validarSuperficiePorCuadro(variedades: VariedadCicloInput[]) {
   }
 }
 
+/**
+ * Editar un Ciclo ya creado (9.1) — corrige tipo/fecha/composición varietal
+ * sin tener que cerrarlo y volver a crearlo. Reemplaza la lista completa de
+ * variedades (mismo patrón que "todas las variedades de un Cuadro se
+ * capturan juntas en un mismo registro" del alta) y vuelve a correr el
+ * mismo candado de superficie por Cuadro.
+ */
+export async function editarCiclo(
+  cicloId: string,
+  tipo: "cultivo" | "descanso" | "prueba",
+  fechaInicio: string,
+  variedades: VariedadCicloInput[]
+) {
+  await validarSuperficiePorCuadro(variedades);
+
+  return prisma.$transaction(async (tx) => {
+    const ciclo = await tx.ciclo.update({ where: { id: cicloId }, data: { tipo, fechaInicio: new Date(fechaInicio) } });
+    await tx.cicloVariedad.deleteMany({ where: { cicloId } });
+    for (const v of variedades) {
+      await tx.cicloVariedad.create({
+        data: { cicloId, cuadroId: v.cuadroId, variedad: v.variedad, hectareas: v.hectareas, porcentaje: v.porcentaje },
+      });
+    }
+    return ciclo;
+  });
+}
+
 export async function crearCiclo(
   huertaId: string,
   tipo: "cultivo" | "descanso" | "prueba",

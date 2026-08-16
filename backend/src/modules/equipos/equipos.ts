@@ -27,6 +27,7 @@ export interface AltaEquipoInput {
   modelo?: string;
   anio?: number;
   placas?: string;
+  operadorDesignadoId?: string;
 }
 
 export async function crearEquipo(input: AltaEquipoInput) {
@@ -35,4 +36,18 @@ export async function crearEquipo(input: AltaEquipoInput) {
     throw new Error(`El folio de un(a) ${input.tipo} debe empezar con "${prefijoEsperado}-".`);
   }
   return prisma.equipo.create({ data: input });
+}
+
+export interface EditarEquipoInput {
+  marca?: string;
+  modelo?: string;
+  anio?: number;
+  placas?: string;
+  operadorDesignadoId?: string | null;
+}
+
+export function editarEquipo(id: string, input: EditarEquipoInput) {
+  // tipo y folio no se editan aquí — cambiar de serie (AF/IA) o de folio
+  // formalmente es dar de baja y alta de nuevo, no una corrección de datos.
+  return prisma.equipo.update({ where: { id }, data: input });
 }

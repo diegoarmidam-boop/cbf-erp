@@ -55,9 +55,16 @@ export function darDeBaja(id: string, motivo: string, dadoBajaPorId: string) {
   });
 }
 
-export function listarPersonal(filtro?: { tipo?: "fijo" | "destajo"; incluirInactivos?: boolean }) {
+export function listarPersonal(filtro?: { tipo?: "fijo" | "destajo"; incluirInactivos?: boolean; soloDisponibles?: boolean }) {
   return prisma.personal.findMany({
-    where: { tipo: filtro?.tipo, activo: filtro?.incluirInactivos ? undefined : true },
+    where: {
+      tipo: filtro?.tipo,
+      activo: filtro?.incluirInactivos ? undefined : true,
+      // Liquidación (9.11, 15-ago-2026): excluye a quien ya se liquidó y no
+      // ha vuelto — distinto de la Baja formal (`activo`), sigue en el
+      // catálogo pero no se ofrece para capturar trabajo nuevo.
+      ...(filtro?.soloDisponibles ? { OR: [{ noDisponibleDesde: null }, { noDisponibleDesde: { gt: new Date() } }] } : {}),
+    },
     include: { puesto: true, documentos: true },
     orderBy: { nombreCompleto: "asc" },
   });

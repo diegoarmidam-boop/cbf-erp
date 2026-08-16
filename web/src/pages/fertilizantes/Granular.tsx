@@ -64,6 +64,9 @@ export default function Granular() {
   const [equipoId, setEquipoId] = useState("");
   const [fechaInicio, setFechaInicio] = useState(hoyISO());
   const [fechaFin, setFechaFin] = useState(hoyISO());
+  // Editar Paso 1 (15-ago-2026): solo mientras no haya reportes de avance —
+  // mismo criterio que Aplicaciones (9.7).
+  const [editandoProgramadaId, setEditandoProgramadaId] = useState<string | null>(null);
 
   const [registrando, setRegistrando] = useState<string | null>(null);
   const [gruposHuerta, setGruposHuerta] = useState<GrupoPago[]>([]);
@@ -120,17 +123,22 @@ export default function Granular() {
   async function programar(e: FormEvent) {
     e.preventDefault();
     setError(null);
+    const payload = {
+      cuadroIds,
+      productos: productosForm.map((p) => ({ productoId: p.productoId, modoDosis: p.modoDosis, dosisValor: Number(p.dosisValor) })),
+      recursoTipo,
+      equipoId: recursoTipo === "implemento" ? equipoId : undefined,
+      fechaInicio,
+      fechaFin,
+    };
     try {
-      await api.post("/fertilizantes/granular", {
-        huertaId,
-        cuadroIds,
-        productos: productosForm.map((p) => ({ productoId: p.productoId, modoDosis: p.modoDosis, dosisValor: Number(p.dosisValor) })),
-        recursoTipo,
-        equipoId: recursoTipo === "implemento" ? equipoId : undefined,
-        fechaInicio,
-        fechaFin,
-      });
+      if (editandoProgramadaId) {
+        await api.patch(`/fertilizantes/granular/${editandoProgramadaId}`, payload);
+      } else {
+        await api.post("/fertilizantes/granular", { huertaId, ...payload });
+      }
       setMostrarForm(false);
+      setEditandoProgramadaId(null);
       setCuadroIds([]);
       setProductosForm([productoGranularFormVacio()]);
       setEquipoId("");
@@ -138,8 +146,21 @@ export default function Granular() {
       setFechaFin(hoyISO());
       cargar();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "No se pudo programar la fertilización.");
+      setError(err instanceof ApiError ? err.message : "No se pudo guardar la fertilización.");
     }
+  }
+
+  function iniciarEdicionProgramada(f: FertilizacionGranular) {
+    setEditandoProgramadaId(f.id);
+    setHuertaId(f.huertaId);
+    setCuadroIds(f.cuadros.map((c) => c.cuadro.id));
+    setProductosForm(f.productos.map((p) => ({ productoId: p.productoId, modoDosis: p.modoDosis, dosisValor: String(p.dosisValor) })));
+    setRecursoTipo(f.recursoTipo);
+    setEquipoId(f.equipoId ?? "");
+    setFechaInicio(f.fechaInicio.slice(0, 10));
+    setFechaFin(f.fechaFin.slice(0, 10));
+    setError(null);
+    setMostrarForm(true);
   }
 
   async function entregar(id: string) {
@@ -268,7 +289,18 @@ export default function Granular() {
   return (
     <div>
       <div style={{ marginBottom: 14 }}>
-        <button className="btn-primary" onClick={() => setMostrarForm((v) => !v)}>
+        <button
+          className="btn-primary"
+          onClick={() => {
+            if (mostrarForm) {
+              setEditandoProgramadaId(null);
+              setCuadroIds([]);
+              setProductosForm([productoGranularFormVacio()]);
+              setEquipoId("");
+            }
+            setMostrarForm((v) => !v);
+          }}
+        >
           {mostrarForm ? "Cancelar" : "+ Programar fertilización"}
         </button>
       </div>
@@ -278,7 +310,12 @@ export default function Granular() {
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
             <label className="field">
               Huerta
-              <select value={huertaId} onChange={(e) => { setHuertaId(e.target.value); setCuadroIds([]); }} required>
+              <select
+                value={huertaId}
+                onChange={(e) => { setHuertaId(e.target.value); setCuadroIds([]); }}
+                required
+                disabled={!!editandoProgramadaId}
+              >
                 <option value="">Selecciona…</option>
                 {huertas.map((h) => (
                   <option key={h.id} value={h.id}>
@@ -384,7 +421,7 @@ export default function Granular() {
               <FechaInput value={fechaFin} onChange={setFechaFin} required />
             </label>
             <button className="btn-primary" type="submit">
-              Programar
+              {editandoProgramadaId ? "Guardar cambios" : "Programar"}
             </button>
           </div>
         </form>
@@ -437,6 +474,11 @@ export default function Granular() {
                 </div>
 
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  {(f.estado === "programada" || f.estado === "entregada") && f.realizadas.length === 0 && (
+                    <button className="btn-secondary" onClick={() => iniciarEdicionProgramada(f)}>
+                      Editar
+                    </button>
+                  )}
                   {f.estado === "programada" && f.comprometido && (
                     <button className="btn-primary" onClick={() => entregar(f.id)}>
                       Confirmar entrega

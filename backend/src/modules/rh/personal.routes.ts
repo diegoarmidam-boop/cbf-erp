@@ -31,7 +31,8 @@ personalRouter.get("/", async (req, res) => {
   }
   const tipo = req.query.tipo === "fijo" || req.query.tipo === "destajo" ? req.query.tipo : undefined;
   const incluirInactivos = req.query.incluirInactivos === "true";
-  res.json(await listarPersonal({ tipo, incluirInactivos }));
+  const soloDisponibles = req.query.soloDisponibles === "true";
+  res.json(await listarPersonal({ tipo, incluirInactivos, soloDisponibles }));
 });
 
 personalRouter.get("/:id", requirePermission("rh", "ver"), async (req, res) => {

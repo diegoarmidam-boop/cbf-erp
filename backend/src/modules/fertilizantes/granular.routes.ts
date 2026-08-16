@@ -11,6 +11,7 @@ import {
   confirmarEntregaGranular,
   confirmarRecepcionCancelacionGranular,
   DiaCerradoRequiereCasoExtraordinarioError,
+  editarGranularProgramada,
   editarRealizadaGranular,
   equiposImplementoParaFertilizacion,
   gruposParaFertilizacion,
@@ -24,6 +25,7 @@ import {
   registrarRealizadaGranular,
   StockNoComprometidoError,
   TransicionFertilizacionInvalidaError,
+  YaHayAvanceReportadoGranularError,
 } from "./granular.js";
 
 export const granularRouter = Router();
@@ -111,6 +113,34 @@ granularRouter.post("/", requirePermission("fertilizantes", "capturar"), async (
     res.status(201).json(fertilizacion);
   } catch (err) {
     if (err instanceof ProductoNoAutorizadoFertilizanteError) {
+      res.status(409).json({ error: err.message });
+      return;
+    }
+    if (err instanceof Error) {
+      res.status(400).json({ error: err.message });
+      return;
+    }
+    throw err;
+  }
+});
+
+// Editar el Paso 1 ya programado/entregado (9.5, 15-ago-2026) — mismo criterio que Aplicaciones (9.7).
+granularRouter.patch("/:id", requirePermission("fertilizantes", "capturar"), async (req, res) => {
+  if (!verificarRol(req, res, ROLES_PROGRAMAR)) return;
+  const parsed = programarSchema.omit({ huertaId: true }).safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
+    return;
+  }
+  try {
+    const fertilizacion = await editarGranularProgramada(unoSolo(req.params.id), parsed.data, req.usuario!.usuarioId);
+    res.json(fertilizacion);
+  } catch (err) {
+    if (
+      err instanceof ProductoNoAutorizadoFertilizanteError ||
+      err instanceof YaHayAvanceReportadoGranularError ||
+      err instanceof TransicionFertilizacionInvalidaError
+    ) {
       res.status(409).json({ error: err.message });
       return;
     }

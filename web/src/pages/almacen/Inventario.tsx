@@ -60,10 +60,16 @@ export default function Inventario() {
   }
   useEffect(cargarCancelacionesPendientes, []);
 
-  async function confirmarRecepcionCancelacion(id: string) {
+  async function confirmarRecepcion(item: CancelacionPendienteBodega) {
     setError(null);
     try {
-      await api.post(`/aplicaciones/${id}/confirmar-recepcion-cancelacion`);
+      if (item.tipo === "ajuste_dosis") {
+        await api.post(`/aplicaciones/ajustes/${item.id}/confirmar-recepcion`);
+      } else if (item.origen === "granular") {
+        await api.post(`/fertilizantes/granular/${item.id}/confirmar-recepcion-cancelacion`);
+      } else {
+        await api.post(`/aplicaciones/${item.id}/confirmar-recepcion-cancelacion`);
+      }
       cargarCancelacionesPendientes();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "No se pudo confirmar.");
@@ -91,6 +97,7 @@ export default function Inventario() {
   const [nuevoValor, setNuevoValor] = useState("");
 
   const [productoDetalleId, setProductoDetalleId] = useState<string | null>(null);
+  const [editandoId, setEditandoId] = useState<string | null>(null);
 
   async function toggleActivo(p: Producto) {
     setError(null);
@@ -106,27 +113,49 @@ export default function Inventario() {
     e.preventDefault();
     setError(null);
     setMensaje(null);
+    const payload = {
+      categoria,
+      ingredienteActivo: requiereIngrediente ? ingredienteActivo || undefined : undefined,
+      nombreComercial,
+      contenedor,
+      presentacionCantidad: Number(presentacionCantidad),
+      unidad,
+      requiereLote,
+    };
     try {
-      const r = await api.post<{ mensaje?: string }>("/almacen/productos", {
-        categoria,
-        ingredienteActivo: requiereIngrediente ? ingredienteActivo || undefined : undefined,
-        nombreComercial,
-        contenedor,
-        presentacionCantidad: Number(presentacionCantidad),
-        unidad,
-        requiereLote,
-      });
-      setMensaje(r.mensaje ?? "Producto autorizado y agregado al catálogo.");
+      if (editandoId) {
+        await api.patch(`/almacen/productos/${editandoId}`, payload);
+        setMensaje("Producto actualizado.");
+      } else {
+        const r = await api.post<{ mensaje?: string }>("/almacen/productos", payload);
+        setMensaje(r.mensaje ?? "Producto autorizado y agregado al catálogo.");
+      }
       setNombreComercial("");
       setContenedor("");
       setPresentacionCantidad("");
       setUnidad("");
       setIngredienteActivo("");
+      setCategoria("");
+      setRequiereLote(true);
       setMostrarForm(false);
+      setEditandoId(null);
       refetch();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "No se pudo guardar.");
     }
+  }
+
+  function iniciarEdicion(p: Producto) {
+    setEditandoId(p.id);
+    setCategoria(p.categoria);
+    setIngredienteActivo(p.ingredienteActivo ?? "");
+    setNombreComercial(p.nombreComercial);
+    setContenedor(p.contenedor);
+    setPresentacionCantidad(String(p.presentacionCantidad));
+    setUnidad(p.unidad);
+    setRequiereLote(p.requiereLote);
+    setError(null);
+    setMostrarForm(true);
   }
 
   function valoresDeColumna(columna: Columna): string[] {
@@ -170,19 +199,21 @@ export default function Inventario() {
     <div>
       {cancelacionesPendientes.length > 0 && (
         <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
-          {cancelacionesPendientes.map((c) => (
+          {cancelacionesPendientes.map((c, i) => (
             <div
-              key={c.id}
+              key={`${c.tipo}-${c.id}-${i}`}
               className="card"
               style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}
             >
               <div>
-                <span className="tag tag-warning">Aplicación cancelada — se te va a regresar producto</span>
+                <span className="tag tag-warning">
+                  {c.tipo === "ajuste_dosis" ? "Ajuste de dosis — se te va a regresar producto" : "Programación cancelada — se te va a regresar producto"}
+                </span>
                 <div style={{ fontSize: 12.5, marginTop: 4 }}>
                   {c.huerta.nombre} — {c.cantidadRegresada} {c.producto.unidad} de {c.producto.nombreComercial}
                 </div>
               </div>
-              <button className="btn-primary" onClick={() => confirmarRecepcionCancelacion(c.id)}>
+              <button className="btn-primary" onClick={() => confirmarRecepcion(c)}>
                 Ya llegó — confirmar recepción
               </button>
             </div>
@@ -191,7 +222,13 @@ export default function Inventario() {
       )}
 
       <div style={{ marginBottom: 14 }}>
-        <button className="btn-primary" onClick={() => setMostrarForm((v) => !v)}>
+        <button
+          className="btn-primary"
+          onClick={() => {
+            if (mostrarForm) setEditandoId(null);
+            setMostrarForm((v) => !v);
+          }}
+        >
           {mostrarForm ? "Cancelar" : "+ Nuevo producto"}
         </button>
       </div>
@@ -247,7 +284,7 @@ export default function Inventario() {
             Requiere lote/caducidad
           </label>
           <button className="btn-primary" type="submit">
-            Guardar
+            {editandoId ? "Guardar cambios" : "Guardar"}
           </button>
         </form>
       )}
@@ -361,7 +398,10 @@ export default function Inventario() {
                 <td>
                   <span className={`tag ${p.activo ? "tag-success" : "tag-danger"}`}>{p.activo ? "Activo" : "Inactivo"}</span>
                 </td>
-                <td>
+                <td style={{ display: "flex", gap: 6 }}>
+                  <button className="btn-secondary" onClick={() => iniciarEdicion(p)}>
+                    Editar
+                  </button>
                   <button className="btn-secondary" onClick={() => toggleActivo(p)}>
                     {p.activo ? "Desactivar" : "Reactivar"}
                   </button>

@@ -4,8 +4,9 @@ import { solicitudesPendientes } from "./solicitudes.js";
 import { listarOrdenes } from "../modules/compras/ordenes.js";
 import { listarCxP } from "../modules/compras/cxp.js";
 import { listarAplicaciones, listarCancelacionesPendientesConfirmar } from "../modules/aplicaciones/aplicaciones.js";
-import { listarGranular } from "../modules/fertilizantes/granular.js";
+import { listarCancelacionesPendientesConfirmarGranular, listarGranular } from "../modules/fertilizantes/granular.js";
 import { candadosDeHuerta } from "../modules/almacen/almacen-local.js";
+import { listarAjustesPendientesConfirmar } from "../modules/almacen/movimientos.js";
 import { diasPendientesDeCierre } from "../modules/nomina/cierre.js";
 import type { Rol } from "@prisma/client";
 
@@ -170,19 +171,25 @@ export async function obtenerNotificaciones(rol: Rol, huertaIdAlcance: string | 
     }
   }
 
-  // 6-bis) Cancelaciones de Aplicaciones (9.7) esperando la firma digital de
-  // recepción del Encargado de Bodega — Bodega no tiene permiso sobre el
-  // módulo de Aplicaciones, así que este es el único lugar donde le llega el aviso.
+  // 6-bis) Cancelaciones/ajustes de dosis de Aplicaciones y Fertilizantes
+  // (9.7/9.5, 15-ago-2026) esperando la firma digital de recepción del
+  // Encargado de Bodega — Bodega no tiene permiso sobre esos módulos, así
+  // que este es el único lugar donde le llega el aviso.
   if (ROLES_CONFIRMAR_BODEGA.includes(rol)) {
-    const pendientes = await listarCancelacionesPendientesConfirmar();
-    for (const p of pendientes) {
+    const [cancelacionesAplicaciones, cancelacionesGranular, ajustes] = await Promise.all([
+      listarCancelacionesPendientesConfirmar(),
+      listarCancelacionesPendientesConfirmarGranular(),
+      listarAjustesPendientesConfirmar(),
+    ]);
+    for (const p of [...cancelacionesAplicaciones, ...cancelacionesGranular, ...ajustes]) {
+      const esCancelacion = p.tipo === "cancelacion";
       notificaciones.push({
-        id: `cancelacion-bodega-${p.id}`,
-        tipo: "cancelacion_pendiente_bodega",
-        titulo: "Aplicación cancelada — confirmar recepción en Almacén",
-        detalle: `${p.huerta.nombre} — se regresan ${p.productos.map((pr) => `${pr.cantidadRegresada} ${pr.unidad} de ${pr.nombreComercial}`).join(" + ")}`,
+        id: `${p.tipo}-bodega-${p.id}`,
+        tipo: esCancelacion ? "cancelacion_pendiente_bodega" : "ajuste_dosis_pendiente_bodega",
+        titulo: esCancelacion ? "Programación cancelada — confirmar recepción en Almacén" : "Ajuste de dosis — confirmar recepción en Almacén",
+        detalle: `${p.huerta.nombre} — se regresan ${p.cantidadRegresada} ${p.producto.unidad} de ${p.producto.nombreComercial}`,
         urgente: false,
-        fecha: (p.fechaCancelacion ?? new Date()).toISOString(),
+        fecha: (p.fecha ?? new Date().toISOString()),
         enlace: "/almacen/inventario",
       });
     }

@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { requireAuth, requirePermission } from "../../middleware/auth.js";
 import { mensajeErrorValidacion, unoSolo } from "../../core/http.js";
-import { avanzarEtapa, cerrarCiclo, crearCiclo, listarCiclos, SuperficieExcedeCuadroError, YaHayCicloActivoError } from "./ciclos.js";
+import { avanzarEtapa, cerrarCiclo, crearCiclo, editarCiclo, listarCiclos, SuperficieExcedeCuadroError, YaHayCicloActivoError } from "./ciclos.js";
 
 export const ciclosRouter = Router();
 ciclosRouter.use(requireAuth);
@@ -44,6 +44,24 @@ ciclosRouter.post("/", requirePermission("unidades_produccion", "capturar"), asy
       res.status(409).json({ error: err.message });
       return;
     }
+    if (err instanceof SuperficieExcedeCuadroError) {
+      res.status(409).json({ error: err.message });
+      return;
+    }
+    throw err;
+  }
+});
+
+ciclosRouter.patch("/:id", requirePermission("unidades_produccion", "editar"), async (req, res) => {
+  const parsed = crearCicloSchema.omit({ huertaId: true }).safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
+    return;
+  }
+  try {
+    const ciclo = await editarCiclo(unoSolo(req.params.id), parsed.data.tipo, parsed.data.fechaInicio, parsed.data.variedades);
+    res.json(ciclo);
+  } catch (err) {
     if (err instanceof SuperficieExcedeCuadroError) {
       res.status(409).json({ error: err.message });
       return;

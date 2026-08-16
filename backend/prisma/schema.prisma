@@ -328,8 +328,14 @@ model Personal {
   fechaBaja          DateTime?    @db.Date
   motivoBaja         String?
   dadoBajaPorId      String?
+  // Liquidación (9.11, 15-ago-2026): distinto de la Baja formal (arriba) —
+  // no se toca `activo`/`fechaBaja` aquí, la persona sigue existiendo en el
+  // catálogo por si regresa. Solo deja de ofrecerse en Captura del día a
+  // partir de esta fecha; se limpia manualmente si vuelve a trabajar.
+  noDisponibleDesde  DateTime?    @db.Date
 
   usuario                    Usuario?
+  liquidaciones              Liquidacion[]
   documentos                 PersonalDocumento[]
   grupoMiembros              GrupoMiembro[]
   registrosNomina            RegistroNomina[]
@@ -339,9 +345,11 @@ model Personal {
   faltasInjustificadas       FaltaInjustificada[]
   equipoUsoDiario            EquipoUsoDiario[]
   grupoAsistenciaDias        GrupoAsistenciaDia[]
-  actividadRealizadaPersonas ActividadRealizadaPersona[]
   aplicacionLineasOperador   AplicacionRealizadaLinea[]        @relation("AplicacionLineaOperador")
   aplicacionLineaPersonas    AplicacionRealizadaLineaPersona[] @relation("AplicacionLineaPersona")
+  equiposComoOperadorDesignado Equipo[]                        @relation("EquipoOperadorDesignado")
+  actividadLineasOperador   ActividadRealizadaLinea[]          @relation("ActividadLineaOperador")
+  actividadLineaPersonas    ActividadRealizadaLineaPersona[]   @relation("ActividadLineaPersona")
 
   @@index([tipo, activo])
 }
@@ -392,16 +400,28 @@ enum EsquemaPago {
 // Catálogo de Actividades — compartido con Aplicaciones/Fertilizantes (9.4).
 // Arranca con las 12 confirmadas del Apéndice A; el resto se agrega vía
 // "+" conforme se autorice (Gerente Administrativo).
+// Tipo de recurso (9.4, 15-ago-2026, reabre decisión previa del 11-ago que
+// dejaba a Actividades sin maquinaria): determina qué modalidades de línea
+// se ofrecen al reportar avance — "gente" solo permite líneas de gente,
+// "tractor" solo líneas de tractor, "mixta" permite combinar cualquiera
+// (mismo criterio de "no forzar los 3 siempre" del bloque 9.4).
+enum TipoRecursoActividad {
+  gente
+  tractor
+  mixta
+}
+
 model Actividad {
-  id                String      @id @default(uuid())
-  nombre            String      @unique
+  id                String               @id @default(uuid())
+  nombre            String               @unique
   unidad            String // hora | dia | surco | planta | remolque | caja | cuadro | kg | ha
-  tarifa            Decimal     @db.Decimal(10, 2)
-  usarTarifaGeneral Boolean     @default(false) // si true, ignora `tarifa` y usa ConfigNomina.tarifaGeneralHora
+  tarifa            Decimal              @db.Decimal(10, 2)
+  usarTarifaGeneral Boolean              @default(false) // si true, ignora `tarifa` y usa ConfigNomina.tarifaGeneralHora
   esquemaPago       EsquemaPago
-  requiereCuadro    Boolean     @default(false) // solo grupal_remolque lo requiere obligatoriamente hoy
+  requiereCuadro    Boolean              @default(false) // solo grupal_remolque lo requiere obligatoriamente hoy
   etapaRestringida  EtapaCiclo? // null = libre en cualquier etapa del ciclo
-  activo            Boolean     @default(true)
+  tipoRecurso       TipoRecursoActividad @default(gente)
+  activo            Boolean              @default(true)
 
   registrosNomina        RegistroNomina[]
   actividadesProgramadas ActividadProgramada[]
@@ -544,6 +564,27 @@ model PrestamoDescuento {
   aplicadoPorId String
 }
 
+// Liquidación fuera de ciclo (9.11, 15-ago-2026, feature nueva): pagar a
+// alguien eventual/destajo que deja de venir a mitad del periodo semanal
+// normal — no toca Nómina fija ni al Grupo de Pago de la persona. El rango
+// [fechaInicio, fechaFin] es el que se liquida (default: día siguiente al
+// último cierre de Nómina a nivel empresa → último día trabajado).
+model Liquidacion {
+  id                    String   @id @default(uuid())
+  personalId            String
+  personal              Personal @relation(fields: [personalId], references: [id])
+  fechaInicio           DateTime @db.Date
+  fechaFin              DateTime @db.Date
+  bruto                 Decimal  @db.Decimal(10, 2)
+  bonos                 Decimal  @db.Decimal(10, 2)
+  descuentoPrestamos    Decimal  @db.Decimal(10, 2) // 0 si no se confirmó descontar — nunca automático, ver liquidaciones.ts
+  neto                  Decimal  @db.Decimal(10, 2)
+  liquidadoPorId        String
+  fechaLiquidacion      DateTime @default(now())
+
+  @@index([personalId])
+}
+
 enum TipoBono {
   asistencia_perfecta
   permanencia_racha
@@ -643,6 +684,14 @@ model Equipo {
   placas String?
   activo Boolean    @default(true)
 
+  // Operador designado (9.13, 15-ago-2026): opcional porque camionetas y
+  // equipo grande casi siempre tienen operador fijo, pero tractores
+  // pequeños no necesariamente (varía, sobre todo en cosecha). Solo
+  // precarga el default en las pantallas de captura — editable ahí sin
+  // afectar este valor guardado.
+  operadorDesignadoId String?
+  operadorDesignado   Personal? @relation("EquipoOperadorDesignado", fields: [operadorDesignadoId], references: [id])
+
   cargasCombustible          CombustibleCarga[]
   mantenimientoConceptos     MantenimientoConcepto[]
   mantenimientoEventos       MantenimientoEvento[]
@@ -650,6 +699,8 @@ model Equipo {
   fertilizacionesGranular    FertilizacionGranular[]
   aplicacionLineasTractor    AplicacionRealizadaLinea[] @relation("AplicacionLineaTractor")
   aplicacionLineasImplemento AplicacionRealizadaLinea[] @relation("AplicacionLineaImplemento")
+  actividadLineasTractor     ActividadRealizadaLinea[]  @relation("ActividadLineaTractor")
+  actividadLineasImplemento  ActividadRealizadaLinea[]  @relation("ActividadLineaImplemento")
 }
 
 enum TipoCombustible {
@@ -706,6 +757,7 @@ model MantenimientoEvento {
 enum OrigenUsoDiario {
   manual
   automatico_aplicacion
+  automatico_actividad
 }
 
 // Alimentación automática desde Aplicaciones (9.7/9.13, 8-ago-2026): cada
@@ -824,6 +876,15 @@ model AlmacenCentralMovimiento {
   fecha           DateTime                     @default(now())
   capturadoPorId  String
   motivoAjuste    String? // requerido para merma/ajuste_manual (doble-check de Gerencia)
+  // Firma digital de recepción de Bodega, por movimiento (15-ago-2026):
+  // permite confirmar cada devolución de sobrante por separado — a
+  // diferencia de Aplicacion.confirmacionBodegaPorId (un solo campo, para
+  // la cancelación completa), un ajuste de dosis puede repetirse varias
+  // veces sobre la misma Aplicación/Fertilización. Default true para que
+  // ningún abono histórico (previo a este campo) aparezca como pendiente.
+  confirmado      Boolean                      @default(true)
+  confirmadoPorId String?
+  fechaConfirmado DateTime?
 
   @@index([productoId, fecha])
   @@index([huertaDestinoId])
@@ -1014,10 +1075,46 @@ model ActividadRealizada {
   fechaReal             DateTime            @db.Date
   registradoPorId       String
 
-  cuadros  ActividadRealizadaCuadro[]
-  personas ActividadRealizadaPersona[]
+  cuadros ActividadRealizadaCuadro[]
+  lineas  ActividadRealizadaLinea[]
 
   @@index([actividadProgramadaId])
+}
+
+// Recurso real usado por reporte (9.4, 15-ago-2026): una o varias líneas,
+// cada una con su propio tipo — igual que Aplicaciones (9.7), pero a
+// diferencia de esa, las horas se capturan por persona (ver
+// ActividadRealizadaLineaPersona.horas), no compartidas por línea —
+// confirmado con Diego para no perder la flexibilidad que ya tenía
+// Actividades de que cada quien trabaje horas distintas el mismo reporte.
+model ActividadRealizadaLinea {
+  id            String                  @id @default(uuid())
+  realizadaId   String
+  realizada     ActividadRealizada      @relation(fields: [realizadaId], references: [id])
+  tipo          TipoRecursoActividad
+  tractorId     String?
+  tractor       Equipo?                 @relation("ActividadLineaTractor", fields: [tractorId], references: [id])
+  operadorId    String?
+  operador      Personal?               @relation("ActividadLineaOperador", fields: [operadorId], references: [id])
+  operadorHoras Decimal?                @db.Decimal(6, 2) // solo si tipo=tractor/mixta
+  implementoId  String?
+  implemento    Equipo?                 @relation("ActividadLineaImplemento", fields: [implementoId], references: [id])
+
+  personas ActividadRealizadaLineaPersona[]
+
+  @@index([realizadaId])
+}
+
+// Personas de una línea con su propia hora individual — para tipo "gente"
+// (todas), y para "mixta" (el grupo detrás del tractor, aparte del operador).
+model ActividadRealizadaLineaPersona {
+  lineaId    String
+  linea      ActividadRealizadaLinea @relation(fields: [lineaId], references: [id])
+  personalId String
+  personal   Personal                @relation("ActividadLineaPersona", fields: [personalId], references: [id])
+  horas      Decimal                 @db.Decimal(6, 2)
+
+  @@id([lineaId, personalId])
 }
 
 model ActividadRealizadaCuadro {
@@ -1030,20 +1127,6 @@ model ActividadRealizadaCuadro {
 
   @@index([realizadaId])
   @@index([cuadroId])
-}
-
-// Precarga de personas (10-ago-2026, ver 9.4 y patrón compartido con
-// Aplicaciones/Fertilizantes): cada persona lleva sus propias horas — no
-// todos trabajan lo mismo el mismo reporte.
-model ActividadRealizadaPersona {
-  id          String             @id @default(uuid())
-  realizadaId String
-  realizada   ActividadRealizada @relation(fields: [realizadaId], references: [id])
-  personalId  String
-  personal    Personal           @relation(fields: [personalId], references: [id])
-  horas       Decimal            @db.Decimal(6, 2)
-
-  @@index([realizadaId])
 }
 
 // ============================================================

@@ -44,6 +44,7 @@ export default function Ciclos() {
   const [fechaInicio, setFechaInicio] = useState(hoyISO());
   const [variedades, setVariedades] = useState<FilaVariedad[]>([{ cuadroId: "", variedad: "", hectareas: "" }]);
   const [avisoSobrante, setAvisoSobrante] = useState<DesajusteCuadro[] | null>(null);
+  const [editandoId, setEditandoId] = useState<string | null>(null);
 
   function hectareasVigentesCuadro(cuadroId: string): number | null {
     const cuadro = cuadros.find((c) => c.id === cuadroId);
@@ -88,22 +89,41 @@ export default function Ciclos() {
 
   async function enviarCiclo() {
     setError(null);
+    const payload = {
+      tipo,
+      fechaInicio,
+      variedades: variedades
+        .filter((v) => v.cuadroId && v.variedad && v.hectareas)
+        .map((v) => ({ cuadroId: v.cuadroId, variedad: v.variedad, hectareas: Number(v.hectareas) })),
+    };
     try {
-      await api.post("/ciclos", {
-        huertaId,
-        tipo,
-        fechaInicio,
-        variedades: variedades
-          .filter((v) => v.cuadroId && v.variedad && v.hectareas)
-          .map((v) => ({ cuadroId: v.cuadroId, variedad: v.variedad, hectareas: Number(v.hectareas) })),
-      });
+      if (editandoId) {
+        await api.patch(`/ciclos/${editandoId}`, payload);
+      } else {
+        await api.post("/ciclos", { huertaId, ...payload });
+      }
       setVariedades([{ cuadroId: "", variedad: "", hectareas: "" }]);
       setAvisoSobrante(null);
       setMostrarForm(false);
+      setEditandoId(null);
       cargar();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "No se pudo crear el ciclo.");
+      setError(err instanceof ApiError ? err.message : "No se pudo guardar el ciclo.");
     }
+  }
+
+  function iniciarEdicion(c: Ciclo) {
+    setEditandoId(c.id);
+    setTipo(c.tipo);
+    setFechaInicio(c.fechaInicio.slice(0, 10));
+    setVariedades(
+      c.variedades.length
+        ? c.variedades.map((v) => ({ cuadroId: v.cuadroId, variedad: v.variedad, hectareas: v.hectareas != null ? String(v.hectareas) : "" }))
+        : [{ cuadroId: "", variedad: "", hectareas: "" }]
+    );
+    setAvisoSobrante(null);
+    setError(null);
+    setMostrarForm(true);
   }
 
   function onSubmit(e: FormEvent) {
@@ -160,9 +180,14 @@ export default function Ciclos() {
               <span className="tag tag-success">Ciclo activo</span> <span className="tag tag-neutral">{activo.tipo}</span>
               <div style={{ fontSize: 12, color: "var(--ink-soft)", marginTop: 6 }}>Inicio: {formatearFecha(activo.fechaInicio)}</div>
             </div>
-            <button className="btn-danger" onClick={() => cerrarCiclo(activo.id)}>
-              Cerrar ciclo
-            </button>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button className="btn-secondary" onClick={() => iniciarEdicion(activo)}>
+                Editar
+              </button>
+              <button className="btn-danger" onClick={() => cerrarCiclo(activo.id)}>
+                Cerrar ciclo
+              </button>
+            </div>
           </div>
 
           <div style={{ marginTop: 14 }}>
@@ -207,7 +232,16 @@ export default function Ciclos() {
 
       {!activo && (
         <div style={{ marginBottom: 14 }}>
-          <button className="btn-primary" onClick={() => setMostrarForm((v) => !v)}>
+          <button
+            className="btn-primary"
+            onClick={() => {
+              if (mostrarForm) {
+                setEditandoId(null);
+                setVariedades([{ cuadroId: "", variedad: "", hectareas: "" }]);
+              }
+              setMostrarForm((v) => !v);
+            }}
+          >
             {mostrarForm ? "Cancelar" : "+ Nuevo Ciclo"}
           </button>
         </div>
@@ -301,10 +335,24 @@ export default function Ciclos() {
             </div>
           )}
 
-          <div style={{ marginTop: 14 }}>
+          <div style={{ marginTop: 14, display: "flex", gap: 8 }}>
             <button className="btn-primary" type="submit">
-              Crear ciclo
+              {editandoId ? "Guardar cambios" : "Crear ciclo"}
             </button>
+            {editandoId && (
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => {
+                  setEditandoId(null);
+                  setMostrarForm(false);
+                  setVariedades([{ cuadroId: "", variedad: "", hectareas: "" }]);
+                  setAvisoSobrante(null);
+                }}
+              >
+                Cancelar
+              </button>
+            )}
           </div>
         </form>
       )}

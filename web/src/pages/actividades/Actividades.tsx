@@ -3,9 +3,16 @@ import { api, ApiError } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
 import { useHuertas } from "../../lib/useHuertas";
 import { usePersonal } from "../../lib/usePersonal";
-import type { Actividad, ActividadProgramada, ActividadRealizadaPersona, Cuadro } from "../../lib/types";
+import { useEquipos } from "../../lib/useEquipos";
+import type { Actividad, ActividadProgramada, ActividadRealizadaLinea, Cuadro, TipoRecursoActividad } from "../../lib/types";
 import FechaInput from "../../components/FechaInput";
 import { formatearFecha } from "../../lib/fecha";
+
+const ETIQUETAS_TIPO: Record<TipoRecursoActividad, string> = {
+  gente: "Gente",
+  tractor: "Tractor",
+  mixta: "Mixta",
+};
 
 function hoyISO(): string {
   const d = new Date();
@@ -21,29 +28,82 @@ function formaDinero(valor: number): string {
   return valor.toLocaleString("es-MX", { style: "currency", currency: "MXN", maximumFractionDigits: 2 });
 }
 
-interface PersonaForm {
+let contadorKey = 0;
+function nuevaKey(): string {
+  contadorKey += 1;
+  return `linea-${Date.now()}-${contadorKey}`;
+}
+
+interface PersonaLineaForm {
   personalId: string;
   horas: string;
 }
 
-function personasDesdeExistentes(personas: ActividadRealizadaPersona[]): PersonaForm[] {
-  return personas.map((p) => ({ personalId: p.personalId, horas: p.horas }));
+interface LineaForm {
+  key: string;
+  tipo: TipoRecursoActividad;
+  tractorId: string;
+  operadorId: string;
+  operadorHoras: string;
+  implementoId: string;
+  personas: PersonaLineaForm[];
+}
+
+function lineaVacia(tipoDefault: TipoRecursoActividad): LineaForm {
+  return { key: nuevaKey(), tipo: tipoDefault, tractorId: "", operadorId: "", operadorHoras: "", implementoId: "", personas: [{ personalId: "", horas: "" }] };
+}
+
+function lineasDesdeExistentes(lineas: ActividadRealizadaLinea[]): LineaForm[] {
+  return lineas.map((l) => ({
+    key: nuevaKey(),
+    tipo: l.tipo,
+    tractorId: l.tractorId ?? "",
+    operadorId: l.operadorId ?? "",
+    operadorHoras: l.operadorHoras ?? "",
+    implementoId: l.implementoId ?? "",
+    personas: l.personas.length > 0 ? l.personas.map((p) => ({ personalId: p.personalId, horas: p.horas })) : [{ personalId: "", horas: "" }],
+  }));
 }
 
 /** Validación de espejo del backend (9.4) — evita un viaje al servidor solo para descubrir un error de forma. */
-function validarPersonasForm(personas: PersonaForm[]): string | null {
-  if (personas.length === 0) return "Falta capturar al menos una persona en este reporte.";
-  for (const p of personas) {
-    if (!p.personalId) return "Falta elegir la persona de una fila.";
-    if (!p.horas || Number(p.horas) <= 0) return "Falta capturar las horas de una persona.";
+function validarLineasForm(lineas: LineaForm[], tipoRecursoActividad: TipoRecursoActividad): string | null {
+  if (lineas.length === 0) return "Falta capturar al menos una línea de recurso.";
+  for (const l of lineas) {
+    if (tipoRecursoActividad !== "mixta" && l.tipo !== tipoRecursoActividad) {
+      return `Esta actividad solo admite líneas de tipo "${ETIQUETAS_TIPO[tipoRecursoActividad]}".`;
+    }
+    const personasValidas = l.personas.filter((p) => p.personalId);
+    if (l.tipo === "gente") {
+      if (personasValidas.length === 0) return "Una línea de Gente necesita al menos una persona.";
+    } else {
+      if (!l.tractorId || !l.operadorId || !l.implementoId) return `Una línea de ${ETIQUETAS_TIPO[l.tipo]} necesita Tractor, Operador e Implemento.`;
+      if (!l.operadorHoras || Number(l.operadorHoras) <= 0) return "Falta capturar las horas del operador de una línea.";
+      if (l.tipo === "mixta" && personasValidas.length === 0) return "Una línea de Mixta necesita al menos una persona además del operador.";
+    }
+    for (const p of personasValidas) {
+      if (!p.horas || Number(p.horas) <= 0) return "Falta capturar las horas de una persona.";
+    }
   }
   return null;
+}
+
+function lineasParaEnviar(form: LineaForm[]) {
+  return form.map((l) => ({
+    tipo: l.tipo,
+    tractorId: l.tipo !== "gente" ? l.tractorId : undefined,
+    operadorId: l.tipo !== "gente" ? l.operadorId : undefined,
+    operadorHoras: l.tipo !== "gente" ? Number(l.operadorHoras) : undefined,
+    implementoId: l.tipo !== "gente" ? l.implementoId : undefined,
+    personas: l.personas.filter((p) => p.personalId).map((p) => ({ personalId: p.personalId, horas: Number(p.horas) })),
+  }));
 }
 
 export default function Actividades() {
   const { usuario } = useAuth();
   const { huertas } = useHuertas();
   const { personal } = usePersonal();
+  const { equipos: tractores } = useEquipos("tractor");
+  const { equipos: implementos } = useEquipos("implemento");
 
   const [programadas, setProgramadas] = useState<ActividadProgramada[]>([]);
   const [cargando, setCargando] = useState(true);
@@ -63,12 +123,12 @@ export default function Actividades() {
   const [registrando, setRegistrando] = useState<string | null>(null);
   const [fechaReal, setFechaReal] = useState(hoyISO());
   const [avanceCuadros, setAvanceCuadros] = useState<Record<string, string>>({});
-  const [personas, setPersonas] = useState<PersonaForm[]>([{ personalId: "", horas: "" }]);
+  const [lineas, setLineas] = useState<LineaForm[]>([lineaVacia("gente")]);
 
   // ---- Editar reporte existente ----
   const [editando, setEditando] = useState<string | null>(null);
   const [editAvanceCuadros, setEditAvanceCuadros] = useState<Record<string, string>>({});
-  const [editPersonas, setEditPersonas] = useState<PersonaForm[]>([]);
+  const [editLineas, setEditLineas] = useState<LineaForm[]>([]);
 
   function cargar() {
     setCargando(true);
@@ -113,16 +173,17 @@ export default function Actividades() {
     }
   }
 
-  // Precarga (9.4, 10-ago-2026): el reporte de un nuevo día se pre-llena con
-  // las mismas personas y horas del reporte anterior de esta misma
-  // Actividad — el Supervisor/Capturista solo ajusta lo que cambió, sin
-  // afectar el registro de días anteriores.
+  // Precarga (9.4, 10-ago-2026, ampliada 15-ago-2026 con líneas de
+  // tractor/mixta): el reporte de un nuevo día se pre-llena con las mismas
+  // líneas del reporte anterior de esta misma Actividad — el
+  // Supervisor/Capturista solo ajusta lo que cambió, sin afectar el
+  // registro de días anteriores.
   function abrirRegistrar(a: ActividadProgramada) {
     setRegistrando(a.id);
     setFechaReal(hoyISO());
     setAvanceCuadros({});
     const ultimo = a.realizadas[0];
-    setPersonas(ultimo ? personasDesdeExistentes(ultimo.personas) : [{ personalId: "", horas: "" }]);
+    setLineas(ultimo ? lineasDesdeExistentes(ultimo.lineas) : [lineaVacia(a.actividad.tipoRecurso === "mixta" ? "gente" : a.actividad.tipoRecurso)]);
   }
 
   function cuadrosDesdeMapa(mapa: Record<string, string>, restantes: Record<string, number> | undefined): { cuadroId: string; hectareas: number }[] {
@@ -147,10 +208,6 @@ export default function Actividades() {
     return `Vas a dar por completados estos Cuadros:\n\n${lineasResumen.join("\n")}\n\n¿Confirmar?`;
   }
 
-  function personasParaEnviar(form: PersonaForm[]) {
-    return form.map((p) => ({ personalId: p.personalId, horas: Number(p.horas) }));
-  }
-
   async function confirmarRegistrar(a: ActividadProgramada) {
     setError(null);
     const cuadros = cuadrosDesdeMapa(avanceCuadros, a.restantesPorCuadro);
@@ -158,16 +215,16 @@ export default function Actividades() {
       setError("Falta capturar qué Cuadro(s) se avanzaron y sus hectáreas en este reporte.");
       return;
     }
-    const errorPersonas = validarPersonasForm(personas);
-    if (errorPersonas) {
-      setError(errorPersonas);
+    const errorLineas = validarLineasForm(lineas, a.actividad.tipoRecurso);
+    if (errorLineas) {
+      setError(errorLineas);
       return;
     }
     const resumen = resumenConfirmacion(a, avanceCuadros);
     if (resumen && !confirm(resumen)) return;
 
     try {
-      await api.post(`/actividades/${a.id}/avance`, { fechaReal, cuadros, personas: personasParaEnviar(personas) });
+      await api.post(`/actividades/${a.id}/avance`, { fechaReal, cuadros, lineas: lineasParaEnviar(lineas) });
       setRegistrando(null);
       cargar();
     } catch (err) {
@@ -180,7 +237,7 @@ export default function Actividades() {
     const mapa: Record<string, string> = {};
     for (const c of r.cuadros) mapa[c.cuadroId] = c.hectareas;
     setEditAvanceCuadros(mapa);
-    setEditPersonas(personasDesdeExistentes(r.personas));
+    setEditLineas(lineasDesdeExistentes(r.lineas));
   }
 
   async function confirmarEditar(a: ActividadProgramada, realizadaId: string) {
@@ -190,13 +247,13 @@ export default function Actividades() {
       setError("Falta capturar qué Cuadro(s) se avanzaron y sus hectáreas en este reporte.");
       return;
     }
-    const errorPersonas = validarPersonasForm(editPersonas);
-    if (errorPersonas) {
-      setError(errorPersonas);
+    const errorLineas = validarLineasForm(editLineas, a.actividad.tipoRecurso);
+    if (errorLineas) {
+      setError(errorLineas);
       return;
     }
     try {
-      await api.patch(`/actividades/avance/${realizadaId}`, { cuadros, personas: personasParaEnviar(editPersonas) });
+      await api.patch(`/actividades/avance/${realizadaId}`, { cuadros, lineas: lineasParaEnviar(editLineas) });
       setEditando(null);
       cargar();
     } catch (err) {
@@ -206,8 +263,6 @@ export default function Actividades() {
 
   return (
     <div>
-      <h2 style={{ marginBottom: 16 }}>Actividades</h2>
-
       <div style={{ marginBottom: 14 }}>
         <button className="btn-primary" onClick={() => setMostrarForm((v) => !v)}>
           {mostrarForm ? "Cancelar" : "+ Programar actividad"}
@@ -283,7 +338,7 @@ export default function Actividades() {
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 10 }}>
                 <div>
                   <div style={{ fontSize: 13, fontWeight: 600 }}>
-                    {a.huerta.nombre} — {a.actividad.nombre}
+                    {a.huerta.nombre} — {a.actividad.nombre} <span className="tag tag-neutral">{ETIQUETAS_TIPO[a.actividad.tipoRecurso]}</span>
                   </div>
                   <div style={{ fontSize: 12, color: "var(--ink-soft)" }}>
                     Cuadros: {a.cuadros.map((c) => c.cuadro.nombre).join(", ") || "—"} · {formaEntero(a.hectareasTotalesProgramadas)} ha ·{" "}
@@ -350,7 +405,14 @@ export default function Actividades() {
                     })}
                   </div>
 
-                  <PersonasEditor personas={personas} setPersonas={setPersonas} personal={personal} />
+                  <LineasActividadEditor
+                    lineas={lineas}
+                    setLineas={setLineas}
+                    tipoRecursoActividad={a.actividad.tipoRecurso}
+                    tractores={tractores}
+                    implementos={implementos}
+                    personal={personal}
+                  />
 
                   <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
                     <button className="btn-primary" onClick={() => confirmarRegistrar(a)}>
@@ -370,7 +432,7 @@ export default function Actividades() {
                     <thead>
                       <tr>
                         <th>Fecha</th>
-                        <th>Personas</th>
+                        <th>Líneas</th>
                         <th>Cuadros avanzados</th>
                         <th></th>
                       </tr>
@@ -380,7 +442,16 @@ export default function Actividades() {
                         <Fragment key={r.id}>
                           <tr>
                             <td>{formatearFecha(r.fechaReal)}</td>
-                            <td>{r.personas.map((p) => `${p.personal.nombreCompleto} (${p.horas}h)`).join(", ") || "—"}</td>
+                            <td>
+                              {r.lineas
+                                .map((l) => {
+                                  const gente = l.personas.map((p) => `${p.personal.nombreCompleto} (${p.horas}h)`).join(", ");
+                                  if (l.tipo === "gente") return `${ETIQUETAS_TIPO[l.tipo]}: ${gente || "—"}`;
+                                  const op = l.operador ? `${l.operador.nombreCompleto} (${l.operadorHoras}h)` : "—";
+                                  return `${ETIQUETAS_TIPO[l.tipo]}: ${op}${gente ? ` + ${gente}` : ""}`;
+                                })
+                                .join(" · ") || "—"}
+                            </td>
                             <td>{r.cuadros.map((c) => `${c.cuadro.nombre} (${c.hectareas} ha)`).join(", ") || "—"}</td>
                             <td>
                               {editando !== r.id && (
@@ -427,7 +498,14 @@ export default function Actividades() {
                                   })}
                                 </div>
 
-                                <PersonasEditor personas={editPersonas} setPersonas={setEditPersonas} personal={personal} />
+                                <LineasActividadEditor
+                                  lineas={editLineas}
+                                  setLineas={setEditLineas}
+                                  tipoRecursoActividad={a.actividad.tipoRecurso}
+                                  tractores={tractores}
+                                  implementos={implementos}
+                                  personal={personal}
+                                />
 
                                 <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
                                   <button className="btn-primary" onClick={() => confirmarEditar(a, r.id)}>
@@ -455,59 +533,187 @@ export default function Actividades() {
   );
 }
 
-/** Precarga de personas (10-ago-2026, 9.4): lista de personas del reporte, cada una con sus propias horas. */
-function PersonasEditor({
-  personas,
-  setPersonas,
+/**
+ * Recurso real usado por reporte (9.4, 15-ago-2026): una o varias líneas.
+ * El tipo de recurso de la Actividad restringe qué modalidades se ofrecen —
+ * "gente"/"tractor" solo permiten su propio tipo, "mixta" permite combinar
+ * cualquiera (mismo criterio de "no forzar los 3 siempre" del bloque 9.4).
+ * A diferencia de Aplicaciones, las horas son por persona (y por operador),
+ * no compartidas por línea.
+ */
+function LineasActividadEditor({
+  lineas,
+  setLineas,
+  tipoRecursoActividad,
+  tractores,
+  implementos,
   personal,
 }: {
-  personas: PersonaForm[];
-  setPersonas: (updater: (prev: PersonaForm[]) => PersonaForm[]) => void;
+  lineas: LineaForm[];
+  setLineas: (updater: (prev: LineaForm[]) => LineaForm[]) => void;
+  tipoRecursoActividad: TipoRecursoActividad;
+  tractores: { id: string; folio: string; marca: string | null; operadorDesignadoId: string | null }[];
+  implementos: { id: string; folio: string; marca: string | null }[];
   personal: { id: string; nombreCompleto: string }[];
 }) {
-  function actualizar(index: number, cambios: Partial<PersonaForm>) {
-    setPersonas((prev) => prev.map((p, i) => (i !== index ? p : { ...p, ...cambios })));
+  const tiposDisponibles: TipoRecursoActividad[] = tipoRecursoActividad === "mixta" ? ["gente", "tractor", "mixta"] : [tipoRecursoActividad];
+
+  function actualizar(key: string, cambios: Partial<LineaForm>) {
+    setLineas((prev) => prev.map((l) => (l.key !== key ? l : { ...l, ...cambios })));
   }
 
-  function agregarFila() {
-    setPersonas((prev) => [...prev, { personalId: "", horas: "" }]);
+  function actualizarPersona(key: string, index: number, cambios: Partial<PersonaLineaForm>) {
+    setLineas((prev) =>
+      prev.map((l) => (l.key !== key ? l : { ...l, personas: l.personas.map((p, i) => (i !== index ? p : { ...p, ...cambios })) }))
+    );
   }
 
-  function quitarFila(index: number) {
-    setPersonas((prev) => (prev.length === 1 ? prev : prev.filter((_, i) => i !== index)));
+  function agregarPersona(key: string) {
+    setLineas((prev) => prev.map((l) => (l.key !== key ? l : { ...l, personas: [...l.personas, { personalId: "", horas: "" }] })));
+  }
+
+  function quitarPersona(key: string, index: number) {
+    setLineas((prev) =>
+      prev.map((l) => (l.key !== key ? l : { ...l, personas: l.personas.length === 1 ? l.personas : l.personas.filter((_, i) => i !== index) }))
+    );
+  }
+
+  function elegirTractor(key: string, tractorId: string) {
+    // Precarga del operador designado (9.13, 15-ago-2026) — solo sugiere,
+    // editable libremente sin afectar el default guardado en la ficha.
+    const designado = tractores.find((t) => t.id === tractorId)?.operadorDesignadoId ?? "";
+    actualizar(key, { tractorId, operadorId: designado });
+  }
+
+  function agregarLinea() {
+    setLineas((prev) => [...prev, lineaVacia(tiposDisponibles[0]!)]);
+  }
+
+  function quitarLinea(key: string) {
+    setLineas((prev) => (prev.length === 1 ? prev : prev.filter((l) => l.key !== key)));
   }
 
   return (
     <div>
-      <div style={{ fontSize: 11.5, color: "var(--ink-soft)", marginBottom: 8 }}>Personas que trabajaron en este reporte, y cuántas horas cada una.</div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        {personas.map((p, i) => (
-          <div key={i} style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
-            <label className="field">
-              Persona
-              <select value={p.personalId} onChange={(e) => actualizar(i, { personalId: e.target.value })}>
-                <option value="">Selecciona…</option>
-                {personal.map((per) => (
-                  <option key={per.id} value={per.id}>
-                    {per.nombreCompleto}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="field">
-              Horas
-              <input type="number" step="0.25" style={{ width: 90 }} value={p.horas} onChange={(e) => actualizar(i, { horas: e.target.value })} />
-            </label>
-            {personas.length > 1 && (
-              <button className="btn-secondary" onClick={() => quitarFila(i)}>
-                Quitar
-              </button>
+      <div style={{ fontSize: 11.5, color: "var(--ink-soft)", marginBottom: 8 }}>
+        Recurso real usado — una línea por tipo, se pueden combinar varias en el mismo reporte.
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {lineas.map((l) => (
+          <div key={l.key} className="card" style={{ background: "var(--surface-soft, #fafafa)" }}>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 8 }}>
+              {tiposDisponibles.length > 1 && (
+                <label className="field">
+                  Tipo
+                  <select value={l.tipo} onChange={(e) => actualizar(l.key, { tipo: e.target.value as TipoRecursoActividad })}>
+                    {tiposDisponibles.map((t) => (
+                      <option key={t} value={t}>
+                        {ETIQUETAS_TIPO[t]}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              {lineas.length > 1 && (
+                <button className="btn-secondary" onClick={() => quitarLinea(l.key)}>
+                  Quitar línea
+                </button>
+              )}
+            </div>
+
+            {l.tipo !== "gente" && (
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 8 }}>
+                <label className="field">
+                  Tractor
+                  <select value={l.tractorId} onChange={(e) => elegirTractor(l.key, e.target.value)}>
+                    <option value="">Selecciona…</option>
+                    {tractores.map((eq) => (
+                      <option key={eq.id} value={eq.id}>
+                        {eq.folio} {eq.marca ?? ""}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field">
+                  Operador
+                  <select value={l.operadorId} onChange={(e) => actualizar(l.key, { operadorId: e.target.value })}>
+                    <option value="">Selecciona…</option>
+                    {personal.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.nombreCompleto}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field">
+                  Horas del operador
+                  <input
+                    type="number"
+                    step="0.25"
+                    style={{ width: 90 }}
+                    value={l.operadorHoras}
+                    onChange={(e) => actualizar(l.key, { operadorHoras: e.target.value })}
+                  />
+                </label>
+                <label className="field">
+                  Implemento
+                  <select value={l.implementoId} onChange={(e) => actualizar(l.key, { implementoId: e.target.value })}>
+                    <option value="">Selecciona…</option>
+                    {implementos.map((eq) => (
+                      <option key={eq.id} value={eq.id}>
+                        {eq.folio} {eq.marca ?? ""}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
             )}
+
+            <div>
+              <div style={{ fontSize: 11, color: "var(--ink-soft)", marginBottom: 4 }}>
+                {l.tipo === "gente" ? "Personas de esta línea" : "Personas detrás del tractor (aparte del operador)"}
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {l.personas.map((p, i) => (
+                  <div key={i} style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+                    <label className="field">
+                      Persona
+                      <select value={p.personalId} onChange={(e) => actualizarPersona(l.key, i, { personalId: e.target.value })}>
+                        <option value="">Selecciona…</option>
+                        {personal.map((per) => (
+                          <option key={per.id} value={per.id}>
+                            {per.nombreCompleto}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="field">
+                      Horas
+                      <input
+                        type="number"
+                        step="0.25"
+                        style={{ width: 90 }}
+                        value={p.horas}
+                        onChange={(e) => actualizarPersona(l.key, i, { horas: e.target.value })}
+                      />
+                    </label>
+                    {l.personas.length > 1 && (
+                      <button className="btn-secondary" onClick={() => quitarPersona(l.key, i)}>
+                        Quitar
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <button className="btn-secondary" style={{ marginTop: 6 }} onClick={() => agregarPersona(l.key)}>
+                + Otra persona
+              </button>
+            </div>
           </div>
         ))}
       </div>
-      <button className="btn-secondary" style={{ marginTop: 8 }} onClick={agregarFila}>
-        + Otra persona
+      <button className="btn-secondary" style={{ marginTop: 8 }} onClick={agregarLinea}>
+        + Otra línea
       </button>
     </div>
   );

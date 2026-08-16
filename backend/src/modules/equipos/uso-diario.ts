@@ -1,3 +1,4 @@
+import type { OrigenUsoDiario } from "@prisma/client";
 import { prisma } from "../../core/db.js";
 import type { TransactionClient } from "../../core/db.js";
 
@@ -16,7 +17,8 @@ export function registrarUsoDiario(equipoId: string, fecha: string, operadorId: 
 
 /**
  * Alimentación automática desde una línea de Turbina/Aguilón de un reporte
- * de avance de Aplicaciones (9.7/9.13, 8-ago-2026) — mismo mecanismo que
+ * de avance de Aplicaciones (9.7/9.13, 8-ago-2026) — o, desde 15-ago-2026,
+ * de una línea de tractor/mixta de Actividades (9.4) — mismo mecanismo que
  * `referenciaOrigenId` en RegistroNomina: se identifica por
  * `referenciaLineaId` para poder reemplazarla limpio si el reporte se edita
  * (ver `borrarUsoDiarioDeLineasTx`), sin volver a capturar el uso a mano.
@@ -28,10 +30,11 @@ export async function registrarUsoDiarioAutomaticoTx(
   operadorId: string,
   horas: number,
   huertaId: string,
-  referenciaLineaId: string
+  referenciaLineaId: string,
+  origen: OrigenUsoDiario = "automatico_aplicacion"
 ) {
   await tx.equipoUsoDiario.create({
-    data: { equipoId, fecha, operadorId, horas, huertaId, origen: "automatico_aplicacion", referenciaLineaId },
+    data: { equipoId, fecha, operadorId, horas, huertaId, origen, referenciaLineaId },
   });
 }
 

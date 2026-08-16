@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { requireAuth, requirePermission } from "../../middleware/auth.js";
 import { prisma } from "../../core/db.js";
-import { actualizarDiasCredito, crearProveedor, listarProveedores, mejoresProveedoresPorProducto } from "./proveedores.js";
+import { actualizarDiasCredito, crearProveedor, editarProveedor, listarProveedores, mejoresProveedoresPorProducto } from "./proveedores.js";
 import { mensajeErrorValidacion, unoSolo } from "../../core/http.js";
 
 export const proveedoresRouter = Router();
@@ -37,6 +37,15 @@ proveedoresRouter.post("/", requirePermission("compras", "capturar"), async (req
     return;
   }
   res.status(201).json(await crearProveedor(parsed.data));
+});
+
+proveedoresRouter.patch("/:id", requirePermission("compras", "editar"), async (req, res) => {
+  const parsed = altaSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
+    return;
+  }
+  res.json(await editarProveedor(unoSolo(req.params.id), parsed.data));
 });
 
 const diasCreditoSchema = z.object({ diasCredito: z.number().int().nonnegative() });

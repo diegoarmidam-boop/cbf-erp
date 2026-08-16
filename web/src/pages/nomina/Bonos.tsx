@@ -15,6 +15,7 @@ export default function Bonos() {
   const [mesesRequeridos, setMesesRequeridos] = useState("3");
   const [multiplicador, setMultiplicador] = useState("2");
   const [fechasDobles, setFechasDobles] = useState("");
+  const [editandoId, setEditandoId] = useState<string | null>(null);
 
   function cargar() {
     api.get<BonoConfig[]>("/nomina/bonos").then(setBonos);
@@ -35,12 +36,35 @@ export default function Bonos() {
           multiplicador: Number(multiplicador),
           fechas: fechasDobles.split(",").map((f) => f.trim()).filter(Boolean),
         });
-      await api.post("/nomina/bonos", base);
+      if (editandoId) {
+        await api.patch(`/nomina/bonos/${editandoId}`, base);
+      } else {
+        await api.post("/nomina/bonos", base);
+      }
       setNombre("");
+      setEditandoId(null);
       cargar();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "No se pudo guardar el bono.");
     }
+  }
+
+  function iniciarEdicion(b: BonoConfig) {
+    setEditandoId(b.id);
+    setNombre(b.nombre);
+    setTipo(b.tipo);
+    const p = b.parametros as Record<string, unknown>;
+    if (b.tipo === "asistencia_perfecta") {
+      setDiasRequeridos(String(p.diasRequeridos ?? "6"));
+      setMonto(String(p.monto ?? ""));
+    } else if (b.tipo === "permanencia_racha") {
+      setMesesRequeridos(String(p.mesesRequeridos ?? "3"));
+      setMonto(String(p.monto ?? ""));
+    } else if (b.tipo === "dia_doble") {
+      setMultiplicador(String(p.multiplicador ?? "2"));
+      setFechasDobles(b.diasEspeciales.map((d) => d.fecha.slice(0, 10)).join(", "));
+    }
+    setError(null);
   }
 
   async function toggleActivo(b: BonoConfig) {
@@ -130,8 +154,22 @@ export default function Bonos() {
         )}
 
         <button className="btn-primary" type="submit">
-          + Nuevo bono
+          {editandoId ? "Guardar cambios" : "+ Nuevo bono"}
         </button>
+        {editandoId && (
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={() => {
+              setEditandoId(null);
+              setNombre("");
+              setMonto("");
+              setFechasDobles("");
+            }}
+          >
+            Cancelar
+          </button>
+        )}
       </form>
 
       {error && <div className="tag tag-danger" style={{ display: "block", padding: "8px 12px", marginBottom: 12 }}>{error}</div>}
@@ -154,7 +192,10 @@ export default function Bonos() {
               <td>
                 <span className={`tag ${b.activo ? "tag-success" : "tag-danger"}`}>{b.activo ? "Activo" : "Inactivo"}</span>
               </td>
-              <td>
+              <td style={{ display: "flex", gap: 6 }}>
+                <button className="btn-secondary" onClick={() => iniciarEdicion(b)}>
+                  Editar
+                </button>
                 <button className="btn-secondary" onClick={() => toggleActivo(b)}>
                   {b.activo ? "Desactivar" : "Reactivar"}
                 </button>

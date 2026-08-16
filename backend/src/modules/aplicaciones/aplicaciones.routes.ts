@@ -11,6 +11,7 @@ import {
   confirmarEntrega,
   confirmarRecepcionCancelacion,
   DiaCerradoRequiereCasoExtraordinarioError,
+  editarAplicacionProgramada,
   editarRealizada,
   equiposImplementoParaAplicacion,
   equiposTractorParaAplicacion,
@@ -25,7 +26,10 @@ import {
   registrarRealizada,
   StockNoComprometidoError,
   TransicionAplicacionInvalidaError,
+  YaHayAvanceReportadoError,
 } from "./aplicaciones.js";
+import { AjusteInvalidoError, confirmarRecepcionAjuste, listarAjustesPendientesConfirmar } from "../almacen/movimientos.js";
+import { listarCancelacionesPendientesConfirmarGranular } from "../fertilizantes/granular.js";
 
 export const aplicacionesRouter = Router();
 aplicacionesRouter.use(requireAuth);
@@ -92,7 +96,28 @@ aplicacionesRouter.get("/equipos-tractor", requirePermission("aplicaciones", "ve
 // Va antes de "/:id" para que Express no la confunda con un id.
 aplicacionesRouter.get("/cancelaciones-pendientes-bodega", requirePermission("almacen", "ver"), async (req, res) => {
   if (!verificarRol(req, res, ROLES_CONFIRMAR_BODEGA)) return;
-  res.json(await listarCancelacionesPendientesConfirmar());
+  const [cancelacionesAplicaciones, cancelacionesGranular, ajustes] = await Promise.all([
+    listarCancelacionesPendientesConfirmar(),
+    listarCancelacionesPendientesConfirmarGranular(),
+    listarAjustesPendientesConfirmar(),
+  ]);
+  res.json([...cancelacionesAplicaciones, ...cancelacionesGranular, ...ajustes]);
+});
+
+// Ajuste de dosis (15-ago-2026): confirma que un sobrante ya regresó
+// físicamente a Bodega — mismo botón/aviso que una cancelación, pero por
+// movimiento individual (ver listarAjustesPendientesConfirmar).
+aplicacionesRouter.post("/ajustes/:movimientoId/confirmar-recepcion", requirePermission("almacen", "capturar"), async (req, res) => {
+  if (!verificarRol(req, res, ROLES_CONFIRMAR_BODEGA)) return;
+  try {
+    res.json(await confirmarRecepcionAjuste(unoSolo(req.params.movimientoId), req.usuario!.usuarioId));
+  } catch (err) {
+    if (err instanceof AjusteInvalidoError) {
+      res.status(409).json({ error: err.message });
+      return;
+    }
+    throw err;
+  }
 });
 
 aplicacionesRouter.get("/:id", requirePermission("aplicaciones", "ver"), async (req, res) => {
@@ -129,6 +154,32 @@ aplicacionesRouter.post("/", requirePermission("aplicaciones", "capturar"), asyn
     res.status(201).json(aplicacion);
   } catch (err) {
     if (err instanceof ProductoNoAutorizadoAplicacionError) {
+      res.status(409).json({ error: err.message });
+      return;
+    }
+    if (err instanceof Error) {
+      res.status(400).json({ error: err.message });
+      return;
+    }
+    throw err;
+  }
+});
+
+// Editar el Paso 1 ya programado/entregado (9.7, 15-ago-2026): mismo grupo
+// de roles que programar — decide dosis/cuadros/fechas, así que decide
+// también sus correcciones.
+aplicacionesRouter.patch("/:id", requirePermission("aplicaciones", "capturar"), async (req, res) => {
+  if (!verificarRol(req, res, ROLES_PROGRAMAR)) return;
+  const parsed = programarSchema.omit({ huertaId: true }).safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
+    return;
+  }
+  try {
+    const aplicacion = await editarAplicacionProgramada(unoSolo(req.params.id), parsed.data, req.usuario!.usuarioId);
+    res.json(aplicacion);
+  } catch (err) {
+    if (err instanceof ProductoNoAutorizadoAplicacionError || err instanceof YaHayAvanceReportadoError || err instanceof TransicionAplicacionInvalidaError) {
       res.status(409).json({ error: err.message });
       return;
     }

@@ -70,6 +70,32 @@ bonosRouter.post("/pendientes/:id/rechazar", requirePermission("nomina", "autori
   res.json(await rechazarBono(unoSolo(req.params.id), req.usuario!.usuarioId));
 });
 
+bonosRouter.patch("/:id", requirePermission("nomina", "editar"), async (req, res) => {
+  const parsed = crearBonoSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
+    return;
+  }
+  const { nombre, tipo, ...parametros } = parsed.data;
+  const fechas = tipo === "dia_doble" ? (parametros as { fechas: string[] }).fechas : [];
+  const id = unoSolo(req.params.id);
+
+  const bono = await prisma.$transaction(async (tx) => {
+    await tx.bonoDiaEspecial.deleteMany({ where: { bonoId: id } });
+    return tx.bonoConfig.update({
+      where: { id },
+      data: {
+        nombre,
+        tipo,
+        parametros,
+        diasEspeciales: fechas.length ? { create: fechas.map((f) => ({ fecha: new Date(f) })) } : undefined,
+      },
+      include: { diasEspeciales: true },
+    });
+  });
+  res.json(bono);
+});
+
 const activoSchema = z.object({ activo: z.boolean() });
 
 // Desactivar en vez de borrar — BonoOtorgado histórico depende de este

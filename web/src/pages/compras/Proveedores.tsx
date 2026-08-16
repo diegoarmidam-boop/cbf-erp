@@ -14,6 +14,7 @@ export default function Proveedores() {
   const [diasCredito, setDiasCredito] = useState("");
   const [editandoDiasId, setEditandoDiasId] = useState<string | null>(null);
   const [diasCreditoEdit, setDiasCreditoEdit] = useState("");
+  const [editandoId, setEditandoId] = useState<string | null>(null);
 
   function cargar() {
     api
@@ -37,22 +38,38 @@ export default function Proveedores() {
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
+    const payload = {
+      nombre,
+      creditoMonto: creditoMonto ? Number(creditoMonto) : undefined,
+      creditoVencimiento: creditoVencimiento || undefined,
+      diasCredito: diasCredito ? Number(diasCredito) : undefined,
+    };
     try {
-      await api.post("/compras/proveedores", {
-        nombre,
-        creditoMonto: creditoMonto ? Number(creditoMonto) : undefined,
-        creditoVencimiento: creditoVencimiento || undefined,
-        diasCredito: diasCredito ? Number(diasCredito) : undefined,
-      });
+      if (editandoId) {
+        await api.patch(`/compras/proveedores/${editandoId}`, payload);
+      } else {
+        await api.post("/compras/proveedores", payload);
+      }
       setNombre("");
       setCreditoMonto("");
       setCreditoVencimiento("");
       setDiasCredito("");
       setMostrarForm(false);
+      setEditandoId(null);
       cargar();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "No se pudo guardar.");
     }
+  }
+
+  function iniciarEdicion(p: Proveedor) {
+    setEditandoId(p.id);
+    setNombre(p.nombre);
+    setCreditoMonto(p.creditoMonto != null ? String(p.creditoMonto) : "");
+    setCreditoVencimiento(p.creditoVencimiento ? p.creditoVencimiento.slice(0, 10) : "");
+    setDiasCredito(p.diasCredito != null ? String(p.diasCredito) : "");
+    setError(null);
+    setMostrarForm(true);
   }
 
   async function guardarDiasCredito(id: string) {
@@ -69,7 +86,19 @@ export default function Proveedores() {
   return (
     <div>
       <div style={{ marginBottom: 14 }}>
-        <button className="btn-primary" onClick={() => setMostrarForm((v) => !v)}>
+        <button
+          className="btn-primary"
+          onClick={() => {
+            if (mostrarForm) {
+              setEditandoId(null);
+              setNombre("");
+              setCreditoMonto("");
+              setCreditoVencimiento("");
+              setDiasCredito("");
+            }
+            setMostrarForm((v) => !v);
+          }}
+        >
           {mostrarForm ? "Cancelar" : "+ Nuevo proveedor"}
         </button>
       </div>
@@ -93,7 +122,7 @@ export default function Proveedores() {
             <input type="number" min={0} step="1" value={diasCredito} onChange={(e) => setDiasCredito(e.target.value)} placeholder="Ej. 15" />
           </label>
           <button className="btn-primary" type="submit">
-            Guardar
+            {editandoId ? "Guardar cambios" : "Guardar"}
           </button>
         </form>
       )}
@@ -151,7 +180,10 @@ export default function Proveedores() {
               <td>
                 <span className={`tag ${p.activo ? "tag-success" : "tag-danger"}`}>{p.activo ? "Activo" : "Inactivo"}</span>
               </td>
-              <td>
+              <td style={{ display: "flex", gap: 6 }}>
+                <button className="btn-secondary" onClick={() => iniciarEdicion(p)}>
+                  Editar
+                </button>
                 <button className="btn-secondary" onClick={() => toggleActivo(p)}>
                   {p.activo ? "Desactivar" : "Reactivar"}
                 </button>

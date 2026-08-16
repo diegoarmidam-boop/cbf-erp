@@ -11,6 +11,8 @@ import {
   ActividadFueraDeAlcanceError,
   DiaCerradoRequiereCasoExtraordinarioActividadError,
   editarAvanceActividad,
+  equiposImplementoParaActividad,
+  equiposTractorParaActividad,
   listarActividadesProgramadas,
   obtenerActividadProgramada,
   programarActividad,
@@ -57,6 +59,14 @@ actividadesRouter.get("/catalogo", requirePermission("actividades", "ver"), asyn
   res.json(await actividadesParaProgramar());
 });
 
+actividadesRouter.get("/equipos-tractor", requirePermission("actividades", "ver"), async (_req, res) => {
+  res.json(await equiposTractorParaActividad());
+});
+
+actividadesRouter.get("/equipos-implemento", requirePermission("actividades", "ver"), async (_req, res) => {
+  res.json(await equiposImplementoParaActividad());
+});
+
 actividadesRouter.get("/:id", requirePermission("actividades", "ver"), async (req, res) => {
   const programada = await obtenerActividadProgramada(unoSolo(req.params.id));
   if (!verificarAlcance(req, res, programada.huertaId)) return;
@@ -95,12 +105,21 @@ actividadesRouter.post("/", requirePermission("actividades", "capturar"), async 
 });
 
 const cuadroAvanceSchema = z.object({ cuadroId: z.string().min(1), hectareas: z.number().positive() });
-const personaAvanceSchema = z.object({ personalId: z.string().min(1), horas: z.number().positive() });
+const personaLineaSchema = z.object({ personalId: z.string().min(1), horas: z.number().positive() });
+
+const lineaActividadSchema = z.object({
+  tipo: z.enum(["gente", "tractor", "mixta"]),
+  tractorId: z.string().optional(),
+  operadorId: z.string().optional(),
+  operadorHoras: z.number().positive().optional(),
+  implementoId: z.string().optional(),
+  personas: z.array(personaLineaSchema).default([]),
+});
 
 const avanceSchema = z.object({
   fechaReal: z.string(),
   cuadros: z.array(cuadroAvanceSchema).min(1),
-  personas: z.array(personaAvanceSchema).min(1),
+  lineas: z.array(lineaActividadSchema).min(1),
 });
 
 // Se acepta "actividades:capturar" (Supervisor/Capturista, el caso normal) O
@@ -152,7 +171,7 @@ actividadesRouter.post("/:id/avance", requirePermissionAny(["actividades", "capt
 
 const editarAvanceSchema = z.object({
   cuadros: z.array(cuadroAvanceSchema).min(1),
-  personas: z.array(personaAvanceSchema).min(1),
+  lineas: z.array(lineaActividadSchema).min(1),
 });
 
 actividadesRouter.patch("/avance/:realizadaId", requirePermission("actividades", "capturar"), async (req, res) => {

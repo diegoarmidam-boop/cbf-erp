@@ -34,6 +34,15 @@ export default function HuertasYCuadros() {
   const [distPlantas, setDistPlantas] = useState("");
   const [tipoSuelo, setTipoSuelo] = useState("");
 
+  // Editar Cuadro (9.1): no se sobreescribe la fila — se crea una nueva
+  // versión vigente a partir de hoy, conservando la anterior en el
+  // historial (ver POST /cuadros/:id/version).
+  const [editandoCuadroId, setEditandoCuadroId] = useState<string | null>(null);
+  const [hectareasEdit, setHectareasEdit] = useState("");
+  const [distSurcosEdit, setDistSurcosEdit] = useState("");
+  const [distPlantasEdit, setDistPlantasEdit] = useState("");
+  const [tipoSueloEdit, setTipoSueloEdit] = useState("");
+
   useEffect(() => {
     if (!huertaId) return;
     api
@@ -101,6 +110,37 @@ export default function HuertasYCuadros() {
       refetch();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "No se pudo actualizar.");
+    }
+  }
+
+  function iniciarEdicionCuadro(cuadroId: string) {
+    const c = cuadros.find((x) => x.id === cuadroId);
+    const vigente = c?.versiones.find((v) => !v.vigenteHasta) ?? c?.versiones[0];
+    setHectareasEdit(vigente?.hectareas != null ? String(vigente.hectareas) : "");
+    setDistSurcosEdit(vigente?.distSurcosM != null ? String(vigente.distSurcosM) : "");
+    setDistPlantasEdit(vigente?.distPlantasM != null ? String(vigente.distPlantasM) : "");
+    setTipoSueloEdit(vigente?.tipoSuelo ?? "");
+    setError(null);
+    setEditandoCuadroId(cuadroId);
+  }
+
+  async function guardarEdicionCuadro(e: FormEvent, cuadroId: string) {
+    e.preventDefault();
+    setError(null);
+    try {
+      await api.post(`/cuadros/${cuadroId}/version`, {
+        vigenteDesde: hoyISO(),
+        version: {
+          hectareas: Number(hectareasEdit),
+          distSurcosM: distSurcosEdit ? Number(distSurcosEdit) : undefined,
+          distPlantasM: distPlantasEdit ? Number(distPlantasEdit) : undefined,
+          tipoSuelo: tipoSueloEdit || undefined,
+        },
+      });
+      setEditandoCuadroId(null);
+      refetch();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "No se pudo guardar el cambio.");
     }
   }
 
@@ -199,27 +239,69 @@ export default function HuertasYCuadros() {
                   <th>Hectáreas</th>
                   <th>Marco de plantación</th>
                   <th>Plantas totales</th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody>
                 {cuadros.map((c) => {
                   const vigente = c.versiones.find((v) => !v.vigenteHasta) ?? c.versiones[0];
                   return (
-                    <tr key={c.id}>
-                      <td>{c.nombre}</td>
-                      <td>
-                        <select value={c.estatus} onChange={(e) => cambiarEstatusCuadro(c.id, e.target.value as EstatusCuadro)}>
-                          {Object.entries(ETIQUETAS_ESTATUS_CUADRO).map(([v, l]) => (
-                            <option key={v} value={v}>
-                              {l}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                      <td>{vigente?.hectareas ?? "—"}</td>
-                      <td>{vigente?.distSurcosM && vigente?.distPlantasM ? `${vigente.distSurcosM} × ${vigente.distPlantasM} m` : "—"}</td>
-                      <td>{c.plantasTotales != null ? Math.round(c.plantasTotales).toLocaleString("es-MX") : "—"}</td>
-                    </tr>
+                    <>
+                      <tr key={c.id}>
+                        <td>{c.nombre}</td>
+                        <td>
+                          <select value={c.estatus} onChange={(e) => cambiarEstatusCuadro(c.id, e.target.value as EstatusCuadro)}>
+                            {Object.entries(ETIQUETAS_ESTATUS_CUADRO).map(([v, l]) => (
+                              <option key={v} value={v}>
+                                {l}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                        <td>{vigente?.hectareas ?? "—"}</td>
+                        <td>{vigente?.distSurcosM && vigente?.distPlantasM ? `${vigente.distSurcosM} × ${vigente.distPlantasM} m` : "—"}</td>
+                        <td>{c.plantasTotales != null ? Math.round(c.plantasTotales).toLocaleString("es-MX") : "—"}</td>
+                        <td>
+                          <button className="btn-secondary" onClick={() => (editandoCuadroId === c.id ? setEditandoCuadroId(null) : iniciarEdicionCuadro(c.id))}>
+                            {editandoCuadroId === c.id ? "Cancelar" : "Editar"}
+                          </button>
+                        </td>
+                      </tr>
+                      {editandoCuadroId === c.id && (
+                        <tr>
+                          <td colSpan={6}>
+                            <form
+                              onSubmit={(e) => guardarEdicionCuadro(e, c.id)}
+                              className="card"
+                              style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}
+                            >
+                              <div style={{ fontSize: 11.5, color: "var(--ink-soft)", width: "100%" }}>
+                                Esto crea una nueva configuración vigente desde hoy — la anterior se conserva en el historial.
+                              </div>
+                              <label className="field">
+                                Hectáreas
+                                <input type="number" step="0.0001" value={hectareasEdit} onChange={(e) => setHectareasEdit(e.target.value)} required />
+                              </label>
+                              <label className="field">
+                                Tipo de suelo
+                                <input value={tipoSueloEdit} onChange={(e) => setTipoSueloEdit(e.target.value)} />
+                              </label>
+                              <label className="field">
+                                Dist. entre surcos (m)
+                                <input type="number" step="0.01" value={distSurcosEdit} onChange={(e) => setDistSurcosEdit(e.target.value)} />
+                              </label>
+                              <label className="field">
+                                Dist. entre plantas (m)
+                                <input type="number" step="0.01" value={distPlantasEdit} onChange={(e) => setDistPlantasEdit(e.target.value)} />
+                              </label>
+                              <button className="btn-primary" type="submit">
+                                Guardar cambios
+                              </button>
+                            </form>
+                          </td>
+                        </tr>
+                      )}
+                    </>
                   );
                 })}
               </tbody>
