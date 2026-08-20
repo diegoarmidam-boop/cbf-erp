@@ -50,7 +50,7 @@ interface LineaForm {
 }
 
 function lineaVacia(tipoDefault: TipoRecursoActividad): LineaForm {
-  return { key: nuevaKey(), tipo: tipoDefault, tractorId: "", operadorId: "", operadorHoras: "", implementoId: "", personas: [{ personalId: "", horas: "" }] };
+  return { key: nuevaKey(), tipo: tipoDefault, tractorId: "", operadorId: "", operadorHoras: "", implementoId: "", personas: [] };
 }
 
 function lineasDesdeExistentes(lineas: ActividadRealizadaLinea[]): LineaForm[] {
@@ -61,7 +61,7 @@ function lineasDesdeExistentes(lineas: ActividadRealizadaLinea[]): LineaForm[] {
     operadorId: l.operadorId ?? "",
     operadorHoras: l.operadorHoras ?? "",
     implementoId: l.implementoId ?? "",
-    personas: l.personas.length > 0 ? l.personas.map((p) => ({ personalId: p.personalId, horas: p.horas })) : [{ personalId: "", horas: "" }],
+    personas: l.personas.map((p) => ({ personalId: p.personalId, horas: p.horas })),
   }));
 }
 
@@ -155,6 +155,14 @@ export default function Actividades() {
 
   function alternarCuadro(id: string) {
     setCuadroIds((prev) => (prev.includes(id) ? prev.filter((c) => c !== id) : [...prev, id]));
+  }
+
+  // Atajo "toda la Huerta" (16-ago-2026): equivale exactamente a marcar cada
+  // Cuadro a mano uno por uno — mismo cuadroIds que llega al backend, sin
+  // tocar ninguna lógica de negocio (candados de superficie, hectáreas
+  // restantes, etc. siguen calculándose igual).
+  function alternarTodaLaHuerta() {
+    setCuadroIds((prev) => (prev.length === cuadrosHuerta.length ? [] : cuadrosHuerta.map((c) => c.id)));
   }
 
   async function programar(e: FormEvent) {
@@ -299,7 +307,13 @@ export default function Actividades() {
           {huertaId && (
             <div className="field">
               Cuadros
-              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+                {cuadrosHuerta.length > 0 && (
+                  <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12.5, fontWeight: 600, color: "var(--ink)" }}>
+                    <input type="checkbox" checked={cuadroIds.length === cuadrosHuerta.length} onChange={alternarTodaLaHuerta} />
+                    Toda la Huerta
+                  </label>
+                )}
                 {cuadrosHuerta.map((c) => (
                   <label key={c.id} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12.5, color: "var(--ink)" }}>
                     <input type="checkbox" checked={cuadroIds.includes(c.id)} onChange={() => alternarCuadro(c.id)} />
@@ -558,6 +572,14 @@ function LineasActividadEditor({
 }) {
   const tiposDisponibles: TipoRecursoActividad[] = tipoRecursoActividad === "mixta" ? ["gente", "tractor", "mixta"] : [tipoRecursoActividad];
 
+  // Selector múltiple de personas (16-ago-2026, reemplaza "+ Otra persona"
+  // de una en una): se abre para una sola línea a la vez, acumula la
+  // selección en un checklist y las agrega todas juntas al confirmar —
+  // como ya excluye del checklist a quien ya está en la línea, no hay forma
+  // de volver a marcar a la misma persona dos veces (bug de duplicados).
+  const [selectorAbiertoKey, setSelectorAbiertoKey] = useState<string | null>(null);
+  const [seleccionPendiente, setSeleccionPendiente] = useState<Set<string>>(new Set());
+
   function actualizar(key: string, cambios: Partial<LineaForm>) {
     setLineas((prev) => prev.map((l) => (l.key !== key ? l : { ...l, ...cambios })));
   }
@@ -568,14 +590,43 @@ function LineasActividadEditor({
     );
   }
 
-  function agregarPersona(key: string) {
-    setLineas((prev) => prev.map((l) => (l.key !== key ? l : { ...l, personas: [...l.personas, { personalId: "", horas: "" }] })));
+  function abrirSelector(key: string) {
+    setSelectorAbiertoKey(key);
+    setSeleccionPendiente(new Set());
+  }
+
+  function cerrarSelector() {
+    setSelectorAbiertoKey(null);
+    setSeleccionPendiente(new Set());
+  }
+
+  function alternarSeleccion(personalId: string) {
+    setSeleccionPendiente((prev) => {
+      const copia = new Set(prev);
+      if (copia.has(personalId)) copia.delete(personalId);
+      else copia.add(personalId);
+      return copia;
+    });
+  }
+
+  function confirmarSeleccion(key: string) {
+    if (seleccionPendiente.size === 0) return;
+    setLineas((prev) =>
+      prev.map((l) => {
+        if (l.key !== key) return l;
+        // La línea arranca con una fila vacía por defecto (sin persona
+        // elegida todavía) — si sigue vacía cuando se agrega por checklist,
+        // se descarta en vez de dejar una fila incompleta suelta.
+        const yaConDatos = l.personas.filter((p) => p.personalId);
+        const nuevas = [...seleccionPendiente].map((personalId) => ({ personalId, horas: "" }));
+        return { ...l, personas: [...yaConDatos, ...nuevas] };
+      })
+    );
+    cerrarSelector();
   }
 
   function quitarPersona(key: string, index: number) {
-    setLineas((prev) =>
-      prev.map((l) => (l.key !== key ? l : { ...l, personas: l.personas.length === 1 ? l.personas : l.personas.filter((_, i) => i !== index) }))
-    );
+    setLineas((prev) => prev.map((l) => (l.key !== key ? l : { ...l, personas: l.personas.filter((_, i) => i !== index) })));
   }
 
   function elegirTractor(key: string, tractorId: string) {
@@ -673,20 +724,15 @@ function LineasActividadEditor({
               <div style={{ fontSize: 11, color: "var(--ink-soft)", marginBottom: 4 }}>
                 {l.tipo === "gente" ? "Personas de esta línea" : "Personas detrás del tractor (aparte del operador)"}
               </div>
+              {l.personas.length === 0 && (
+                <div style={{ fontSize: 12, color: "var(--ink-soft)", marginBottom: 6 }}>Sin personas todavía.</div>
+              )}
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 {l.personas.map((p, i) => (
-                  <div key={i} style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
-                    <label className="field">
-                      Persona
-                      <select value={p.personalId} onChange={(e) => actualizarPersona(l.key, i, { personalId: e.target.value })}>
-                        <option value="">Selecciona…</option>
-                        {personal.map((per) => (
-                          <option key={per.id} value={per.id}>
-                            {per.nombreCompleto}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
+                  <div key={p.personalId} style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+                    <div className="field" style={{ minWidth: 160, fontSize: 12.5, paddingTop: 4 }}>
+                      {personal.find((per) => per.id === p.personalId)?.nombreCompleto ?? "—"}
+                    </div>
                     <label className="field">
                       Horas
                       <input
@@ -697,17 +743,40 @@ function LineasActividadEditor({
                         onChange={(e) => actualizarPersona(l.key, i, { horas: e.target.value })}
                       />
                     </label>
-                    {l.personas.length > 1 && (
-                      <button className="btn-secondary" onClick={() => quitarPersona(l.key, i)}>
-                        Quitar
-                      </button>
-                    )}
+                    <button className="btn-secondary" onClick={() => quitarPersona(l.key, i)}>
+                      Quitar
+                    </button>
                   </div>
                 ))}
               </div>
-              <button className="btn-secondary" style={{ marginTop: 6 }} onClick={() => agregarPersona(l.key)}>
-                + Otra persona
-              </button>
+
+              {selectorAbiertoKey === l.key ? (
+                <div className="card" style={{ marginTop: 8, background: "var(--surface)" }}>
+                  <div style={{ fontSize: 11.5, fontWeight: 600, marginBottom: 6 }}>Marca a quiénes agregar</div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 220, overflowY: "auto", marginBottom: 10 }}>
+                    {personal
+                      .filter((per) => !l.personas.some((p) => p.personalId === per.id))
+                      .map((per) => (
+                        <label key={per.id} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5 }}>
+                          <input type="checkbox" checked={seleccionPendiente.has(per.id)} onChange={() => alternarSeleccion(per.id)} />
+                          {per.nombreCompleto}
+                        </label>
+                      ))}
+                  </div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button className="btn-primary" disabled={seleccionPendiente.size === 0} onClick={() => confirmarSeleccion(l.key)}>
+                      Agregar seleccionadas ({seleccionPendiente.size})
+                    </button>
+                    <button className="btn-secondary" onClick={cerrarSelector}>
+                      Cancelar
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button className="btn-secondary" style={{ marginTop: 6 }} onClick={() => abrirSelector(l.key)}>
+                  + Agregar personas
+                </button>
+              )}
             </div>
           </div>
         ))}

@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { requireAuth, requirePermission } from "../../middleware/auth.js";
-import { mensajeErrorValidacion, unoSolo } from "../../core/http.js";
+import { mensajeErrorCaptura, mensajeErrorValidacion, unoSolo } from "../../core/http.js";
 import { calcularAlertaRendimiento, historialCargas, OdometroRetrocedeError, registrarCarga } from "./combustible.js";
 
 export const combustibleRouter = Router();
@@ -40,7 +40,7 @@ combustibleRouter.post("/:equipoId", requirePermission("equipos", "capturar"), a
       return;
     }
     if (err instanceof Error) {
-      res.status(400).json({ error: err.message });
+      res.status(400).json({ error: mensajeErrorCaptura(err) });
       return;
     }
     throw err;

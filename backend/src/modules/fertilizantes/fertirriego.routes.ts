@@ -2,7 +2,7 @@ import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import type { Rol } from "@prisma/client";
 import { requireAuth, requirePermission, huertaIdDeAlcance } from "../../middleware/auth.js";
-import { mensajeErrorValidacion, unoSolo } from "../../core/http.js";
+import { mensajeErrorCaptura, mensajeErrorValidacion, unoSolo } from "../../core/http.js";
 import {
   confirmarEntregaFertirriego,
   liberarFertirriegoVencido,
@@ -85,7 +85,7 @@ fertirriegoRouter.post("/", requirePermission("fertilizantes", "capturar"), asyn
       return;
     }
     if (err instanceof Error) {
-      res.status(400).json({ error: err.message });
+      res.status(400).json({ error: mensajeErrorCaptura(err) });
       return;
     }
     throw err;

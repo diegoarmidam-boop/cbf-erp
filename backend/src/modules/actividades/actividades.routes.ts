@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { Rol } from "@prisma/client";
 import { requireAuth, requirePermission, requirePermissionAny, huertaIdDeAlcance } from "../../middleware/auth.js";
 import { tienePermiso } from "../../core/permissions.js";
-import { mensajeErrorValidacion, unoSolo } from "../../core/http.js";
+import { mensajeErrorCaptura, mensajeErrorValidacion, unoSolo } from "../../core/http.js";
 import { prisma } from "../../core/db.js";
 import { diaEstaCerrado } from "../nomina/captura.js";
 import {
@@ -97,7 +97,7 @@ actividadesRouter.post("/", requirePermission("actividades", "capturar"), async 
       return;
     }
     if (err instanceof Error) {
-      res.status(400).json({ error: err.message });
+      res.status(400).json({ error: mensajeErrorCaptura(err) });
       return;
     }
     throw err;
@@ -107,14 +107,23 @@ actividadesRouter.post("/", requirePermission("actividades", "capturar"), async 
 const cuadroAvanceSchema = z.object({ cuadroId: z.string().min(1), hectareas: z.number().positive() });
 const personaLineaSchema = z.object({ personalId: z.string().min(1), horas: z.number().positive() });
 
-const lineaActividadSchema = z.object({
-  tipo: z.enum(["gente", "tractor", "mixta"]),
-  tractorId: z.string().optional(),
-  operadorId: z.string().optional(),
-  operadorHoras: z.number().positive().optional(),
-  implementoId: z.string().optional(),
-  personas: z.array(personaLineaSchema).default([]),
-});
+// Duplicados en la misma línea (16-ago-2026): seleccionar dos veces a la
+// misma persona en una línea tronaba en el `create` anidado de Prisma con
+// un error crudo de constraint PRIMARY — se corta aquí, antes de tocar la
+// base de datos, con un mensaje que sí se entiende.
+const lineaActividadSchema = z
+  .object({
+    tipo: z.enum(["gente", "tractor", "mixta"]),
+    tractorId: z.string().optional(),
+    operadorId: z.string().optional(),
+    operadorHoras: z.number().positive().optional(),
+    implementoId: z.string().optional(),
+    personas: z.array(personaLineaSchema).default([]),
+  })
+  .refine((l) => new Set(l.personas.map((p) => p.personalId)).size === l.personas.length, {
+    message: "No se puede repetir la misma persona dos veces en la misma línea.",
+    path: ["personas"],
+  });
 
 const avanceSchema = z.object({
   fechaReal: z.string(),
@@ -162,7 +171,7 @@ actividadesRouter.post("/:id/avance", requirePermissionAny(["actividades", "capt
       return;
     }
     if (err instanceof Error) {
-      res.status(400).json({ error: err.message });
+      res.status(400).json({ error: mensajeErrorCaptura(err) });
       return;
     }
     throw err;
@@ -193,7 +202,7 @@ actividadesRouter.patch("/avance/:realizadaId", requirePermission("actividades",
     res.json(await editarAvanceActividad(realizadaId, parsed.data, req.usuario!.usuarioId));
   } catch (err) {
     if (err instanceof Error) {
-      res.status(400).json({ error: err.message });
+      res.status(400).json({ error: mensajeErrorCaptura(err) });
       return;
     }
     throw err;

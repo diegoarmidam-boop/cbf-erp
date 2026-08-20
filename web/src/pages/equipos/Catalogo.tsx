@@ -64,13 +64,16 @@ export default function Catalogo() {
     e.preventDefault();
     setError(null);
     try {
+      // Un Implemento nunca manda operadorDesignadoId — ni de lo que haya
+      // escrito el usuario (el campo ni se muestra para ese tipo) ni de un
+      // valor viejo que traiga el formulario de una edición anterior.
       if (editandoId) {
         await api.patch(`/equipos/${editandoId}`, {
           marca: marca || undefined,
           modelo: modelo || undefined,
           anio: anio ? Number(anio) : undefined,
           placas: placas || undefined,
-          operadorDesignadoId: operadorDesignadoId || null,
+          operadorDesignadoId: tipo === "implemento" ? null : operadorDesignadoId || null,
         });
       } else {
         await api.post("/equipos", {
@@ -80,7 +83,7 @@ export default function Catalogo() {
           modelo: modelo || undefined,
           anio: anio ? Number(anio) : undefined,
           placas: placas || undefined,
-          operadorDesignadoId: operadorDesignadoId || undefined,
+          operadorDesignadoId: tipo === "implemento" ? undefined : operadorDesignadoId || undefined,
         });
       }
       limpiarForm();
@@ -138,17 +141,19 @@ export default function Catalogo() {
               <input value={placas} onChange={(e) => setPlacas(e.target.value)} />
             </label>
           )}
-          <label className="field">
-            Operador designado
-            <select value={operadorDesignadoId} onChange={(e) => setOperadorDesignadoId(e.target.value)}>
-              <option value="">Sin operador fijo</option>
-              {personal.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.nombreCompleto}
-                </option>
-              ))}
-            </select>
-          </label>
+          {tipo !== "implemento" && (
+            <label className="field">
+              Operador designado
+              <select value={operadorDesignadoId} onChange={(e) => setOperadorDesignadoId(e.target.value)}>
+                <option value="">Sin operador fijo</option>
+                {personal.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.nombreCompleto}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <button className="btn-primary" type="submit">
             {editandoId ? "Guardar cambios" : "Guardar"}
           </button>

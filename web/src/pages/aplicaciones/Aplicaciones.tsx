@@ -169,6 +169,12 @@ export default function Aplicaciones() {
     setCuadroIds((prev) => (prev.includes(id) ? prev.filter((c) => c !== id) : [...prev, id]));
   }
 
+  // Atajo "toda la Huerta" (16-ago-2026): mismo cuadroIds que marcar cada
+  // Cuadro a mano — no cambia ninguna lógica de negocio.
+  function alternarTodaLaHuerta() {
+    setCuadroIds((prev) => (prev.length === cuadrosHuerta.length ? [] : cuadrosHuerta.map((c) => c.id)));
+  }
+
   function actualizarProductoForm(index: number, cambios: Partial<ProductoForm>) {
     setProductosForm((prev) => prev.map((p, i) => (i !== index ? p : { ...p, ...cambios })));
   }
@@ -417,7 +423,13 @@ export default function Aplicaciones() {
           {huertaId && (
             <div className="field">
               Cuadros
-              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+                {cuadrosHuerta.length > 0 && (
+                  <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12.5, fontWeight: 600, color: "var(--ink)" }}>
+                    <input type="checkbox" checked={cuadroIds.length === cuadrosHuerta.length} onChange={alternarTodaLaHuerta} />
+                    Toda la Huerta
+                  </label>
+                )}
                 {cuadrosHuerta.map((c) => (
                   <label key={c.id} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12.5, color: "var(--ink)" }}>
                     <input type="checkbox" checked={cuadroIds.includes(c.id)} onChange={() => alternarCuadro(c.id)} />

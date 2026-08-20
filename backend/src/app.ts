@@ -49,6 +49,15 @@ export function createApp() {
   apiRouter.use("/aplicaciones", aplicacionesRouter);
   apiRouter.use("/fertilizantes", fertilizantesModuleRouter);
   apiRouter.use("/riego", riegoRouter);
+  // Cierre de la API (16-ago-2026): sin esto, una ruta de /api mal escrita o
+  // renombrada (ej. un frontend viejo llamando un endpoint que ya se movió)
+  // caía en el catch-all del SPA de abajo y devolvía el index.html completo
+  // con status 200 — el frontend lo tomaba como respuesta "exitosa" (sin
+  // ser JSON, cae a .blob()) y tronaba después al intentar usarlo como
+  // arreglo, con pantalla en blanco y sin ningún error de red visible.
+  apiRouter.use((_req, res) => {
+    res.status(404).json({ error: "Ruta de API no encontrada." });
+  });
   app.use("/api", apiRouter);
 
   // Sirve el frontend ya compilado (`npm run build --workspace=web`) desde

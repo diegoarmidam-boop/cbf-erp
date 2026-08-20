@@ -8,7 +8,7 @@ export function useActividades() {
 
   useEffect(() => {
     api
-      .get<Actividad[]>("/nomina/actividades")
+      .get<Actividad[]>("/actividades/definiciones")
       .then(setActividades)
       .finally(() => setCargando(false));
   }, []);

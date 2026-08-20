@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { requireAuth, requirePermission } from "../../middleware/auth.js";
 import { prisma } from "../../core/db.js";
-import { mensajeErrorValidacion, unoSolo } from "../../core/http.js";
+import { mensajeErrorCaptura, mensajeErrorValidacion, unoSolo } from "../../core/http.js";
 import { crearEquipo, editarEquipo, listarEquipos, sugerirFolio } from "./equipos.js";
 
 export const equiposRouter = Router();
@@ -49,7 +49,7 @@ equiposRouter.post("/", requirePermission("equipos", "capturar"), async (req, re
   try {
     res.status(201).json(await crearEquipo(parsed.data));
   } catch (err) {
-    res.status(400).json({ error: err instanceof Error ? err.message : "No se pudo crear." });
+    res.status(400).json({ error: mensajeErrorCaptura(err) });
   }
 });
 
@@ -67,7 +67,11 @@ equiposRouter.patch("/:id", requirePermission("equipos", "editar"), async (req, 
     res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
     return;
   }
-  res.json(await editarEquipo(unoSolo(req.params.id), parsed.data));
+  try {
+    res.json(await editarEquipo(unoSolo(req.params.id), parsed.data));
+  } catch (err) {
+    res.status(400).json({ error: mensajeErrorCaptura(err) });
+  }
 });
 
 const activoSchema = z.object({ activo: z.boolean() });

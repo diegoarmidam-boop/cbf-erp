@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { Rol } from "@prisma/client";
 import { requireAuth, requirePermission, requirePermissionAny, huertaIdDeAlcance } from "../../middleware/auth.js";
 import { tienePermiso } from "../../core/permissions.js";
-import { mensajeErrorValidacion, unoSolo } from "../../core/http.js";
+import { mensajeErrorCaptura, mensajeErrorValidacion, unoSolo } from "../../core/http.js";
 import { prisma } from "../../core/db.js";
 import { diaEstaCerrado } from "../nomina/captura.js";
 import {
@@ -117,7 +117,7 @@ granularRouter.post("/", requirePermission("fertilizantes", "capturar"), async (
       return;
     }
     if (err instanceof Error) {
-      res.status(400).json({ error: err.message });
+      res.status(400).json({ error: mensajeErrorCaptura(err) });
       return;
     }
     throw err;
@@ -145,7 +145,7 @@ granularRouter.patch("/:id", requirePermission("fertilizantes", "capturar"), asy
       return;
     }
     if (err instanceof Error) {
-      res.status(400).json({ error: err.message });
+      res.status(400).json({ error: mensajeErrorCaptura(err) });
       return;
     }
     throw err;
@@ -211,7 +211,7 @@ granularRouter.post("/:id/realizada", requirePermissionAny(["fertilizantes", "ca
     res.status(201).json(realizada);
   } catch (err) {
     if (err instanceof Error) {
-      res.status(400).json({ error: err.message });
+      res.status(400).json({ error: mensajeErrorCaptura(err) });
       return;
     }
     throw err;
@@ -244,7 +244,7 @@ granularRouter.patch("/realizada/:realizadaId", requirePermission("fertilizantes
     res.json(await editarRealizadaGranular(realizadaId, parsed.data, req.usuario!.usuarioId));
   } catch (err) {
     if (err instanceof Error) {
-      res.status(400).json({ error: err.message });
+      res.status(400).json({ error: mensajeErrorCaptura(err) });
       return;
     }
     throw err;

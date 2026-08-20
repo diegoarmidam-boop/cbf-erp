@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { Rol } from "@prisma/client";
 import { requireAuth, requirePermission, requirePermissionAny, huertaIdDeAlcance } from "../../middleware/auth.js";
 import { tienePermiso } from "../../core/permissions.js";
-import { mensajeErrorValidacion, unoSolo } from "../../core/http.js";
+import { mensajeErrorCaptura, mensajeErrorValidacion, unoSolo } from "../../core/http.js";
 import { prisma } from "../../core/db.js";
 import { diaEstaCerrado } from "../nomina/captura.js";
 import {
@@ -158,7 +158,7 @@ aplicacionesRouter.post("/", requirePermission("aplicaciones", "capturar"), asyn
       return;
     }
     if (err instanceof Error) {
-      res.status(400).json({ error: err.message });
+      res.status(400).json({ error: mensajeErrorCaptura(err) });
       return;
     }
     throw err;
@@ -184,7 +184,7 @@ aplicacionesRouter.patch("/:id", requirePermission("aplicaciones", "capturar"), 
       return;
     }
     if (err instanceof Error) {
-      res.status(400).json({ error: err.message });
+      res.status(400).json({ error: mensajeErrorCaptura(err) });
       return;
     }
     throw err;
@@ -262,7 +262,7 @@ aplicacionesRouter.post("/:id/realizada", requirePermissionAny(["aplicaciones", 
     res.status(201).json(realizada);
   } catch (err) {
     if (err instanceof Error) {
-      res.status(400).json({ error: err.message });
+      res.status(400).json({ error: mensajeErrorCaptura(err) });
       return;
     }
     throw err;
@@ -293,7 +293,7 @@ aplicacionesRouter.patch("/realizada/:realizadaId", requirePermission("aplicacio
     res.json(await editarRealizada(realizadaId, parsed.data, req.usuario!.usuarioId));
   } catch (err) {
     if (err instanceof Error) {
-      res.status(400).json({ error: err.message });
+      res.status(400).json({ error: mensajeErrorCaptura(err) });
       return;
     }
     throw err;

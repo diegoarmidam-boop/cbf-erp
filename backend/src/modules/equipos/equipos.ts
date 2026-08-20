@@ -35,6 +35,11 @@ export async function crearEquipo(input: AltaEquipoInput) {
   if (!input.folio.startsWith(`${prefijoEsperado}-`)) {
     throw new Error(`El folio de un(a) ${input.tipo} debe empezar con "${prefijoEsperado}-".`);
   }
+  // Operador designado exclusivo de AF (16-ago-2026): un implemento no
+  // tiene operador propio, depende del tractor al que se conecta.
+  if (input.tipo === "implemento" && input.operadorDesignadoId) {
+    throw new Error("Un Implemento no lleva Operador designado — depende del tractor al que se conecte.");
+  }
   return prisma.equipo.create({ data: input });
 }
 
@@ -46,8 +51,14 @@ export interface EditarEquipoInput {
   operadorDesignadoId?: string | null;
 }
 
-export function editarEquipo(id: string, input: EditarEquipoInput) {
+export async function editarEquipo(id: string, input: EditarEquipoInput) {
   // tipo y folio no se editan aquí — cambiar de serie (AF/IA) o de folio
   // formalmente es dar de baja y alta de nuevo, no una corrección de datos.
+  if (input.operadorDesignadoId) {
+    const equipo = await prisma.equipo.findUniqueOrThrow({ where: { id } });
+    if (equipo.tipo === "implemento") {
+      throw new Error("Un Implemento no lleva Operador designado — depende del tractor al que se conecte.");
+    }
+  }
   return prisma.equipo.update({ where: { id }, data: input });
 }

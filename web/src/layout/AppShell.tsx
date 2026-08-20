@@ -3,6 +3,7 @@ import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import { MODULOS_CONSTRUIDOS, moduloVisible } from "../lib/modulos";
 import { api } from "../lib/api";
+import { ErrorBoundary } from "../components/ErrorBoundary";
 import type { Notificacion } from "../lib/types";
 
 export default function AppShell() {
@@ -157,7 +158,12 @@ export default function AppShell() {
       </aside>
 
       <main className="app-main" style={{ flex: 1, overflow: "auto", padding: 24, minWidth: 0 }}>
-        <Outlet />
+        {/* key=pathname: si esta pantalla truena, navegar a otra (el menú
+            sigue visible aquí afuera) debe reintentar de cero en vez de
+            seguir mostrando el mensaje de error de la pantalla anterior. */}
+        <ErrorBoundary key={location.pathname}>
+          <Outlet />
+        </ErrorBoundary>
       </main>
     </div>
   );
