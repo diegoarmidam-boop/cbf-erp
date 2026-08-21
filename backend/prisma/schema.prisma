@@ -433,6 +433,22 @@ model ConfigNomina {
   valor String
 }
 
+// Switch de comunicación por módulo (bloque de arquitectura, 20-ago-2026):
+// herramienta de desarrollo — cuando `comunicacionActiva` es false, el
+// backend deja de disparar las cascadas automáticas que salen de ese
+// módulo hacia los demás (mano de obra a Nómina, salida de Almacén, uso
+// diario de Equipos, auto-orden a Compras, etc.), sin apagar el módulo en
+// sí ni borrar nada — el dato correspondiente en el módulo destino queda
+// abierto para capturarse a mano con la misma estructura de siempre. Todos
+// los módulos tienen su fila desde el arranque (ver seed), aunque hoy solo
+// algunos generen cascada. Auditado automáticamente por el extension de
+// Prisma en core/db.ts (ver MODELOS_AUDITADOS) — no necesita bitácora
+// propia, ya se aprovecha AuditoriaLog.
+model ModuloConfig {
+  modulo             String  @id
+  comunicacionActiva Boolean @default(true)
+}
+
 // Cuadrillas — con nombre persistente (reutilizadas semana a semana) o
 // armadas el mismo día sin nombre fijo (persistente=false).
 // Catálogo global (9.11) — un grupo de pago NO está asociado a ninguna
@@ -800,6 +816,33 @@ model IngredienteActivo {
   id     String  @id @default(uuid())
   nombre String  @unique
   activo Boolean @default(true)
+
+  // Producto preferido y sustitutos autorizados (9.15, 20-ago-2026): a
+  // nivel empresa, no por Huerta. No cambia el FIFO de consumo (eso sigue
+  // siendo por antigüedad dentro del mismo Ingrediente Activo) — esto solo
+  // homologa qué se compra cuando el preferido no está disponible con el
+  // proveedor. Solo Director General/Gerente Técnico de Producción lo
+  // administran (mismo permiso "almacen_regulado"/autoriza que ya existe
+  // para autorizar productos).
+  productoPreferidoId String?
+  productoPreferido   Producto?                    @relation("ProductoPreferidoDe", fields: [productoPreferidoId], references: [id])
+  sustitutos          IngredienteActivoSustituto[]
+}
+
+// Lista ordenada por prioridad — `orden` bajo = se prueba primero cuando el
+// preferido no está disponible. Solo se autoriza un sustituto si tiene la
+// misma dosificación que el preferido (regla de negocio, no validada por
+// código — no hay conversión de dosis en Aplicaciones/Fertilizantes).
+model IngredienteActivoSustituto {
+  id                  String            @id @default(uuid())
+  ingredienteActivoId String
+  ingredienteActivo   IngredienteActivo @relation(fields: [ingredienteActivoId], references: [id], onDelete: Cascade)
+  productoId          String
+  producto            Producto          @relation("ProductoSustitutoDe", fields: [productoId], references: [id])
+  orden               Int
+
+  @@unique([ingredienteActivoId, productoId])
+  @@index([ingredienteActivoId])
 }
 
 model Contenedor {
@@ -831,6 +874,8 @@ model Producto {
   fertirriegoProductos           FertirriegoProgramacionProducto[]
   riegoRegistroDiarioProductos   RiegoRegistroDiarioProducto[]
   comparacionItems               ComparacionItem[]
+  preferidoDe                    IngredienteActivo[]              @relation("ProductoPreferidoDe")
+  sustitutoDe                    IngredienteActivoSustituto[]      @relation("ProductoSustitutoDe")
 
   @@index([categoria])
 }

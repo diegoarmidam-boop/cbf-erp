@@ -163,8 +163,8 @@ export default function Ordenes() {
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         {ordenes.map((o) => (
           <div key={o.id} className="card">
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-              <div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 10 }}>
+              <div style={{ minWidth: 0, flex: "1 1 220px" }}>
                 <span className={`tag ${tagEstado(o.estado)}`}>{ETIQUETAS_ESTADO[o.estado]}</span>{" "}
                 <span className="tag tag-neutral">{o.origen}</span>
                 <div style={{ fontSize: 13, fontWeight: 600, marginTop: 6 }}>
@@ -184,7 +184,7 @@ export default function Ordenes() {
                 )}
               </div>
 
-              <div style={{ display: "flex", gap: 6 }}>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                 {o.estado === "pendiente_autorizar" && (
                   <>
                     <button className="btn-primary" onClick={() => autorizar(o.id)}>

@@ -345,6 +345,20 @@ export interface CatalogoAbiertoItem {
   activo: boolean;
 }
 
+export interface IngredienteActivoSustituto {
+  id: string;
+  productoId: string;
+  producto: Producto;
+  orden: number;
+}
+
+export interface PreferenciaIngredienteActivo {
+  ingredienteActivoId: string;
+  ingredienteActivoNombre: string;
+  productoPreferido: Producto | null;
+  sustitutos: IngredienteActivoSustituto[];
+}
+
 export interface ProductoLote {
   id: string;
   lote: string;

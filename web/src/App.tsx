@@ -26,7 +26,9 @@ import AlmacenLayout from "./pages/almacen/AlmacenLayout";
 import Inventario from "./pages/almacen/Inventario";
 import Movimientos from "./pages/almacen/Movimientos";
 import AlmacenLocalPage from "./pages/almacen/AlmacenLocalPage";
+import Preferencias from "./pages/almacen/Preferencias";
 import Notificaciones from "./pages/Notificaciones";
+import ConfiguracionSistema from "./pages/ConfiguracionSistema";
 import ComprasLayout from "./pages/compras/ComprasLayout";
 import Ordenes from "./pages/compras/Ordenes";
 import Proveedores from "./pages/compras/Proveedores";
@@ -69,6 +71,7 @@ export default function App() {
           >
             <Route path="/" element={<Navigate to="/nomina" replace />} />
             <Route path="/notificaciones" element={<Notificaciones />} />
+            <Route path="/configuracion-sistema" element={<ConfiguracionSistema />} />
 
             <Route path="/nomina" element={<NominaLayout />}>
               <Route index element={<Navigate to="captura" replace />} />
@@ -104,6 +107,7 @@ export default function App() {
               <Route path="inventario" element={<Inventario />} />
               <Route path="movimientos" element={<Movimientos />} />
               <Route path="local" element={<AlmacenLocalPage />} />
+              <Route path="preferencias" element={<Preferencias />} />
             </Route>
 
             <Route path="/compras" element={<ComprasLayout />}>

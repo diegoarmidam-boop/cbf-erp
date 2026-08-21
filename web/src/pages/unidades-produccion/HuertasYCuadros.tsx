@@ -178,7 +178,7 @@ export default function HuertasYCuadros() {
       {huertaId && (
         <>
           {area && (
-            <div style={{ display: "flex", gap: 12, marginBottom: 16 }}>
+            <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
               <div className="kpi-card">
                 <div className="label">Área efectiva</div>
                 <div className="value">{area.areaEfectiva.toFixed(2)} ha</div>

@@ -57,7 +57,11 @@ export default function ReporteSemanal() {
 
   return (
     <div>
-      <div style={{ display: "flex", gap: 12, marginBottom: 16 }}>
+      {/* 4.2 (20-ago-2026): sin flexWrap, esta fila de 4 tarjetas era la
+          causa real de "la tabla se corta" — no cabía en un celular y
+          arrastraba a todo .app-main a un scroll horizontal confuso que
+          movía título, pestañas y tabla juntos en vez de solo la tabla. */}
+      <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
         <div className="kpi-card">
           <div className="label">Periodo</div>
           <div className="value" style={{ fontSize: 14 }}>

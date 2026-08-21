@@ -50,6 +50,12 @@ const MODELOS_AUDITADOS = new Set([
   "AnalisisLaboratorio",
   "RiegoRegistroDiario",
 ]);
+// ModuloConfig NO entra aquí: su llave primaria es `modulo` (string), no
+// `id` — este extension solo sabe leer `resultado.id`/`valorAnterior.id`
+// (mismo motivo por el que ConfigNomina tampoco está en esta lista), así
+// que quedaría auditado en silencio (sin error, pero sin fila real en
+// AuditoriaLog). Su bitácora se escribe explícito en
+// core/moduloComunicacion.ts en vez de depender de este mecanismo genérico.
 
 const ACCIONES_ESCRITURA = new Set(["create", "update", "delete", "upsert"]);
 

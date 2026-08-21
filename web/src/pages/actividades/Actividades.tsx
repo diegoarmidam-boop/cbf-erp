@@ -457,14 +457,33 @@ export default function Actividades() {
                           <tr>
                             <td>{formatearFecha(r.fechaReal)}</td>
                             <td>
-                              {r.lineas
-                                .map((l) => {
-                                  const gente = l.personas.map((p) => `${p.personal.nombreCompleto} (${p.horas}h)`).join(", ");
-                                  if (l.tipo === "gente") return `${ETIQUETAS_TIPO[l.tipo]}: ${gente || "—"}`;
-                                  const op = l.operador ? `${l.operador.nombreCompleto} (${l.operadorHoras}h)` : "—";
-                                  return `${ETIQUETAS_TIPO[l.tipo]}: ${op}${gente ? ` + ${gente}` : ""}`;
-                                })
-                                .join(" · ") || "—"}
+                              {/* 4.3 (20-ago-2026): antes era un solo string largo unido con
+                                  "," y "·" — en la columna angosta de la tabla, los nombres se
+                                  partían en varias líneas sin ningún corte visual claro entre
+                                  una persona y otra. Una fila por línea, con las personas en
+                                  una lista propia, se lee de un vistazo aunque la columna sea
+                                  angosta. */}
+                              {r.lineas.length === 0 ? (
+                                "—"
+                              ) : (
+                                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                                  {r.lineas.map((l, i) => (
+                                    <div key={i}>
+                                      <div style={{ fontWeight: 600, fontSize: 11 }}>{ETIQUETAS_TIPO[l.tipo]}</div>
+                                      <ul style={{ margin: "2px 0 0", paddingLeft: 16 }}>
+                                        {l.tipo !== "gente" && (
+                                          <li>{l.operador ? `${l.operador.nombreCompleto} (${l.operadorHoras}h)` : "—"}</li>
+                                        )}
+                                        {l.personas.map((p) => (
+                                          <li key={p.personal.id}>
+                                            {p.personal.nombreCompleto} ({p.horas}h)
+                                          </li>
+                                        ))}
+                                      </ul>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
                             </td>
                             <td>{r.cuadros.map((c) => `${c.cuadro.nombre} (${c.hectareas} ha)`).join(", ") || "—"}</td>
                             <td>

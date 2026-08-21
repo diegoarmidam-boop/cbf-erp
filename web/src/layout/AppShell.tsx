@@ -146,6 +146,49 @@ export default function AppShell() {
               {m.nombre}
             </NavLink>
           ))}
+
+          {/* Configuración del sistema (20-ago-2026): la ausencia es la
+              señal (bloque 4) — para cualquier rol que no sea Director
+              General/Encargado de Sistemas, este link ni se renderiza. El
+              candado real vive en el backend, esto solo evita que aparezca
+              en el menú. */}
+          {(usuario?.rol === "director_general" || usuario?.rol === "encargado_sistemas") && (
+            <>
+              <div style={{ height: 1, background: "var(--border)", margin: "6px 0" }} />
+              <NavLink
+                to="/configuracion-sistema"
+                style={({ isActive }) => ({
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  padding: "8px 10px",
+                  borderRadius: "var(--radius-sm)",
+                  textDecoration: "none",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  color: isActive ? "var(--pink)" : "var(--ink)",
+                  background: isActive ? "var(--pink-soft)" : "transparent",
+                })}
+              >
+                <span
+                  style={{
+                    width: 22,
+                    height: 22,
+                    borderRadius: 6,
+                    background: "var(--mod-equipos-bg)",
+                    color: "var(--mod-equipos-fg)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: 12,
+                  }}
+                >
+                  ⚙️
+                </span>
+                Configuración del sistema
+              </NavLink>
+            </>
+          )}
         </nav>
 
         <div style={{ marginTop: "auto", fontSize: 12, color: "var(--ink-soft)" }}>

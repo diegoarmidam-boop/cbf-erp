@@ -4,6 +4,7 @@ const TABS = [
   { to: "inventario", label: "Inventario" },
   { to: "movimientos", label: "Movimientos" },
   { to: "local", label: "Almacén Local" },
+  { to: "preferencias", label: "Preferido/Sustitutos" },
 ];
 
 export default function AlmacenLayout() {

@@ -8,6 +8,7 @@ import { aActividadCalc } from "../nomina/util.js";
 import { diaEstaCerrado } from "../nomina/captura.js";
 import { registrarUsoDiarioAutomaticoTx, borrarUsoDiarioDeLineasTx } from "../equipos/uso-diario.js";
 import { listarEquipos } from "../equipos/equipos.js";
+import { comunicacionActiva } from "../../core/moduloComunicacion.js";
 
 /**
  * Corrección de fondo (9.4, 15-ago-2026): el alcance inicial del módulo
@@ -316,7 +317,16 @@ async function crearLineasYNomina(
   tarifaAplicada: number,
   registradoPorId: string
 ) {
+  // Switch de comunicación por módulo (20-ago-2026): con "actividades"
+  // apagado, el reporte de avance se sigue guardando igual (Cuadros,
+  // líneas, quién y cuántas horas) — solo se detienen las cascadas hacia
+  // Nómina y Uso Diario de Equipos. La mano de obra y el uso de tractor
+  // quedan abiertos para capturarse a mano en esos módulos, con la misma
+  // estructura de siempre.
+  const cascadaActiva = await comunicacionActiva("actividades");
+
   async function pagar(personalId: string, horas: number) {
+    if (!cascadaActiva) return;
     await tx.registroNomina.create({
       data: {
         fecha,
@@ -348,7 +358,9 @@ async function crearLineasYNomina(
 
     if (l.tipo !== "gente" && l.operadorId && l.operadorHoras) {
       await pagar(l.operadorId, l.operadorHoras);
-      await registrarUsoDiarioAutomaticoTx(tx, l.tractorId!, fecha, l.operadorId, l.operadorHoras, huertaId, lineaCreada.id, "automatico_actividad");
+      if (cascadaActiva) {
+        await registrarUsoDiarioAutomaticoTx(tx, l.tractorId!, fecha, l.operadorId, l.operadorHoras, huertaId, lineaCreada.id, "automatico_actividad");
+      }
     }
     for (const p of l.personas) {
       await pagar(p.personalId, p.horas);

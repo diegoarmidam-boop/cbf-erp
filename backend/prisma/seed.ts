@@ -5,6 +5,7 @@ import { hashPassword } from "../src/core/auth.js";
 import { PERSONAL_SEED } from "./seed-data/personal.js";
 import { ACTIVIDADES_SEED } from "./seed-data/actividades.js";
 import { PERMISOS_SEED } from "./seed-data/permisos.js";
+import { MODULOS_CON_SWITCH } from "../src/core/moduloComunicacion.js";
 
 // Seed sin capa de auditoría (usa el PrismaClient base, no el extendido de
 // src/core/db.ts) — no hay un usuario "capturando" todavía, es carga inicial.
@@ -77,6 +78,20 @@ async function seedConfigNomina() {
   console.log("ConfigNomina: defaults de corte semanal y periodo de gracia cargados.");
 }
 
+// Switch de comunicación por módulo (20-ago-2026): todos arrancan
+// encendidos — es herramienta de desarrollo para apagar deliberadamente,
+// nunca un estado por default.
+async function seedModuloConfig() {
+  for (const modulo of MODULOS_CON_SWITCH) {
+    await prisma.moduloConfig.upsert({
+      where: { modulo },
+      update: {},
+      create: { modulo, comunicacionActiva: true },
+    });
+  }
+  console.log(`ModuloConfig: ${MODULOS_CON_SWITCH.length} módulos cargados, todos con comunicación activa.`);
+}
+
 async function seedPermisos() {
   for (const p of PERMISOS_SEED) {
     await prisma.permisoModulo.upsert({
@@ -120,6 +135,7 @@ async function main() {
   await seedPersonal();
   await seedActividades();
   await seedConfigNomina();
+  await seedModuloConfig();
   await seedPermisos();
   await seedUsuarioBootstrap();
 }

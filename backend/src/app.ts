@@ -18,6 +18,7 @@ import { equiposModuleRouter } from "./modules/equipos/index.js";
 import { aplicacionesRouter } from "./modules/aplicaciones/index.js";
 import { fertilizantesModuleRouter } from "./modules/fertilizantes/index.js";
 import { riegoRouter } from "./modules/riego/index.js";
+import { configuracionRouter } from "./modules/configuracion/configuracion.routes.js";
 
 export function createApp() {
   const app = express();
@@ -49,6 +50,7 @@ export function createApp() {
   apiRouter.use("/aplicaciones", aplicacionesRouter);
   apiRouter.use("/fertilizantes", fertilizantesModuleRouter);
   apiRouter.use("/riego", riegoRouter);
+  apiRouter.use("/configuracion", configuracionRouter);
   // Cierre de la API (16-ago-2026): sin esto, una ruta de /api mal escrita o
   // renombrada (ej. un frontend viejo llamando un endpoint que ya se movió)
   // caía en el catch-all del SPA de abajo y devolvía el index.html completo
