@@ -3,10 +3,13 @@ import { api, ApiError } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
 import { useHuertas } from "../../lib/useHuertas";
 import { usePersonal } from "../../lib/usePersonal";
+import { useRecetas } from "../../lib/useRecetas";
 import type { Aplicacion, AplicacionRealizadaLinea, ConcentracionUnidad, Cuadro, Equipo, ModalidadAplicacion, Producto } from "../../lib/types";
 import FechaInput from "../../components/FechaInput";
 import { formatearFecha, formatearInstante } from "../../lib/fecha";
 import { presentacionTexto } from "../../lib/producto";
+import RecetarioPanel, { ROLES_PUEDEN_RECETAS } from "../../components/RecetarioPanel";
+import MezclaPorTanque from "../../components/MezclaPorTanque";
 
 const ETIQUETAS_ESTADO: Record<string, string> = {
   programada: "Programada",
@@ -103,10 +106,13 @@ export default function Aplicaciones() {
   const { usuario } = useAuth();
   const { huertas } = useHuertas();
   const { personal } = usePersonal();
+  const { recetas, cargando: cargandoRecetas, refetch: refetchRecetas } = useRecetas("aplicaciones");
+  const puedeAjustarReceta = usuario ? ROLES_PUEDEN_RECETAS.includes(usuario.rol) : false;
 
   const [aplicaciones, setAplicaciones] = useState<Aplicacion[]>([]);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [mostrarRecetario, setMostrarRecetario] = useState(false);
 
   // ---- Programar ----
   const [mostrarForm, setMostrarForm] = useState(false);
@@ -124,6 +130,13 @@ export default function Aplicaciones() {
   // Editar Paso 1 (15-ago-2026): solo mientras no haya reportes de avance —
   // reutiliza el mismo formulario de arriba, sin poder cambiar de Huerta.
   const [editandoProgramadaId, setEditandoProgramadaId] = useState<string | null>(null);
+
+  // ---- Recetario (20-ago-2026) ----
+  const [recetaId, setRecetaId] = useState("");
+  const [capacidadTanque, setCapacidadTanque] = useState("");
+  // Si el rol autorizado ajustó una dosis respecto a la receta elegida, se
+  // pregunta antes de guardar — no en cada tecla, para no interrumpir.
+  const [confirmandoDesvioReceta, setConfirmandoDesvioReceta] = useState(false);
 
   // ---- Equipos para líneas de Turbina/Aguilón ----
   const [tractores, setTractores] = useState<Equipo[]>([]);
@@ -187,10 +200,34 @@ export default function Aplicaciones() {
     setProductosForm((prev) => (prev.length === 1 ? prev : prev.filter((_, i) => i !== index)));
   }
 
-  async function programar(e: FormEvent) {
-    e.preventDefault();
-    setError(null);
-    const payload = {
+  // Recetario (20-ago-2026): precarga productos + litros/ha de la receta
+  // elegida — el campo queda editable, no bloqueado (el candado real de
+  // quién puede tocarlo es de rol, ver `disabled` en los inputs de abajo).
+  function elegirReceta(id: string) {
+    setRecetaId(id);
+    if (!id) return;
+    const receta = recetas.find((r) => r.id === id);
+    if (!receta) return;
+    setLitrosMezclaPorHa(String(receta.litrosPorHa));
+    setProductosForm(receta.productos.map((p) => ({ productoId: p.productoId, concentracionValor: String(p.concentracionValor), concentracionUnidad: p.concentracionUnidad })));
+  }
+
+  // ¿La dosis actual del formulario ya no coincide con la receta elegida?
+  // Determina si hace falta preguntar "solo esta vez" vs "receta original".
+  function huboDesvioDeReceta(): boolean {
+    if (!recetaId) return false;
+    const receta = recetas.find((r) => r.id === recetaId);
+    if (!receta) return false;
+    if (Number(receta.litrosPorHa) !== Number(litrosMezclaPorHa)) return true;
+    if (receta.productos.length !== productosForm.length) return true;
+    return receta.productos.some((rp) => {
+      const actual = productosForm.find((p) => p.productoId === rp.productoId);
+      return !actual || Number(rp.concentracionValor) !== Number(actual.concentracionValor) || rp.concentracionUnidad !== actual.concentracionUnidad;
+    });
+  }
+
+  function construirPayload(actualizarRecetaOriginal?: boolean) {
+    return {
       cuadroIds,
       productos: productosForm.map((p) => ({
         productoId: p.productoId,
@@ -201,24 +238,51 @@ export default function Aplicaciones() {
       litrosMezclaPorHa: Number(litrosMezclaPorHa),
       fechaInicio,
       fechaFin,
+      recetaId: recetaId || undefined,
+      capacidadTanque: capacidadTanque ? Number(capacidadTanque) : undefined,
+      actualizarRecetaOriginal,
     };
+  }
+
+  function limpiarFormProgramar() {
+    setMostrarForm(false);
+    setEditandoProgramadaId(null);
+    setCuadroIds([]);
+    setProductosForm([productoFormVacio()]);
+    setLitrosMezclaPorHa("");
+    setFechaInicio(hoyISO());
+    setFechaFin(hoyISO());
+    setRecetaId("");
+    setCapacidadTanque("");
+  }
+
+  async function enviarProgramacion(actualizarRecetaOriginal?: boolean) {
+    setError(null);
+    setConfirmandoDesvioReceta(false);
+    const payload = construirPayload(actualizarRecetaOriginal);
     try {
       if (editandoProgramadaId) {
         await api.patch(`/aplicaciones/${editandoProgramadaId}`, payload);
       } else {
         await api.post("/aplicaciones", { huertaId, ...payload });
       }
-      setMostrarForm(false);
-      setEditandoProgramadaId(null);
-      setCuadroIds([]);
-      setProductosForm([productoFormVacio()]);
-      setLitrosMezclaPorHa("");
-      setFechaInicio(hoyISO());
-      setFechaFin(hoyISO());
+      limpiarFormProgramar();
       cargar();
+      if (actualizarRecetaOriginal) refetchRecetas();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "No se pudo guardar la aplicación.");
     }
+  }
+
+  function programar(e: FormEvent) {
+    e.preventDefault();
+    // Solo pregunta si de verdad puede ajustar la receta y de verdad ajustó
+    // algo — si no hay receta elegida, o no cambió nada, se guarda directo.
+    if (recetaId && puedeAjustarReceta && huboDesvioDeReceta()) {
+      setConfirmandoDesvioReceta(true);
+      return;
+    }
+    enviarProgramacion(false);
   }
 
   function iniciarEdicionProgramada(a: Aplicacion) {
@@ -232,6 +296,8 @@ export default function Aplicaciones() {
     setLitrosMezclaPorHa(String(a.litrosMezclaPorHa));
     setFechaInicio(a.fechaInicio.slice(0, 10));
     setFechaFin(a.fechaFin.slice(0, 10));
+    setRecetaId(a.recetaId ?? "");
+    setCapacidadTanque(a.capacidadTanque ?? "");
     setError(null);
     setMostrarForm(true);
   }
@@ -382,7 +448,7 @@ export default function Aplicaciones() {
     <div>
       <h2 style={{ marginBottom: 16 }}>Aplicaciones</h2>
 
-      <div style={{ marginBottom: 14 }}>
+      <div style={{ marginBottom: 14, display: "flex", gap: 10 }}>
         <button
           className="btn-primary"
           onClick={() => {
@@ -397,7 +463,14 @@ export default function Aplicaciones() {
         >
           {mostrarForm ? "Cancelar" : "+ Programar aplicación"}
         </button>
+        <button className="btn-secondary" onClick={() => setMostrarRecetario((v) => !v)}>
+          {mostrarRecetario ? "Ocultar Recetario" : "Recetario"}
+        </button>
       </div>
+
+      {mostrarRecetario && (
+        <RecetarioPanel modulo="aplicaciones" productos={productos} recetas={recetas} cargando={cargandoRecetas} refetch={refetchRecetas} />
+      )}
 
       {mostrarForm && (
         <form onSubmit={programar} className="card" style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 18 }}>
@@ -414,6 +487,17 @@ export default function Aplicaciones() {
                 {huertas.map((h) => (
                   <option key={h.id} value={h.id}>
                     {h.nombre}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              Usar receta (opcional)
+              <select value={recetaId} onChange={(e) => elegirReceta(e.target.value)}>
+                <option value="">Ninguna — programar libre</option>
+                {recetas.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.nombre}
                   </option>
                 ))}
               </select>
@@ -457,12 +541,22 @@ export default function Aplicaciones() {
 
           <div className="field">
             Productos (mismo tanque — cada uno con su propia concentración)
+            {recetaId && !puedeAjustarReceta && (
+              <div style={{ fontSize: 11, color: "var(--ink-soft)", marginBottom: 4 }}>
+                Receta seleccionada — tu rol no puede ajustar la dosis, se usa tal cual está guardada.
+              </div>
+            )}
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {productosForm.map((p, i) => (
                 <div key={i} style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
                   <label className="field">
                     Producto (agroquímico autorizado)
-                    <select value={p.productoId} onChange={(e) => actualizarProductoForm(i, { productoId: e.target.value })} required>
+                    <select
+                      value={p.productoId}
+                      onChange={(e) => actualizarProductoForm(i, { productoId: e.target.value })}
+                      required
+                      disabled={!!recetaId && !puedeAjustarReceta}
+                    >
                       <option value="">Selecciona…</option>
                       {productos.map((prod) => (
                         <option key={prod.id} value={prod.id}>
@@ -480,17 +574,22 @@ export default function Aplicaciones() {
                       value={p.concentracionValor}
                       onChange={(e) => actualizarProductoForm(i, { concentracionValor: e.target.value })}
                       required
+                      disabled={!!recetaId && !puedeAjustarReceta}
                     />
                   </label>
                   <label className="field">
                     Unidad
-                    <select value={p.concentracionUnidad} onChange={(e) => actualizarProductoForm(i, { concentracionUnidad: e.target.value as ConcentracionUnidad })}>
+                    <select
+                      value={p.concentracionUnidad}
+                      onChange={(e) => actualizarProductoForm(i, { concentracionUnidad: e.target.value as ConcentracionUnidad })}
+                      disabled={!!recetaId && !puedeAjustarReceta}
+                    >
                       <option value="ml_l">ml/L</option>
                       <option value="g_l">g/L</option>
                       <option value="kg_l">kg/L</option>
                     </select>
                   </label>
-                  {productosForm.length > 1 && (
+                  {productosForm.length > 1 && (!recetaId || puedeAjustarReceta) && (
                     <button type="button" className="btn-secondary" onClick={() => quitarProductoForm(i)}>
                       Quitar
                     </button>
@@ -498,15 +597,28 @@ export default function Aplicaciones() {
                 </div>
               ))}
             </div>
-            <button type="button" className="btn-secondary" style={{ marginTop: 8, width: "fit-content" }} onClick={agregarProductoForm}>
-              + Otro producto
-            </button>
+            {(!recetaId || puedeAjustarReceta) && (
+              <button type="button" className="btn-secondary" style={{ marginTop: 8, width: "fit-content" }} onClick={agregarProductoForm}>
+                + Otro producto
+              </button>
+            )}
           </div>
 
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
             <label className="field">
               Litros de mezcla / ha (un solo tanque para toda la mezcla)
-              <input type="number" step="0.0001" value={litrosMezclaPorHa} onChange={(e) => setLitrosMezclaPorHa(e.target.value)} required />
+              <input
+                type="number"
+                step="0.0001"
+                value={litrosMezclaPorHa}
+                onChange={(e) => setLitrosMezclaPorHa(e.target.value)}
+                required
+                disabled={!!recetaId && !puedeAjustarReceta}
+              />
+            </label>
+            <label className="field">
+              Capacidad del tanque/recipiente (L, opcional)
+              <input type="number" step="0.01" style={{ width: 140 }} value={capacidadTanque} onChange={(e) => setCapacidadTanque(e.target.value)} />
             </label>
             <label className="field">
               Fecha inicio
@@ -521,6 +633,28 @@ export default function Aplicaciones() {
             </button>
           </div>
         </form>
+      )}
+
+      {confirmandoDesvioReceta && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100 }}>
+          <div className="card" style={{ width: 420 }}>
+            <h3 style={{ marginBottom: 10 }}>Ajustaste la dosis de la receta</h3>
+            <p style={{ fontSize: 12.5, color: "var(--ink-soft)", marginBottom: 16 }}>
+              ¿Modificar solo para esta vez, o modificar la receta original para las próximas veces que se use?
+            </p>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
+              <button className="btn-secondary" onClick={() => setConfirmandoDesvioReceta(false)}>
+                Cancelar
+              </button>
+              <button className="btn-secondary" onClick={() => enviarProgramacion(false)}>
+                Solo esta vez
+              </button>
+              <button className="btn-primary" onClick={() => enviarProgramacion(true)}>
+                Modificar receta original
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {error && <div className="tag tag-danger" style={{ display: "block", padding: "8px 12px", marginBottom: 12 }}>{error}</div>}
@@ -553,6 +687,15 @@ export default function Aplicaciones() {
                     {a.litrosMezclaPorHa} L mezcla/ha · Sugerido: {ETIQUETAS_MODALIDAD[a.recursoSugerido]} · {formatearFecha(a.fechaInicio)} a{" "}
                     {formatearFecha(a.fechaFin)}
                   </div>
+                  {a.mezclaPorTanque && a.mezclaPorTanque.length > 0 && (
+                    <div style={{ marginTop: 8, maxWidth: 460 }}>
+                      <MezclaPorTanque
+                        mezcla={a.mezclaPorTanque}
+                        capacidadTanque={Number(a.capacidadTanque)}
+                        productos={a.productos.map((p) => ({ productoId: p.productoId, nombreComercial: p.producto.nombreComercial, concentracionUnidad: p.concentracionUnidad }))}
+                      />
+                    </div>
+                  )}
                   {a.realizadas.length > 0 && (
                     <div style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: 4 }}>
                       {(a.porcentajeAvance ?? 0).toFixed(1)}% avance · {a.horasHombreTotales ?? 0} horas-hombre totales · {a.realizadas.length}{" "}

@@ -1,8 +1,9 @@
-import { calcularCantidadTotal, tarifaEfectiva, type ConcentracionUnidad } from "@cbf/shared";
-import type { Prisma } from "@prisma/client";
+import { calcularCantidadTotal, calcularMezclaPorTanque, tarifaEfectiva, type ConcentracionUnidad } from "@cbf/shared";
+import type { Prisma, Rol } from "@prisma/client";
 import { prisma } from "../../core/db.js";
 import type { TransactionClient } from "../../core/db.js";
 import { productosAutorizados } from "../almacen/productos.js";
+import { actualizarDosisProductoEnReceta, obtenerReceta, ROLES_RECETAS } from "../recetario/recetario.js";
 import {
   ajustarCantidadProducto,
   confirmarEntregaComprometida,
@@ -77,6 +78,53 @@ export interface ProgramarAplicacionInput {
   litrosMezclaPorHa: number;
   fechaInicio: string;
   fechaFin: string;
+  // Recetario (20-ago-2026): recetaId es solo trazabilidad de "de dónde
+  // salió esta programación" — los productos/dosis reales a aplicar siguen
+  // viniendo de `productos`/`litrosMezclaPorHa` de arriba (precargados de la
+  // receta en el frontend, editables). capacidadTanque es opcional y
+  // universal — aplica con o sin receta, cualquier Aplicación con producto
+  // líquido por hectárea puede pedir el desglose por tanque.
+  recetaId?: string;
+  capacidadTanque?: number;
+  // Si viene una receta y el rol autorizado ajustó la dosis: además de usar
+  // la dosis nueva en esta programación, actualiza también la receta
+  // maestra para las próximas veces.
+  actualizarRecetaOriginal?: boolean;
+}
+
+export class RolNoPuedeAjustarRecetaError extends Error {
+  constructor() {
+    super("Tu rol solo puede usar esta receta tal cual está guardada — no puede cambiar la dosis. Pide a Dirección General o al Gerente Técnico de Producción que la ajuste.");
+  }
+}
+
+/**
+ * Recetario (20-ago-2026): valida que, si la programación viene de una
+ * receta y quien la captura NO es Director General/Gerente Técnico de
+ * Producción, la dosis (litros/ha compartido + concentración de cada
+ * producto) coincida EXACTO con lo guardado en la receta — el candado real
+ * vive aquí, no solo en que el frontend muestre el campo de solo lectura
+ * (cualquiera podría llamar la API directo). Devuelve la receta cargada
+ * para reutilizarla si aplica "actualizar receta original".
+ */
+async function validarUsoDeReceta(
+  recetaId: string,
+  usuarioRol: Rol,
+  litrosMezclaPorHa: number,
+  productos: ProductoAplicacionInput[]
+) {
+  const receta = await obtenerReceta(recetaId);
+  if (!ROLES_RECETAS.includes(usuarioRol)) {
+    const mismaAgua = Number(receta.litrosPorHa) === litrosMezclaPorHa;
+    const mismasDosis = receta.productos.every((rp) => {
+      const enviado = productos.find((p) => p.productoId === rp.productoId);
+      return enviado && Number(rp.concentracionValor) === enviado.concentracionValor && rp.concentracionUnidad === enviado.concentracionUnidad;
+    });
+    if (!mismaAgua || !mismasDosis || receta.productos.length !== productos.length) {
+      throw new RolNoPuedeAjustarRecetaError();
+    }
+  }
+  return receta;
 }
 
 /**
@@ -88,7 +136,7 @@ export interface ProgramarAplicacionInput {
  * requerir autorización adicional (ya la trae de quien programó). Cada
  * producto se autoriza/aparta/compra por separado, aunque se programen juntos.
  */
-export async function programarAplicacion(input: ProgramarAplicacionInput, creadoPorId: string) {
+export async function programarAplicacion(input: ProgramarAplicacionInput, creadoPorId: string, usuarioRol: Rol) {
   if (input.cuadroIds.length === 0) {
     throw new Error("Elige al menos un Cuadro.");
   }
@@ -99,6 +147,15 @@ export async function programarAplicacion(input: ProgramarAplicacionInput, cread
   for (const p of productos) {
     if (p.categoria !== "agroquimico" || !p.autorizado) {
       throw new ProductoNoAutorizadoAplicacionError();
+    }
+  }
+
+  if (input.recetaId) {
+    await validarUsoDeReceta(input.recetaId, usuarioRol, input.litrosMezclaPorHa, input.productos);
+    if (input.actualizarRecetaOriginal) {
+      for (const p of input.productos) {
+        await actualizarDosisProductoEnReceta(input.recetaId, p.productoId, p.concentracionValor, p.concentracionUnidad);
+      }
     }
   }
 
@@ -116,6 +173,8 @@ export async function programarAplicacion(input: ProgramarAplicacionInput, cread
         huertaId: input.huertaId,
         recursoSugerido: input.recursoSugerido,
         litrosMezclaPorHa: input.litrosMezclaPorHa,
+        recetaId: input.recetaId,
+        capacidadTanque: input.capacidadTanque,
         fechaInicio: fechaRef,
         fechaFin: new Date(input.fechaFin),
         hectareasTotalesProgramadas: hectareasTotales,
@@ -184,7 +243,7 @@ export class YaHayAvanceReportadoError extends Error {
  * Productos quitados de la edición se tratan como baja completa; productos
  * nuevos, como alta completa.
  */
-export async function editarAplicacionProgramada(aplicacionId: string, input: Omit<ProgramarAplicacionInput, "huertaId">, editadoPorId: string) {
+export async function editarAplicacionProgramada(aplicacionId: string, input: Omit<ProgramarAplicacionInput, "huertaId">, editadoPorId: string, usuarioRol: Rol) {
   if (input.cuadroIds.length === 0) throw new Error("Elige al menos un Cuadro.");
   if (!input.productos || input.productos.length === 0) throw new Error("Elige al menos un producto.");
 
@@ -200,6 +259,16 @@ export async function editarAplicacionProgramada(aplicacionId: string, input: Om
   const productosNuevos = await prisma.producto.findMany({ where: { id: { in: input.productos.map((p) => p.productoId) } } });
   for (const p of productosNuevos) {
     if (p.categoria !== "agroquimico" || !p.autorizado) throw new ProductoNoAutorizadoAplicacionError();
+  }
+
+  const recetaId = input.recetaId ?? aplicacion.recetaId ?? undefined;
+  if (recetaId) {
+    await validarUsoDeReceta(recetaId, usuarioRol, input.litrosMezclaPorHa, input.productos);
+    if (input.actualizarRecetaOriginal) {
+      for (const p of input.productos) {
+        await actualizarDosisProductoEnReceta(recetaId, p.productoId, p.concentracionValor, p.concentracionUnidad);
+      }
+    }
   }
 
   let hectareasTotales = 0;
@@ -256,6 +325,7 @@ export async function editarAplicacionProgramada(aplicacionId: string, input: Om
       data: {
         recursoSugerido: input.recursoSugerido,
         litrosMezclaPorHa: input.litrosMezclaPorHa,
+        capacidadTanque: input.capacidadTanque,
         fechaInicio: fechaRef,
         fechaFin: new Date(input.fechaFin),
         hectareasTotalesProgramadas: hectareasTotales,
@@ -297,10 +367,31 @@ type AplicacionConRealizadas = {
   estado: string;
   fechaCreacion: Date;
   hectareasTotalesProgramadas: Prisma.Decimal;
-  productos: { productoId: string; cantidadTotalCalculada: Prisma.Decimal }[];
+  litrosMezclaPorHa: Prisma.Decimal;
+  capacidadTanque: Prisma.Decimal | null;
+  productos: { productoId: string; cantidadTotalCalculada: Prisma.Decimal; concentracionValor: Prisma.Decimal; concentracionUnidad: ConcentracionUnidad }[];
   cuadros: { cuadroId: string; cuadro: { nombre: string } }[];
   realizadas: { id: string; cuadros: { cuadroId: string; hectareas: Prisma.Decimal }[]; lineas: { horas: Prisma.Decimal }[] }[];
 };
+
+/**
+ * Mezcla por tanque (bloque nuevo, 20-ago-2026): calculado al vuelo a
+ * partir de datos ya guardados (concentración, litros de mezcla/ha,
+ * hectáreas totales, capacidad del tanque) — no se persiste, para que
+ * nunca quede desactualizado si algo de eso cambia. Null si esta
+ * Aplicación no capturó capacidad de tanque (sigue funcionando igual sin
+ * el desglose, es opcional).
+ */
+function calcularMezclaPorTanqueDeAplicacion(aplicacion: AplicacionConRealizadas) {
+  if (aplicacion.capacidadTanque == null) return null;
+  const litrosMezclaPorHa = Number(aplicacion.litrosMezclaPorHa);
+  const capacidadTanque = Number(aplicacion.capacidadTanque);
+  const hectareasTotales = Number(aplicacion.hectareasTotalesProgramadas);
+  return aplicacion.productos.map((p) => ({
+    productoId: p.productoId,
+    ...calcularMezclaPorTanque(Number(p.concentracionValor), p.concentracionUnidad, litrosMezclaPorHa, capacidadTanque, hectareasTotales),
+  }));
+}
 
 /** Hectáreas restantes por Cuadro (9.7, 8-ago-2026): lo que falta de reportar de cada Cuadro programado, para mostrarlo visible en el siguiente reporte y no obligar al Supervisor a calcularlo de memoria. `excluirRealizadaId` se usa al editar un reporte existente. */
 async function hectareasRestantesPorCuadro(aplicacion: AplicacionConRealizadas, excluirRealizadaId?: string): Promise<Record<string, number>> {
@@ -351,6 +442,7 @@ async function enriquecerConAlertas<T extends AplicacionConRealizadas>(aplicacio
     horasHombreTotales,
     porcentajeAvance,
     restantesPorCuadro,
+    mezclaPorTanque: calcularMezclaPorTanqueDeAplicacion(aplicacion),
   };
 }
 

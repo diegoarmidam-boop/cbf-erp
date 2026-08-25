@@ -24,6 +24,7 @@ import {
   programarAplicacion,
   ProductoNoAutorizadoAplicacionError,
   registrarRealizada,
+  RolNoPuedeAjustarRecetaError,
   StockNoComprometidoError,
   TransicionAplicacionInvalidaError,
   YaHayAvanceReportadoError,
@@ -140,6 +141,9 @@ const programarSchema = z.object({
   litrosMezclaPorHa: z.number().positive(),
   fechaInicio: z.string(),
   fechaFin: z.string(),
+  recetaId: z.string().optional(),
+  capacidadTanque: z.number().positive().optional(),
+  actualizarRecetaOriginal: z.boolean().optional(),
 });
 
 aplicacionesRouter.post("/", requirePermission("aplicaciones", "capturar"), async (req, res) => {
@@ -150,11 +154,15 @@ aplicacionesRouter.post("/", requirePermission("aplicaciones", "capturar"), asyn
     return;
   }
   try {
-    const aplicacion = await programarAplicacion(parsed.data, req.usuario!.usuarioId);
+    const aplicacion = await programarAplicacion(parsed.data, req.usuario!.usuarioId, req.usuario!.rol);
     res.status(201).json(aplicacion);
   } catch (err) {
     if (err instanceof ProductoNoAutorizadoAplicacionError) {
       res.status(409).json({ error: err.message });
+      return;
+    }
+    if (err instanceof RolNoPuedeAjustarRecetaError) {
+      res.status(403).json({ error: err.message });
       return;
     }
     if (err instanceof Error) {
@@ -176,11 +184,15 @@ aplicacionesRouter.patch("/:id", requirePermission("aplicaciones", "capturar"), 
     return;
   }
   try {
-    const aplicacion = await editarAplicacionProgramada(unoSolo(req.params.id), parsed.data, req.usuario!.usuarioId);
+    const aplicacion = await editarAplicacionProgramada(unoSolo(req.params.id), parsed.data, req.usuario!.usuarioId, req.usuario!.rol);
     res.json(aplicacion);
   } catch (err) {
     if (err instanceof ProductoNoAutorizadoAplicacionError || err instanceof YaHayAvanceReportadoError || err instanceof TransicionAplicacionInvalidaError) {
       res.status(409).json({ error: err.message });
+      return;
+    }
+    if (err instanceof RolNoPuedeAjustarRecetaError) {
+      res.status(403).json({ error: err.message });
       return;
     }
     if (err instanceof Error) {

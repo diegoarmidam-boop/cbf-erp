@@ -876,6 +876,7 @@ model Producto {
   comparacionItems               ComparacionItem[]
   preferidoDe                    IngredienteActivo[]              @relation("ProductoPreferidoDe")
   sustitutoDe                    IngredienteActivoSustituto[]      @relation("ProductoSustitutoDe")
+  recetaProductos                RecetaProducto[]
 
   @@index([categoria])
 }
@@ -1210,6 +1211,58 @@ enum EstadoAplicacion {
   cancelada
 }
 
+// Recetario (20-ago-2026): paquetes técnicos precargados de Aplicaciones y
+// Fertirriego — capa adicional sobre la forma libre de programar por
+// Ingrediente Activo, que se mantiene exactamente igual sin receta.
+// `modulo` evita que una receta de Aplicaciones aparezca en el selector de
+// Fertirriego y viceversa — sus catálogos de producto no son intercambiables
+// (agroquímicos vs. fertilizantes).
+enum ModuloReceta {
+  aplicaciones
+  fertirriego
+}
+
+// Catálogo abierto (botón "+", mismo patrón que Categoría/Ingrediente
+// Activo/Contenedor) — foliar, al suelo, preventiva, correctiva, etc.
+model TipoAplicacion {
+  id     String  @id @default(uuid())
+  nombre String  @unique
+  activo Boolean @default(true)
+
+  recetas Receta[]
+}
+
+model Receta {
+  id               String          @id @default(uuid())
+  nombre           String
+  modulo           ModuloReceta
+  tipoAplicacionId String?
+  tipoAplicacion   TipoAplicacion? @relation(fields: [tipoAplicacionId], references: [id])
+  // Litros de mezcla(o agua)/ha compartido por todos los productos de la
+  // receta — misma estructura que ya existe en Aplicacion/
+  // FertirriegoProgramacion (un solo tanque, una sola densidad).
+  litrosPorHa      Decimal         @db.Decimal(10, 4)
+  activo           Boolean         @default(true)
+  creadoPorId      String
+  fechaCreacion    DateTime        @default(now())
+
+  productos    RecetaProducto[]
+  aplicaciones Aplicacion[]
+  fertirriegos FertirriegoProgramacion[]
+}
+
+model RecetaProducto {
+  id                  String              @id @default(uuid())
+  recetaId            String
+  receta              Receta              @relation(fields: [recetaId], references: [id], onDelete: Cascade)
+  productoId          String
+  producto            Producto            @relation(fields: [productoId], references: [id])
+  concentracionValor  Decimal             @db.Decimal(10, 4)
+  concentracionUnidad ConcentracionUnidad
+
+  @@index([recetaId])
+}
+
 model Aplicacion {
   id                          String              @id @default(uuid())
   huertaId                    String
@@ -1220,6 +1273,17 @@ model Aplicacion {
   // tanque, una sola densidad para toda la mezcla. Cada producto conserva
   // su propia concentración/cantidad, ver AplicacionProducto.
   litrosMezclaPorHa           Decimal             @db.Decimal(10, 4)
+  // Recetario (20-ago-2026): referencia de trazabilidad a la receta usada
+  // como base — nulo si se programó libre por Ingrediente Activo, como
+  // siempre. La dosis realmente aplicada vive en AplicacionProducto (puede
+  // diferir de la receta si se ajustó "solo por esta vez").
+  recetaId                    String?
+  receta                      Receta?             @relation(fields: [recetaId], references: [id])
+  // Capacidad del tanque/recipiente usado ese día (20-ago-2026) — se
+  // captura cada vez que se programa, nunca un catálogo fijo (varía según
+  // qué tanque/turbina esté disponible). Nula si no se usó el cálculo de
+  // mezcla por tanque.
+  capacidadTanque             Decimal?            @db.Decimal(10, 2)
   fechaInicio                 DateTime            @db.Date
   fechaFin                    DateTime            @db.Date
   hectareasTotalesProgramadas Decimal             @db.Decimal(10, 4) // base estable del % de avance y del descuento proporcional — fija desde Paso 1, no recalculada si el Cuadro cambia de superficie después
@@ -1436,6 +1500,11 @@ model FertirriegoProgramacion {
   // varios productos en el mismo fertirriego, mismo mecanismo que
   // Aplicaciones) — cada producto conserva su propia concentración.
   litrosAguaPorHa Decimal               @db.Decimal(10, 4)
+  // Recetario (20-ago-2026): mismo mecanismo de trazabilidad que
+  // Aplicacion — ver ahí el detalle del comentario.
+  recetaId        String?
+  receta          Receta?               @relation(fields: [recetaId], references: [id])
+  capacidadTanque Decimal?              @db.Decimal(10, 2)
   frecuencia      FrecuenciaFertirriego
   fechaInicio     DateTime              @db.Date
   fechaFin        DateTime              @db.Date

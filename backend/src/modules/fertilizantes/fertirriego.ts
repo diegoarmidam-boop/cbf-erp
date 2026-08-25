@@ -1,4 +1,5 @@
-import { calcularCantidadTotal, type ConcentracionUnidad } from "@cbf/shared";
+import { calcularCantidadTotal, calcularMezclaPorTanque, type ConcentracionUnidad } from "@cbf/shared";
+import type { Rol } from "@prisma/client";
 import { prisma } from "../../core/db.js";
 import {
   confirmarEntregaComprometida,
@@ -8,8 +9,22 @@ import {
 } from "../almacen/movimientos.js";
 import { obtenerVersionVigente } from "../unidades-produccion/cuadros.js";
 import { ProductoNoAutorizadoFertilizanteError, StockNoComprometidoError, TransicionFertilizacionInvalidaError } from "./granular.js";
+import { actualizarDosisProductoEnReceta, obtenerReceta, ROLES_RECETAS } from "../recetario/recetario.js";
 
 const DIAS_VENCIMIENTO = 15;
+
+/** Hectáreas totales de un conjunto de Secciones de Riego, a partir de sus Cuadros — no se persiste, se recalcula cada vez (mismo criterio de programarFertirriego). */
+async function hectareasDeSecciones(seccionIds: string[], fecha: Date): Promise<number> {
+  let hectareasTotales = 0;
+  for (const seccionId of seccionIds) {
+    const cuadrosSeccion = await prisma.seccionRiegoCuadro.findMany({ where: { seccionId } });
+    for (const { cuadroId } of cuadrosSeccion) {
+      const version = await obtenerVersionVigente(cuadroId, fecha);
+      if (version) hectareasTotales += Number(version.hectareas);
+    }
+  }
+  return hectareasTotales;
+}
 
 export interface ProductoFertirriegoInput {
   productoId: string;
@@ -25,6 +40,37 @@ export interface ProgramarFertirriegoInput {
   frecuencia: "diario" | "cada_2_dias" | "cada_3_dias" | "patron_2_1";
   fechaInicio: string;
   fechaFin: string;
+  // Recetario (20-ago-2026): mismo mecanismo que Aplicaciones — ver el
+  // comentario completo en aplicaciones.ts.
+  recetaId?: string;
+  capacidadTanque?: number;
+  actualizarRecetaOriginal?: boolean;
+}
+
+export class RolNoPuedeAjustarRecetaFertirriegoError extends Error {
+  constructor() {
+    super("Tu rol solo puede usar esta receta tal cual está guardada — no puede cambiar la dosis. Pide a Dirección General o al Gerente Técnico de Producción que la ajuste.");
+  }
+}
+
+async function validarUsoDeRecetaFertirriego(
+  recetaId: string,
+  usuarioRol: Rol,
+  litrosAguaPorHa: number,
+  productos: ProductoFertirriegoInput[]
+) {
+  const receta = await obtenerReceta(recetaId);
+  if (!ROLES_RECETAS.includes(usuarioRol)) {
+    const mismaAgua = Number(receta.litrosPorHa) === litrosAguaPorHa;
+    const mismasDosis = receta.productos.every((rp) => {
+      const enviado = productos.find((p) => p.productoId === rp.productoId);
+      return enviado && Number(rp.concentracionValor) === enviado.dosisValor && rp.concentracionUnidad === enviado.dosisUnidad;
+    });
+    if (!mismaAgua || !mismasDosis || receta.productos.length !== productos.length) {
+      throw new RolNoPuedeAjustarRecetaFertirriegoError();
+    }
+  }
+  return receta;
 }
 
 /**
@@ -36,7 +82,7 @@ export interface ProgramarFertirriegoInput {
  * realizada" aquí — una vez entregado a la Huerta, la ejecución diaria se
  * registra desde Riego (9.6).
  */
-export async function programarFertirriego(input: ProgramarFertirriegoInput, creadoPorId: string) {
+export async function programarFertirriego(input: ProgramarFertirriegoInput, creadoPorId: string, usuarioRol: Rol) {
   if (input.seccionIds.length === 0) {
     throw new Error("Elige al menos una Sección de Riego.");
   }
@@ -50,15 +96,17 @@ export async function programarFertirriego(input: ProgramarFertirriegoInput, cre
     }
   }
 
-  let hectareasTotales = 0;
-  const fechaRef = new Date(input.fechaInicio);
-  for (const seccionId of input.seccionIds) {
-    const cuadrosSeccion = await prisma.seccionRiegoCuadro.findMany({ where: { seccionId } });
-    for (const { cuadroId } of cuadrosSeccion) {
-      const version = await obtenerVersionVigente(cuadroId, fechaRef);
-      if (version) hectareasTotales += Number(version.hectareas);
+  if (input.recetaId) {
+    await validarUsoDeRecetaFertirriego(input.recetaId, usuarioRol, input.litrosAguaPorHa, input.productos);
+    if (input.actualizarRecetaOriginal) {
+      for (const p of input.productos) {
+        await actualizarDosisProductoEnReceta(input.recetaId, p.productoId, p.dosisValor, p.dosisUnidad);
+      }
     }
   }
+
+  const fechaRef = new Date(input.fechaInicio);
+  const hectareasTotales = await hectareasDeSecciones(input.seccionIds, fechaRef);
   if (hectareasTotales === 0) {
     throw new Error("Las Secciones de Riego elegidas no tienen Cuadros con una configuración vigente para la fecha de inicio.");
   }
@@ -68,6 +116,8 @@ export async function programarFertirriego(input: ProgramarFertirriegoInput, cre
       data: {
         huertaId: input.huertaId,
         litrosAguaPorHa: input.litrosAguaPorHa,
+        recetaId: input.recetaId,
+        capacidadTanque: input.capacidadTanque,
         frecuencia: input.frecuencia,
         fechaInicio: fechaRef,
         fechaFin: new Date(input.fechaFin),
@@ -112,9 +162,36 @@ export async function programarFertirriego(input: ProgramarFertirriegoInput, cre
 
 const INCLUDE_FERTIRRIEGO = { huerta: true, productos: { include: { producto: true } }, secciones: { include: { seccion: true } } };
 
-async function enriquecerConAlertas<T extends { id: string; estado: string; fechaCreacion: Date; productos: { productoId: string }[] }>(
-  fertirriego: T
-) {
+type FertirriegoConTanque = {
+  id: string;
+  estado: string;
+  fechaCreacion: Date;
+  fechaInicio: Date;
+  litrosAguaPorHa: unknown;
+  capacidadTanque: unknown;
+  secciones: { seccionId: string }[];
+  productos: { productoId: string; dosisValor: unknown; dosisUnidad: ConcentracionUnidad }[];
+};
+
+/**
+ * Mezcla por tanque (bloque nuevo, 20-ago-2026): mismo criterio que
+ * Aplicaciones — calculado al vuelo, nunca persistido. Las hectáreas
+ * totales de Fertirriego no se guardan (se derivan de las Secciones cada
+ * vez, ver hectareasDeSecciones), así que este cálculo sí necesita una
+ * consulta extra — solo se hace cuando capacidadTanque no es nulo.
+ */
+async function calcularMezclaPorTanqueDeFertirriego(fertirriego: FertirriegoConTanque) {
+  if (fertirriego.capacidadTanque == null) return null;
+  const hectareasTotales = await hectareasDeSecciones(fertirriego.secciones.map((s) => s.seccionId), fertirriego.fechaInicio);
+  const litrosAguaPorHa = Number(fertirriego.litrosAguaPorHa);
+  const capacidadTanque = Number(fertirriego.capacidadTanque);
+  return fertirriego.productos.map((p) => ({
+    productoId: p.productoId,
+    ...calcularMezclaPorTanque(Number(p.dosisValor), p.dosisUnidad, litrosAguaPorHa, capacidadTanque, hectareasTotales),
+  }));
+}
+
+async function enriquecerConAlertas<T extends FertirriegoConTanque>(fertirriego: T) {
   const comprometidos = await prisma.almacenCentralMovimiento.findMany({ where: { referenciaId: fertirriego.id, tipo: "salida_comprometida" } });
   const comprometido = fertirriego.productos.every((p) => comprometidos.some((m) => m.productoId === p.productoId));
   const diasSinEntregar = fertirriego.estado === "programada" ? Math.floor((Date.now() - fertirriego.fechaCreacion.getTime()) / 86_400_000) : null;
@@ -124,6 +201,7 @@ async function enriquecerConAlertas<T extends { id: string; estado: string; fech
     comprometido,
     diasSinEntregar,
     alertaVencimiento: (diasSinEntregar ?? 0) > DIAS_VENCIMIENTO,
+    mezclaPorTanque: await calcularMezclaPorTanqueDeFertirriego(fertirriego),
   };
 }
 

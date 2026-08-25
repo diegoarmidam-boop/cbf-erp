@@ -9,6 +9,7 @@ import {
   listarFertirriego,
   obtenerFertirriego,
   programarFertirriego,
+  RolNoPuedeAjustarRecetaFertirriegoError,
 } from "./fertirriego.js";
 import { ProductoNoAutorizadoFertilizanteError, StockNoComprometidoError, TransicionFertilizacionInvalidaError } from "./granular.js";
 
@@ -67,6 +68,9 @@ const programarSchema = z.object({
   frecuencia: z.enum(["diario", "cada_2_dias", "cada_3_dias", "patron_2_1"]),
   fechaInicio: z.string(),
   fechaFin: z.string(),
+  recetaId: z.string().optional(),
+  capacidadTanque: z.number().positive().optional(),
+  actualizarRecetaOriginal: z.boolean().optional(),
 });
 
 fertirriegoRouter.post("/", requirePermission("fertilizantes", "capturar"), async (req, res) => {
@@ -77,11 +81,15 @@ fertirriegoRouter.post("/", requirePermission("fertilizantes", "capturar"), asyn
     return;
   }
   try {
-    const fertirriego = await programarFertirriego(parsed.data, req.usuario!.usuarioId);
+    const fertirriego = await programarFertirriego(parsed.data, req.usuario!.usuarioId, req.usuario!.rol);
     res.status(201).json(fertirriego);
   } catch (err) {
     if (err instanceof ProductoNoAutorizadoFertilizanteError) {
       res.status(409).json({ error: err.message });
+      return;
+    }
+    if (err instanceof RolNoPuedeAjustarRecetaFertirriegoError) {
+      res.status(403).json({ error: err.message });
       return;
     }
     if (err instanceof Error) {

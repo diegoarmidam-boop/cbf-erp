@@ -710,6 +710,50 @@ export interface AplicacionProducto {
   cantidadTotalCalculada: string;
 }
 
+// Recetario (20-ago-2026)
+export interface TipoAplicacion {
+  id: string;
+  nombre: string;
+  activo: boolean;
+}
+
+export interface RecetaProducto {
+  id: string;
+  productoId: string;
+  producto: Producto;
+  concentracionValor: string;
+  concentracionUnidad: ConcentracionUnidad;
+}
+
+export type ModuloReceta = "aplicaciones" | "fertirriego";
+
+export interface Receta {
+  id: string;
+  nombre: string;
+  modulo: ModuloReceta;
+  tipoAplicacionId: string | null;
+  tipoAplicacion: TipoAplicacion | null;
+  litrosPorHa: string;
+  activo: boolean;
+  productos: RecetaProducto[];
+}
+
+// Mezcla por tanque (20-ago-2026) — un elemento por producto de la programación.
+export interface TanqueParcial {
+  fraccion: number;
+  volumenMezcla: number;
+  cantidadProducto: number;
+}
+
+export interface MezclaTanqueProducto {
+  productoId: string;
+  hectareasPorTanque: number;
+  numeroTanques: number;
+  tanquesCompletos: number;
+  cantidadProductoPorTanqueCompleto: number;
+  tanqueParcial: TanqueParcial | null;
+}
+
 export interface Aplicacion {
   id: string;
   huertaId: string;
@@ -717,6 +761,8 @@ export interface Aplicacion {
   productos: AplicacionProducto[];
   recursoSugerido: ModalidadAplicacion;
   litrosMezclaPorHa: string;
+  recetaId: string | null;
+  capacidadTanque: string | null;
   fechaInicio: string;
   fechaFin: string;
   hectareasTotalesProgramadas: string;
@@ -737,6 +783,7 @@ export interface Aplicacion {
   horasHombreTotales?: number;
   porcentajeAvance?: number;
   restantesPorCuadro?: Record<string, number>;
+  mezclaPorTanque?: MezclaTanqueProducto[] | null;
 }
 
 export type ModoDosisGranular = "kg_ha" | "g_planta";
@@ -856,6 +903,8 @@ export interface FertirriegoProgramacion {
   huerta: Huerta;
   productos: FertirriegoProgramacionProducto[];
   litrosAguaPorHa: string;
+  recetaId: string | null;
+  capacidadTanque: string | null;
   frecuencia: FrecuenciaFertirriego;
   fechaInicio: string;
   fechaFin: string;
@@ -865,4 +914,5 @@ export interface FertirriegoProgramacion {
   comprometido?: boolean;
   diasSinEntregar?: number | null;
   alertaVencimiento?: boolean;
+  mezclaPorTanque?: MezclaTanqueProducto[] | null;
 }
