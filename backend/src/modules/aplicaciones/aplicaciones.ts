@@ -90,6 +90,10 @@ export interface ProgramarAplicacionInput {
   // la dosis nueva en esta programación, actualiza también la receta
   // maestra para las próximas veces.
   actualizarRecetaOriginal?: boolean;
+  // Tipo de aplicación (25-ago-2026, Orden de Aplicación): propio de la
+  // Aplicación, no solo de la receta — precargado desde la receta cuando
+  // aplica, pero siempre capturable/editable aunque no se use receta.
+  tipoAplicacionId?: string;
 }
 
 export class RolNoPuedeAjustarRecetaError extends Error {
@@ -175,6 +179,7 @@ export async function programarAplicacion(input: ProgramarAplicacionInput, cread
         litrosMezclaPorHa: input.litrosMezclaPorHa,
         recetaId: input.recetaId,
         capacidadTanque: input.capacidadTanque,
+        tipoAplicacionId: input.tipoAplicacionId,
         fechaInicio: fechaRef,
         fechaFin: new Date(input.fechaFin),
         hectareasTotalesProgramadas: hectareasTotales,
@@ -326,6 +331,7 @@ export async function editarAplicacionProgramada(aplicacionId: string, input: Om
         recursoSugerido: input.recursoSugerido,
         litrosMezclaPorHa: input.litrosMezclaPorHa,
         capacidadTanque: input.capacidadTanque,
+        tipoAplicacionId: input.tipoAplicacionId,
         fechaInicio: fechaRef,
         fechaFin: new Date(input.fechaFin),
         hectareasTotalesProgramadas: hectareasTotales,
@@ -345,6 +351,7 @@ const INCLUDE_LINEA = { tractor: true, operador: true, implemento: true, persona
 
 const INCLUDE_APLICACION = {
   huerta: true,
+  tipoAplicacion: true,
   productos: { include: { producto: true } },
   cuadros: { include: { cuadro: true } },
   realizadas: {

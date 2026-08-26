@@ -12,6 +12,8 @@ import {
   RolNoPuedeAjustarRecetaFertirriegoError,
 } from "./fertirriego.js";
 import { ProductoNoAutorizadoFertilizanteError, StockNoComprometidoError, TransicionFertilizacionInvalidaError } from "./granular.js";
+import { construirOrdenFertirriego, OrdenSinCapacidadTanqueError } from "../ordenes/ordenes.js";
+import { generarPdfOrdenFertirriego } from "../ordenes/pdf.js";
 
 export const fertirriegoRouter = Router();
 fertirriegoRouter.use(requireAuth);
@@ -52,6 +54,41 @@ fertirriegoRouter.get("/:id", requirePermission("fertilizantes", "ver"), async (
   const fertirriego = await obtenerFertirriego(unoSolo(req.params.id));
   if (!verificarAlcance(req, res, fertirriego.huertaId)) return;
   res.json(fertirriego);
+});
+
+// Orden de Fertirriego (9.5 Camino 2, 25-ago-2026): documento para el
+// Encargado de Riego, en pantalla (JSON) o descargable en PDF.
+fertirriegoRouter.get("/:id/orden", requirePermission("fertilizantes", "ver"), async (req, res) => {
+  const fertirriego = await obtenerFertirriego(unoSolo(req.params.id));
+  if (!verificarAlcance(req, res, fertirriego.huertaId)) return;
+  try {
+    res.json(await construirOrdenFertirriego(unoSolo(req.params.id)));
+  } catch (err) {
+    if (err instanceof OrdenSinCapacidadTanqueError) {
+      res.status(409).json({ error: err.message });
+      return;
+    }
+    throw err;
+  }
+});
+
+fertirriegoRouter.get("/:id/orden.pdf", requirePermission("fertilizantes", "ver"), async (req, res) => {
+  const fertirriego = await obtenerFertirriego(unoSolo(req.params.id));
+  if (!verificarAlcance(req, res, fertirriego.huertaId)) return;
+  try {
+    const orden = await construirOrdenFertirriego(unoSolo(req.params.id));
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `inline; filename="orden-fertirriego-${unoSolo(req.params.id)}.pdf"`);
+    const doc = generarPdfOrdenFertirriego(orden);
+    doc.pipe(res);
+    doc.end();
+  } catch (err) {
+    if (err instanceof OrdenSinCapacidadTanqueError) {
+      res.status(409).json({ error: err.message });
+      return;
+    }
+    throw err;
+  }
 });
 
 const productoFertirriegoSchema = z.object({

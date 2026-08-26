@@ -160,7 +160,7 @@ export async function programarFertirriego(input: ProgramarFertirriegoInput, cre
   });
 }
 
-const INCLUDE_FERTIRRIEGO = { huerta: true, productos: { include: { producto: true } }, secciones: { include: { seccion: true } } };
+const INCLUDE_FERTIRRIEGO = { huerta: true, receta: true, productos: { include: { producto: true } }, secciones: { include: { seccion: true } } };
 
 type FertirriegoConTanque = {
   id: string;

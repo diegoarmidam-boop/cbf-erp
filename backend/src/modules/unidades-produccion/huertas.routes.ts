@@ -3,10 +3,16 @@ import multer from "multer";
 import path from "node:path";
 import fs from "node:fs";
 import { z } from "zod";
+import type { Rol } from "@prisma/client";
 import { requireAuth, requirePermission } from "../../middleware/auth.js";
-import { mensajeErrorValidacion, unoSolo } from "../../core/http.js";
+import { mensajeErrorCaptura, mensajeErrorValidacion, unoSolo } from "../../core/http.js";
 import { prisma } from "../../core/db.js";
-import { actualizarHuerta, calcularAreaEfectivaHuerta, crearHuerta, listarHuertas } from "./huertas.js";
+import { actualizarHuerta, calcularAreaEfectivaHuerta, crearHuerta, eliminarHuertaCompleta, HuertaTieneNominaCerradaError, listarHuertas } from "./huertas.js";
+
+// Borrar Huerta completa (25-ago-2026) es irreversible y afecta todo lo que
+// cuelga de ella — a diferencia de desactivar (cualquiera con permiso de
+// editar), solo Director General o Encargado de Sistemas pueden hacerlo.
+const ROLES_ELIMINAR_HUERTA: Rol[] = ["director_general", "encargado_sistemas"];
 
 export const huertasRouter = Router();
 huertasRouter.use(requireAuth);
@@ -50,6 +56,44 @@ huertasRouter.patch("/:id", requirePermission("unidades_produccion", "editar"), 
     return;
   }
   res.json(await actualizarHuerta(unoSolo(req.params.id), parsed.data));
+});
+
+const eliminarHuertaSchema = z.object({ confirmarNombre: z.string().min(1) });
+
+// Borrado real e irreversible (25-ago-2026) — distinto del PATCH activo de
+// arriba. Exige repetir el nombre exacto de la Huerta en el cuerpo de la
+// petición, como segunda confirmación además del candado de rol — no es
+// una validación de negocio, es una red de seguridad barata contra un
+// clic equivocado o una llamada automatizada por error.
+huertasRouter.delete("/:id", requirePermission("unidades_produccion", "editar"), async (req, res) => {
+  if (!ROLES_ELIMINAR_HUERTA.includes(req.usuario!.rol)) {
+    res.status(403).json({ error: "Solo Director General o Encargado de Sistemas pueden borrar una Huerta completa." });
+    return;
+  }
+  const parsed = eliminarHuertaSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
+    return;
+  }
+  try {
+    const huerta = await prisma.huerta.findUniqueOrThrow({ where: { id: unoSolo(req.params.id) } });
+    if (parsed.data.confirmarNombre.trim() !== huerta.nombre) {
+      res.status(400).json({ error: "El nombre no coincide — escribe exactamente el nombre de la Huerta para confirmar." });
+      return;
+    }
+    await eliminarHuertaCompleta(unoSolo(req.params.id));
+    res.status(204).end();
+  } catch (err) {
+    if (err instanceof HuertaTieneNominaCerradaError) {
+      res.status(409).json({ error: err.message });
+      return;
+    }
+    if (err instanceof Error) {
+      res.status(400).json({ error: mensajeErrorCaptura(err) });
+      return;
+    }
+    throw err;
+  }
 });
 
 // Mapa/croquis: capa visual de referencia, sin geometría estructurada (9.1).

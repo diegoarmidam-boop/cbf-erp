@@ -763,6 +763,8 @@ export interface Aplicacion {
   litrosMezclaPorHa: string;
   recetaId: string | null;
   capacidadTanque: string | null;
+  tipoAplicacionId: string | null;
+  tipoAplicacion: TipoAplicacion | null;
   fechaInicio: string;
   fechaFin: string;
   hectareasTotalesProgramadas: string;
@@ -904,6 +906,7 @@ export interface FertirriegoProgramacion {
   productos: FertirriegoProgramacionProducto[];
   litrosAguaPorHa: string;
   recetaId: string | null;
+  receta: Receta | null;
   capacidadTanque: string | null;
   frecuencia: FrecuenciaFertirriego;
   fechaInicio: string;
@@ -915,4 +918,76 @@ export interface FertirriegoProgramacion {
   diasSinEntregar?: number | null;
   alertaVencimiento?: boolean;
   mezclaPorTanque?: MezclaTanqueProducto[] | null;
+}
+
+// Orden de Aplicación / Orden de Fertirriego (25-ago-2026) — documentos de
+// salida en pantalla + PDF, capa de presentación sobre los cálculos ya
+// construidos (Recetario/mezcla por tanque).
+export interface CantidadFormateada {
+  valor: number;
+  unidad: "mL" | "L" | "g" | "kg";
+}
+
+export interface SemanaOrden {
+  inicio: string;
+  fin: string;
+}
+
+export interface OrdenAplicacionProducto {
+  numero: number;
+  nombreComercial: string;
+  ingredienteActivo: string;
+  dosisValor: number;
+  unidadDosis: string;
+  cantidadTotalLote: CantidadFormateada;
+  cantidadPorTanqueCompleto: CantidadFormateada;
+  cantidadUltimoTanque: CantidadFormateada;
+}
+
+export interface OrdenAplicacion {
+  encabezado: {
+    semana: SemanaOrden;
+    loteHuerta: string;
+    numeroAplicacion: number;
+    fechaProgramada: string;
+    capacidadTanque: number;
+    tipoAplicacion: string | null;
+    hectareasAAplicar: number;
+    gastoAguaLHa: number;
+    volumenTotalAguaL: number;
+    tanquesAPreparar: number;
+    plantasATratar: number | null;
+    numeroProductos: number;
+    equipoAplicacion: string;
+    hectareasPorTanque: number;
+  };
+  resumenPreparar: string;
+  drench: { mlPorPlanta: number } | null;
+  productos: OrdenAplicacionProducto[];
+}
+
+export interface OrdenFertirriegoProducto {
+  productoId: string;
+  nombreComercial: string;
+  ingredienteActivo: string;
+  dosisValor: number;
+  unidadDosis: string;
+  porValvula: { seccionId: string; cantidad: CantidadFormateada }[];
+  totalPorRiego: CantidadFormateada;
+  totalSemana: CantidadFormateada;
+}
+
+export interface OrdenFertirriego {
+  encabezado: {
+    lote: string;
+    semana: SemanaOrden;
+    fecha: string;
+    valvulasDelLote: number;
+    receta: string | null;
+    frecuencia: string;
+    riegosEnLaSemana: number;
+    hectareasTotales: number;
+  };
+  valvulas: { seccionId: string; nombre: string; hectareas: number }[];
+  productos: OrdenFertirriegoProducto[];
 }

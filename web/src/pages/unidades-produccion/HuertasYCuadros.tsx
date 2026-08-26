@@ -1,9 +1,12 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useOutletContext } from "react-router-dom";
 import { api, ApiError } from "../../lib/api";
+import { useAuth } from "../../lib/auth";
 import { useCuadros } from "../../lib/useCuadros";
 import type { AreaEfectiva, EstatusCuadro, Huerta } from "../../lib/types";
 import { useHuertaSeleccionada } from "./HuertaSeleccionadaContext";
+
+const ROLES_PUEDEN_BORRAR_HUERTA = ["director_general", "encargado_sistemas"];
 
 function hoyISO(): string {
   const d = new Date();
@@ -17,11 +20,20 @@ const ETIQUETAS_ESTATUS_CUADRO: Record<EstatusCuadro, string> = {
 };
 
 export default function HuertasYCuadros() {
-  const { huertaId } = useHuertaSeleccionada();
+  const { usuario } = useAuth();
+  const { huertaId, setHuertaId } = useHuertaSeleccionada();
   const { refetchHuertas, huertaActual } = useOutletContext<{ refetchHuertas: () => void; huertaActual: Huerta | null }>();
   const { cuadros, cargando, refetch } = useCuadros(huertaId);
   const [area, setArea] = useState<AreaEfectiva | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const puedeBorrarHuerta = usuario ? ROLES_PUEDEN_BORRAR_HUERTA.includes(usuario.rol) : false;
+
+  // Borrar Huerta completa (25-ago-2026): irreversible, distinto de
+  // desactivar — se pide repetir el nombre exacto como segunda
+  // confirmación, además del candado de rol que ya hace el backend.
+  const [confirmandoBorrado, setConfirmandoBorrado] = useState(false);
+  const [nombreConfirmacion, setNombreConfirmacion] = useState("");
+  const [borrando, setBorrando] = useState(false);
 
   const [mostrarFormHuerta, setMostrarFormHuerta] = useState(false);
   const [nombreHuerta, setNombreHuerta] = useState("");
@@ -103,6 +115,23 @@ export default function HuertasYCuadros() {
     }
   }
 
+  async function borrarHuertaCompleta() {
+    if (!huertaActual) return;
+    setBorrando(true);
+    setError(null);
+    try {
+      await api.delete(`/huertas/${huertaActual.id}`, { confirmarNombre: nombreConfirmacion });
+      setConfirmandoBorrado(false);
+      setNombreConfirmacion("");
+      setHuertaId("");
+      refetchHuertas();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "No se pudo borrar la Huerta.");
+    } finally {
+      setBorrando(false);
+    }
+  }
+
   async function cambiarEstatusCuadro(cuadroId: string, estatus: EstatusCuadro) {
     setError(null);
     try {
@@ -153,6 +182,11 @@ export default function HuertasYCuadros() {
         {huertaActual && (
           <button className="btn-secondary" onClick={toggleActivoHuerta}>
             {huertaActual.activo ? "Desactivar esta Huerta" : "Reactivar esta Huerta"}
+          </button>
+        )}
+        {huertaActual && puedeBorrarHuerta && (
+          <button className="btn-danger" onClick={() => setConfirmandoBorrado(true)}>
+            Borrar Huerta completa
           </button>
         )}
       </div>
@@ -308,6 +342,36 @@ export default function HuertasYCuadros() {
             </table>
           )}
         </>
+      )}
+
+      {confirmandoBorrado && huertaActual && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100 }}>
+          <div className="card" style={{ width: 440 }}>
+            <h3 style={{ marginBottom: 10, color: "var(--danger)" }}>Borrar "{huertaActual.nombre}" por completo</h3>
+            <p style={{ fontSize: 12.5, color: "var(--ink-soft)", marginBottom: 12 }}>
+              Esto es irreversible: borra la Huerta, sus Cuadros, Secciones de Riego, Ciclos, y todo lo programado/realizado ahí (Aplicaciones,
+              Fertilizantes, Actividades, Riego, Nómina, Almacén Local). Para confirmar, escribe exactamente el nombre de la Huerta.
+            </p>
+            <label className="field" style={{ marginBottom: 14 }}>
+              Nombre de la Huerta
+              <input value={nombreConfirmacion} onChange={(e) => setNombreConfirmacion(e.target.value)} placeholder={huertaActual.nombre} />
+            </label>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
+              <button
+                className="btn-secondary"
+                onClick={() => {
+                  setConfirmandoBorrado(false);
+                  setNombreConfirmacion("");
+                }}
+              >
+                Cancelar
+              </button>
+              <button className="btn-danger" onClick={borrarHuertaCompleta} disabled={borrando || nombreConfirmacion.trim() !== huertaActual.nombre}>
+                {borrando ? "Borrando…" : "Borrar definitivamente"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

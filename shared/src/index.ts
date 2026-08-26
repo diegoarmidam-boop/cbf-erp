@@ -6,3 +6,4 @@ export * from "./nomina/semanal.js";
 export * from "./unidades-produccion/calculo.js";
 export * from "./aplicaciones/calculo.js";
 export * from "./fertilizantes/calculo.js";
+export * from "./ordenes/calculo.js";

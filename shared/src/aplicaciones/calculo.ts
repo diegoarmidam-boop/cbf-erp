@@ -103,6 +103,13 @@ export interface CantidadFormateada {
  * calcularCantidadTotal/cantidadProductoParaVolumen (L para ml_l/g_l, kg
  * para kg_l) — si el valor es menor a 1 en esa unidad, se muestra en la
  * unidad chica (mL/g) en vez de un decimal minúsculo.
+ *
+ * Redondeo (Orden de Aplicación/Fertirriego, 25-ago-2026, función
+ * compartida — no duplicar): en campo no se puede pesar una fracción de
+ * gramo ni medir una fracción de mililitro, así que la unidad chica
+ * (mL/g) redondea a entero; L/kg sí admiten 2 decimales (báscula/probeta
+ * de precisión). Esta misma regla aplica también al desglose de mezcla
+ * por tanque de Recetario — antes redondeaba siempre a 2 decimales.
  */
 export function formatearCantidadProducto(concentracionUnidad: ConcentracionUnidad, cantidadEnUnidadBase: number): CantidadFormateada {
   // ml_l: el total ya viene convertido de mL a L (÷1000) — unidad base L.
@@ -115,11 +122,15 @@ export function formatearCantidadProducto(concentracionUnidad: ConcentracionUnid
   const unidadChica = esVolumen ? "mL" : "g";
 
   if (cantidadEnUnidadBase < 1 && cantidadEnUnidadBase > 0) {
-    return { valor: redondear(cantidadEnUnidadBase * 1000), unidad: unidadChica };
+    return { valor: redondearEntero(cantidadEnUnidadBase * 1000), unidad: unidadChica };
   }
-  return { valor: redondear(cantidadEnUnidadBase), unidad: unidadGrande };
+  return { valor: redondearDosDecimales(cantidadEnUnidadBase), unidad: unidadGrande };
 }
 
-function redondear(valor: number): number {
+function redondearDosDecimales(valor: number): number {
   return Math.round(valor * 100) / 100;
+}
+
+function redondearEntero(valor: number): number {
+  return Math.round(valor);
 }

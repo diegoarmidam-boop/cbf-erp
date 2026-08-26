@@ -31,6 +31,8 @@ import {
 } from "./aplicaciones.js";
 import { AjusteInvalidoError, confirmarRecepcionAjuste, listarAjustesPendientesConfirmar } from "../almacen/movimientos.js";
 import { listarCancelacionesPendientesConfirmarGranular } from "../fertilizantes/granular.js";
+import { construirOrdenAplicacion, OrdenSinCapacidadTanqueError } from "../ordenes/ordenes.js";
+import { generarPdfOrdenAplicacion } from "../ordenes/pdf.js";
 
 export const aplicacionesRouter = Router();
 aplicacionesRouter.use(requireAuth);
@@ -127,6 +129,42 @@ aplicacionesRouter.get("/:id", requirePermission("aplicaciones", "ver"), async (
   res.json(aplicacion);
 });
 
+// Orden de Aplicación (9.7, 25-ago-2026): documento para el Encargado de
+// Fumigación, generable en pantalla (JSON) o descargable en PDF, una vez
+// que la programación ya está guardada.
+aplicacionesRouter.get("/:id/orden", requirePermission("aplicaciones", "ver"), async (req, res) => {
+  const aplicacion = await obtenerAplicacion(unoSolo(req.params.id));
+  if (!verificarAlcance(req, res, aplicacion.huertaId)) return;
+  try {
+    res.json(await construirOrdenAplicacion(unoSolo(req.params.id)));
+  } catch (err) {
+    if (err instanceof OrdenSinCapacidadTanqueError) {
+      res.status(409).json({ error: err.message });
+      return;
+    }
+    throw err;
+  }
+});
+
+aplicacionesRouter.get("/:id/orden.pdf", requirePermission("aplicaciones", "ver"), async (req, res) => {
+  const aplicacion = await obtenerAplicacion(unoSolo(req.params.id));
+  if (!verificarAlcance(req, res, aplicacion.huertaId)) return;
+  try {
+    const orden = await construirOrdenAplicacion(unoSolo(req.params.id));
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `inline; filename="orden-aplicacion-${unoSolo(req.params.id)}.pdf"`);
+    const doc = generarPdfOrdenAplicacion(orden);
+    doc.pipe(res);
+    doc.end();
+  } catch (err) {
+    if (err instanceof OrdenSinCapacidadTanqueError) {
+      res.status(409).json({ error: err.message });
+      return;
+    }
+    throw err;
+  }
+});
+
 const productoAplicacionSchema = z.object({
   productoId: z.string().min(1),
   concentracionValor: z.number().positive(),
@@ -144,6 +182,7 @@ const programarSchema = z.object({
   recetaId: z.string().optional(),
   capacidadTanque: z.number().positive().optional(),
   actualizarRecetaOriginal: z.boolean().optional(),
+  tipoAplicacionId: z.string().optional(),
 });
 
 aplicacionesRouter.post("/", requirePermission("aplicaciones", "capturar"), async (req, res) => {

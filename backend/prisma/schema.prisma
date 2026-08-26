@@ -1229,7 +1229,8 @@ model TipoAplicacion {
   nombre String  @unique
   activo Boolean @default(true)
 
-  recetas Receta[]
+  recetas      Receta[]
+  aplicaciones Aplicacion[]
 }
 
 model Receta {
@@ -1284,6 +1285,12 @@ model Aplicacion {
   // qué tanque/turbina esté disponible). Nula si no se usó el cálculo de
   // mezcla por tanque.
   capacidadTanque             Decimal?            @db.Decimal(10, 2)
+  // Tipo de aplicación (25-ago-2026, Orden de Aplicación): campo propio de
+  // la Aplicación, independiente de si se usó Receta o no — precargado
+  // desde la receta cuando aplica, pero siempre editable y necesario para
+  // saber si esta Aplicación es Drench (dato exclusivo de la Orden).
+  tipoAplicacionId            String?
+  tipoAplicacion              TipoAplicacion?     @relation(fields: [tipoAplicacionId], references: [id])
   fechaInicio                 DateTime            @db.Date
   fechaFin                    DateTime            @db.Date
   hectareasTotalesProgramadas Decimal             @db.Decimal(10, 4) // base estable del % de avance y del descuento proporcional — fija desde Paso 1, no recalculada si el Cuadro cambia de superficie después

@@ -4,12 +4,14 @@ import { useAuth } from "../../lib/auth";
 import { useHuertas } from "../../lib/useHuertas";
 import { usePersonal } from "../../lib/usePersonal";
 import { useRecetas } from "../../lib/useRecetas";
-import type { Aplicacion, AplicacionRealizadaLinea, ConcentracionUnidad, Cuadro, Equipo, ModalidadAplicacion, Producto } from "../../lib/types";
+import { useCatalogoAbierto } from "../../lib/useCatalogoAbierto";
+import type { Aplicacion, AplicacionRealizadaLinea, ConcentracionUnidad, Cuadro, Equipo, ModalidadAplicacion, OrdenAplicacion, Producto } from "../../lib/types";
 import FechaInput from "../../components/FechaInput";
 import { formatearFecha, formatearInstante } from "../../lib/fecha";
 import { presentacionTexto } from "../../lib/producto";
 import RecetarioPanel, { ROLES_PUEDEN_RECETAS } from "../../components/RecetarioPanel";
 import MezclaPorTanque from "../../components/MezclaPorTanque";
+import OrdenAplicacionView from "../../components/OrdenAplicacionView";
 
 const ETIQUETAS_ESTADO: Record<string, string> = {
   programada: "Programada",
@@ -138,6 +140,15 @@ export default function Aplicaciones() {
   // pregunta antes de guardar — no en cada tecla, para no interrumpir.
   const [confirmandoDesvioReceta, setConfirmandoDesvioReceta] = useState(false);
 
+  // ---- Tipo de aplicación (25-ago-2026, Orden de Aplicación) ----
+  const { items: tiposAplicacion, agregar: agregarTipoAplicacion } = useCatalogoAbierto("/tipos-aplicacion");
+  const [tipoAplicacionId, setTipoAplicacionId] = useState("");
+  const [nuevoTipoAplicacion, setNuevoTipoAplicacion] = useState("");
+
+  // ---- Orden de Aplicación (25-ago-2026) ----
+  const [verOrdenId, setVerOrdenId] = useState<string | null>(null);
+  const [ordenData, setOrdenData] = useState<OrdenAplicacion | null>(null);
+
   // ---- Equipos para líneas de Turbina/Aguilón ----
   const [tractores, setTractores] = useState<Equipo[]>([]);
   const [implementos, setImplementos] = useState<Equipo[]>([]);
@@ -210,6 +221,16 @@ export default function Aplicaciones() {
     if (!receta) return;
     setLitrosMezclaPorHa(String(receta.litrosPorHa));
     setProductosForm(receta.productos.map((p) => ({ productoId: p.productoId, concentracionValor: String(p.concentracionValor), concentracionUnidad: p.concentracionUnidad })));
+    // Precarga el Tipo de aplicación de la receta (25-ago-2026) — sigue
+    // siendo editable después, no es parte del candado de dosis.
+    if (receta.tipoAplicacionId) setTipoAplicacionId(receta.tipoAplicacionId);
+  }
+
+  async function agregarTipoAplicacionNuevo() {
+    if (!nuevoTipoAplicacion.trim()) return;
+    const creado = await agregarTipoAplicacion(nuevoTipoAplicacion.trim());
+    setTipoAplicacionId(creado.id);
+    setNuevoTipoAplicacion("");
   }
 
   // ¿La dosis actual del formulario ya no coincide con la receta elegida?
@@ -241,6 +262,7 @@ export default function Aplicaciones() {
       recetaId: recetaId || undefined,
       capacidadTanque: capacidadTanque ? Number(capacidadTanque) : undefined,
       actualizarRecetaOriginal,
+      tipoAplicacionId: tipoAplicacionId || undefined,
     };
   }
 
@@ -254,6 +276,7 @@ export default function Aplicaciones() {
     setFechaFin(hoyISO());
     setRecetaId("");
     setCapacidadTanque("");
+    setTipoAplicacionId("");
   }
 
   async function enviarProgramacion(actualizarRecetaOriginal?: boolean) {
@@ -298,8 +321,20 @@ export default function Aplicaciones() {
     setFechaFin(a.fechaFin.slice(0, 10));
     setRecetaId(a.recetaId ?? "");
     setCapacidadTanque(a.capacidadTanque ?? "");
+    setTipoAplicacionId(a.tipoAplicacionId ?? "");
     setError(null);
     setMostrarForm(true);
+  }
+
+  async function verOrden(a: Aplicacion) {
+    setError(null);
+    try {
+      const orden = await api.get<OrdenAplicacion>(`/aplicaciones/${a.id}/orden`);
+      setOrdenData(orden);
+      setVerOrdenId(a.id);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "No se pudo generar la Orden de Aplicación.");
+    }
   }
 
   async function entregar(id: string) {
@@ -621,6 +656,26 @@ export default function Aplicaciones() {
               <input type="number" step="0.01" style={{ width: 140 }} value={capacidadTanque} onChange={(e) => setCapacidadTanque(e.target.value)} />
             </label>
             <label className="field">
+              Tipo de aplicación
+              <select value={tipoAplicacionId} onChange={(e) => setTipoAplicacionId(e.target.value)}>
+                <option value="">Sin especificar</option>
+                {tiposAplicacion.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.nombre}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              + Tipo nuevo
+              <div style={{ display: "flex", gap: 4 }}>
+                <input value={nuevoTipoAplicacion} onChange={(e) => setNuevoTipoAplicacion(e.target.value)} placeholder="ej. Drench" style={{ width: 120 }} />
+                <button type="button" className="btn-secondary" onClick={agregarTipoAplicacionNuevo} disabled={!nuevoTipoAplicacion.trim()}>
+                  +
+                </button>
+              </div>
+            </label>
+            <label className="field">
               Fecha inicio
               <FechaInput value={fechaInicio} onChange={setFechaInicio} required />
             </label>
@@ -713,6 +768,11 @@ export default function Aplicaciones() {
                 </div>
 
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  {a.capacidadTanque != null && (
+                    <button className="btn-secondary" onClick={() => verOrden(a)}>
+                      Ver Orden
+                    </button>
+                  )}
                   {(a.estado === "programada" || a.estado === "entregada") && a.realizadas.length === 0 && (
                     <button className="btn-secondary" onClick={() => iniciarEdicionProgramada(a)}>
                       Editar
@@ -899,6 +959,17 @@ export default function Aplicaciones() {
           ))}
           {aplicaciones.length === 0 && <p style={{ color: "var(--ink-soft)" }}>No hay aplicaciones{usuario?.huertaId ? " en tu Huerta" : ""}.</p>}
         </div>
+      )}
+
+      {verOrdenId && ordenData && (
+        <OrdenAplicacionView
+          aplicacionId={verOrdenId}
+          orden={ordenData}
+          onCerrar={() => {
+            setVerOrdenId(null);
+            setOrdenData(null);
+          }}
+        />
       )}
     </div>
   );

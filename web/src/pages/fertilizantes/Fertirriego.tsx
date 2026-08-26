@@ -3,12 +3,13 @@ import { api, ApiError } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
 import { useHuertas } from "../../lib/useHuertas";
 import { useRecetas } from "../../lib/useRecetas";
-import type { ConcentracionUnidad, FertirriegoProgramacion, FrecuenciaFertirriego, Producto, SeccionRiego } from "../../lib/types";
+import type { ConcentracionUnidad, FertirriegoProgramacion, FrecuenciaFertirriego, OrdenFertirriego, Producto, SeccionRiego } from "../../lib/types";
 import FechaInput from "../../components/FechaInput";
 import { formatearFecha } from "../../lib/fecha";
 import { presentacionTexto } from "../../lib/producto";
 import RecetarioPanel, { ROLES_PUEDEN_RECETAS } from "../../components/RecetarioPanel";
 import MezclaPorTanque from "../../components/MezclaPorTanque";
+import OrdenFertirriegoView from "../../components/OrdenFertirriegoView";
 
 const ETIQUETAS_ESTADO: Record<string, string> = {
   programada: "Programada",
@@ -79,6 +80,21 @@ export default function Fertirriego() {
   const [recetaId, setRecetaId] = useState("");
   const [capacidadTanque, setCapacidadTanque] = useState("");
   const [confirmandoDesvioReceta, setConfirmandoDesvioReceta] = useState(false);
+
+  // ---- Orden de Fertirriego (25-ago-2026) ----
+  const [verOrdenId, setVerOrdenId] = useState<string | null>(null);
+  const [ordenData, setOrdenData] = useState<OrdenFertirriego | null>(null);
+
+  async function verOrden(f: FertirriegoProgramacion) {
+    setError(null);
+    try {
+      const orden = await api.get<OrdenFertirriego>(`/fertilizantes/fertirriego/${f.id}/orden`);
+      setOrdenData(orden);
+      setVerOrdenId(f.id);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "No se pudo generar la Orden de Fertirriego.");
+    }
+  }
 
   function cargar() {
     setCargando(true);
@@ -437,6 +453,11 @@ export default function Fertirriego() {
                 </div>
 
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  {f.capacidadTanque != null && (
+                    <button className="btn-secondary" onClick={() => verOrden(f)}>
+                      Ver Orden
+                    </button>
+                  )}
                   {f.estado === "programada" && f.comprometido && (
                     <button className="btn-primary" onClick={() => entregar(f.id)}>
                       Confirmar entrega
@@ -453,6 +474,17 @@ export default function Fertirriego() {
           ))}
           {lista.length === 0 && <p style={{ color: "var(--ink-soft)" }}>No hay fertirriegos programados.</p>}
         </div>
+      )}
+
+      {verOrdenId && ordenData && (
+        <OrdenFertirriegoView
+          fertirriegoId={verOrdenId}
+          orden={ordenData}
+          onCerrar={() => {
+            setVerOrdenId(null);
+            setOrdenData(null);
+          }}
+        />
       )}
     </div>
   );
