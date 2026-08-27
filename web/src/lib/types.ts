@@ -331,6 +331,7 @@ export interface Producto {
   categoria: string;
   ingredienteActivo: string | null;
   nombreComercial: string;
+  marca: string | null;
   contenedor: string;
   presentacionCantidad: string;
   unidad: string;

@@ -24,4 +24,18 @@ export const ACTIVIDADES_SEED: Array<{ nombre: string }> = [
   // originales representaba "aplicar fertilizante granular"; decisión
   // explícita del usuario, mismo esquema que las demás (Individual por hora).
   { nombre: "Fertilización" },
+  // 26-ago-2026: de las ~24 candidatas descartadas el 8-ago, el usuario
+  // confirmó que estas 4 sí son actividades reales de campo y deben
+  // agregarse — más 2 actividades nuevas simples ("Supervisor" ya estaba
+  // en el catálogo desde antes, no se duplica). Mismo esquema que las
+  // demás (Individual por hora, tarifa general, solo gente).
+  { nombre: "Herbicida" },
+  { nombre: "Hora Extra" },
+  { nombre: "Descarga y Acomodo de Planta" },
+  { nombre: "Deshilado" },
+  // Nombre específico (no "Mantenimiento" genérico) para no confundirse
+  // con el módulo de Equipos y Maquinaria, que ya tiene su propio concepto
+  // de mantenimiento de equipos.
+  { nombre: "Mantenimiento Cintilla/Riego" },
+  { nombre: "Albañil" },
 ];

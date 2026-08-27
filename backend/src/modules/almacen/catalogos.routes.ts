@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { requireAuth, requirePermission } from "../../middleware/auth.js";
 import { mensajeErrorValidacion, unoSolo } from "../../core/http.js";
-import { categorias, contenedores, ingredientesActivos } from "./catalogos.js";
+import { categorias, contenedores, ingredientesActivos, marcas } from "./catalogos.js";
 
 const nombreSchema = z.object({ nombre: z.string().min(1) });
 const activoSchema = z.object({ activo: z.boolean() });
@@ -40,3 +40,4 @@ function catalogoRouter(catalogo: { listar: (todas?: boolean) => Promise<unknown
 export const categoriasRouter = catalogoRouter(categorias);
 export const ingredientesActivosRouter = catalogoRouter(ingredientesActivos);
 export const contenedoresRouter = catalogoRouter(contenedores);
+export const marcasRouter = catalogoRouter(marcas);

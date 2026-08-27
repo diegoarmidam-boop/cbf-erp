@@ -40,6 +40,7 @@ export default function Inventario() {
   const categorias = useCatalogoAbierto("/almacen/categorias");
   const ingredientes = useCatalogoAbierto("/almacen/ingredientes-activos");
   const contenedores = useCatalogoAbierto("/almacen/contenedores");
+  const marcas = useCatalogoAbierto("/almacen/marcas");
 
   const [stock, setStock] = useState<Record<string, number>>({});
   const [comprometido, setComprometido] = useState<Record<string, number>>({});
@@ -83,6 +84,7 @@ export default function Inventario() {
   const [categoria, setCategoria] = useState("");
   const [ingredienteActivo, setIngredienteActivo] = useState("");
   const [nombreComercial, setNombreComercial] = useState("");
+  const [marca, setMarca] = useState("");
   const [contenedor, setContenedor] = useState("");
   const [presentacionCantidad, setPresentacionCantidad] = useState("");
   const [unidad, setUnidad] = useState("");
@@ -117,6 +119,7 @@ export default function Inventario() {
       categoria,
       ingredienteActivo: requiereIngrediente ? ingredienteActivo || undefined : undefined,
       nombreComercial,
+      marca: marca || undefined,
       contenedor,
       presentacionCantidad: Number(presentacionCantidad),
       unidad,
@@ -131,6 +134,7 @@ export default function Inventario() {
         setMensaje(r.mensaje ?? "Producto autorizado y agregado al catálogo.");
       }
       setNombreComercial("");
+      setMarca("");
       setContenedor("");
       setPresentacionCantidad("");
       setUnidad("");
@@ -150,6 +154,7 @@ export default function Inventario() {
     setCategoria(p.categoria);
     setIngredienteActivo(p.ingredienteActivo ?? "");
     setNombreComercial(p.nombreComercial);
+    setMarca(p.marca ?? "");
     setContenedor(p.contenedor);
     setPresentacionCantidad(String(p.presentacionCantidad));
     setUnidad(p.unidad);
@@ -257,6 +262,13 @@ export default function Inventario() {
             <input value={nombreComercial} onChange={(e) => setNombreComercial(e.target.value)} required />
           </label>
           <SelectConAgregar
+            label="Marca"
+            value={marca}
+            onChange={setMarca}
+            items={marcas.items}
+            onAgregar={marcas.agregar}
+          />
+          <SelectConAgregar
             label="Contenedor"
             value={contenedor}
             onChange={setContenedor}
@@ -360,6 +372,7 @@ export default function Inventario() {
           <thead>
             <tr>
               <th>Nombre comercial</th>
+              <th>Marca</th>
               <th>Ingrediente activo</th>
               <th>Categoría</th>
               <th>Presentación</th>
@@ -381,6 +394,7 @@ export default function Inventario() {
                     {p.nombreComercial}
                   </button>
                 </td>
+                <td>{p.marca ?? "—"}</td>
                 <td>{p.ingredienteActivo ?? "—"}</td>
                 <td>{p.categoria}</td>
                 <td>{presentacionTexto(p)}</td>
@@ -410,7 +424,7 @@ export default function Inventario() {
             ))}
             {productosFiltrados.length === 0 && (
               <tr>
-                <td colSpan={8} style={{ textAlign: "center", color: "var(--ink-soft)" }}>
+                <td colSpan={9} style={{ textAlign: "center", color: "var(--ink-soft)" }}>
                   Ningún producto coincide con la búsqueda/filtros.
                 </td>
               </tr>
@@ -460,6 +474,7 @@ function DetalleProducto({ productoId, onVolver }: { productoId: string; onVolve
           <h2>{producto.nombreComercial}</h2>
           <div style={{ display: "flex", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
             <span className="tag tag-neutral">{producto.categoria}</span>
+            {producto.marca && <span className="tag tag-neutral">{producto.marca}</span>}
             {producto.ingredienteActivo && <span className="tag tag-neutral">{producto.ingredienteActivo}</span>}
             <span className="tag tag-neutral">{presentacionTexto(producto)}</span>
             <span className={`tag ${producto.autorizado ? "tag-success" : "tag-warning"}`}>{producto.autorizado ? "Autorizado" : "Pendiente"}</span>

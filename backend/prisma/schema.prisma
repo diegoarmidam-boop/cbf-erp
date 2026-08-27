@@ -851,11 +851,22 @@ model Contenedor {
   activo Boolean @default(true)
 }
 
+// Marca (26-ago-2026): catálogo abierto independiente de Proveedor — una
+// misma Marca puede venderla más de un Proveedor, no son el mismo dato y
+// no deben fusionarse. Mismo patrón que Categoría/Contenedor: solo
+// respalda el selector, `Producto.marca` se guarda como texto plano.
+model Marca {
+  id     String  @id @default(uuid())
+  nombre String  @unique
+  activo Boolean @default(true)
+}
+
 model Producto {
   id                   String    @id @default(uuid())
   categoria            String // agroquimico | fertilizante | refaccion | general | ...
   ingredienteActivo    String?
   nombreComercial      String
+  marca                String? // catálogo abierto (26-ago-2026), independiente del Proveedor
   contenedor           String // catálogo abierto (Saco/Bote/Garrafa/Tanque/Bolsa/...)
   presentacionCantidad Decimal   @db.Decimal(10, 3)
   unidad               String

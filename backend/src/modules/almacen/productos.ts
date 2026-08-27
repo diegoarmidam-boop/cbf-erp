@@ -10,6 +10,7 @@ export interface AltaProductoInput {
   categoria: string;
   ingredienteActivo?: string;
   nombreComercial: string;
+  marca?: string;
   contenedor: string;
   presentacionCantidad: number;
   unidad: string;
