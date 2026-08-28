@@ -1,6 +1,7 @@
 import { getToken } from "../lib/api";
 import { api } from "../lib/api";
 import type { OrdenAplicacion } from "../lib/types";
+import { formatearNumero } from "../lib/numero";
 
 /**
  * Orden de Aplicación (9.7, 25-ago-2026): vista en pantalla del documento
@@ -57,7 +58,7 @@ export default function OrdenAplicacionView({ aplicacionId, orden, onCerrar }: {
           </div>
           <div style={filaEstilo}>
             <span>Capacidad tanque/bomba</span>
-            <strong>{e.capacidadTanque} L</strong>
+            <strong>{formatearNumero(e.capacidadTanque)} L</strong>
           </div>
           <div style={filaEstilo}>
             <span>Tipo de aplicación</span>
@@ -65,27 +66,27 @@ export default function OrdenAplicacionView({ aplicacionId, orden, onCerrar }: {
           </div>
           <div style={filaEstilo}>
             <span>Hectáreas a aplicar</span>
-            <strong>{e.hectareasAAplicar} ha</strong>
+            <strong>{formatearNumero(e.hectareasAAplicar)} ha</strong>
           </div>
           <div style={filaEstilo}>
             <span>Gasto de agua</span>
-            <strong>{e.gastoAguaLHa} L/ha</strong>
+            <strong>{formatearNumero(e.gastoAguaLHa)} L/ha</strong>
           </div>
           <div style={filaEstilo}>
             <span>Volumen total de agua</span>
-            <strong>{e.volumenTotalAguaL} L</strong>
+            <strong>{formatearNumero(e.volumenTotalAguaL)} L</strong>
           </div>
           <div style={filaEstilo}>
             <span>Tanques a preparar</span>
-            <strong>{e.tanquesAPreparar}</strong>
+            <strong>{formatearNumero(e.tanquesAPreparar)}</strong>
           </div>
           <div style={filaEstilo}>
             <span>Plantas a tratar</span>
-            <strong>{e.plantasATratar != null ? Math.round(e.plantasATratar) : "No disponible"}</strong>
+            <strong>{e.plantasATratar != null ? formatearNumero(Math.round(e.plantasATratar)) : "No disponible"}</strong>
           </div>
           <div style={filaEstilo}>
             <span>Productos en la mezcla</span>
-            <strong>{e.numeroProductos}</strong>
+            <strong>{formatearNumero(e.numeroProductos)}</strong>
           </div>
           <div style={filaEstilo}>
             <span>Equipo de aplicación</span>
@@ -93,7 +94,7 @@ export default function OrdenAplicacionView({ aplicacionId, orden, onCerrar }: {
           </div>
           <div style={{ ...filaEstilo, borderBottom: "none" }}>
             <span>Hectáreas por tanque</span>
-            <strong>{e.hectareasPorTanque} ha</strong>
+            <strong>{formatearNumero(e.hectareasPorTanque)} ha</strong>
           </div>
         </div>
 
@@ -110,16 +111,16 @@ export default function OrdenAplicacionView({ aplicacionId, orden, onCerrar }: {
               <div style={{ fontSize: 11, color: "var(--ink-soft)", marginBottom: 6 }}>{p.ingredienteActivo}</div>
               <div style={{ fontSize: 12, display: "flex", flexDirection: "column", gap: 3 }}>
                 <span>
-                  Dosis: {p.dosisValor} {p.unidadDosis}
+                  Dosis: {formatearNumero(p.dosisValor)} {p.unidadDosis}
                 </span>
                 <span>
-                  Cantidad total para el lote: {p.cantidadTotalLote.valor} {p.cantidadTotalLote.unidad}
+                  Cantidad total para el lote: {formatearNumero(p.cantidadTotalLote.valor)} {p.cantidadTotalLote.unidad}
                 </span>
                 <span>
-                  Cantidad por tanque completo: {p.cantidadPorTanqueCompleto.valor} {p.cantidadPorTanqueCompleto.unidad}
+                  Cantidad por tanque completo: {formatearNumero(p.cantidadPorTanqueCompleto.valor)} {p.cantidadPorTanqueCompleto.unidad}
                 </span>
                 <span>
-                  Cantidad último tanque: {p.cantidadUltimoTanque.valor} {p.cantidadUltimoTanque.unidad}
+                  Cantidad último tanque: {formatearNumero(p.cantidadUltimoTanque.valor)} {p.cantidadUltimoTanque.unidad}
                 </span>
               </div>
             </div>

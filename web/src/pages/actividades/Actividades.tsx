@@ -7,6 +7,7 @@ import { useEquipos } from "../../lib/useEquipos";
 import type { Actividad, ActividadProgramada, ActividadRealizadaLinea, Cuadro, TipoRecursoActividad } from "../../lib/types";
 import FechaInput from "../../components/FechaInput";
 import { formatearFecha } from "../../lib/fecha";
+import { formatearNumero } from "../../lib/numero";
 
 const ETIQUETAS_TIPO: Record<TipoRecursoActividad, string> = {
   gente: "Gente",
@@ -17,11 +18,6 @@ const ETIQUETAS_TIPO: Record<TipoRecursoActividad, string> = {
 function hoyISO(): string {
   const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
-function formaEntero(valor: string | number): string {
-  const n = Number(valor);
-  return Number.isFinite(n) ? n.toLocaleString("es-MX", { maximumFractionDigits: 3 }) : String(valor);
 }
 
 function formaDinero(valor: number): string {
@@ -355,7 +351,7 @@ export default function Actividades() {
                     {a.huerta.nombre} — {a.actividad.nombre} <span className="tag tag-neutral">{ETIQUETAS_TIPO[a.actividad.tipoRecurso]}</span>
                   </div>
                   <div style={{ fontSize: 12, color: "var(--ink-soft)" }}>
-                    Cuadros: {a.cuadros.map((c) => c.cuadro.nombre).join(", ") || "—"} · {formaEntero(a.hectareasTotalesProgramadas)} ha ·{" "}
+                    Cuadros: {a.cuadros.map((c) => c.cuadro.nombre).join(", ") || "—"} · {formatearNumero(a.hectareasTotalesProgramadas)} ha ·{" "}
                     {formatearFecha(a.fechaInicio)} a {formatearFecha(a.fechaFin)}
                   </div>
                   {a.realizadas.length > 0 && (

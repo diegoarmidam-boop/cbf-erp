@@ -5,6 +5,7 @@ import { useCatalogoAbierto } from "../../lib/useCatalogoAbierto";
 import SelectConAgregar from "../../components/SelectConAgregar";
 import { presentacionTexto } from "../../lib/producto";
 import { formatearFecha } from "../../lib/fecha";
+import { formatearNumero } from "../../lib/numero";
 import type { CancelacionPendienteBodega, MovimientoAlmacenCentral, Producto, ProductoLote, TipoMovimientoAlmacenCentral } from "../../lib/types";
 
 const UNIDADES = ["L", "kg", "g", "ml", "pieza", "bulto", "garrafa"];
@@ -399,10 +400,10 @@ export default function Inventario() {
                 <td>{p.categoria}</td>
                 <td>{presentacionTexto(p)}</td>
                 <td>
-                  {stock[p.id] != null ? `${stock[p.id]} ${p.unidad}` : "—"}
+                  {stock[p.id] != null ? `${formatearNumero(stock[p.id]!)} ${p.unidad}` : "—"}
                   {!!comprometido[p.id] && (
                     <div style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 2 }}>
-                      + {comprometido[p.id]} {p.unidad} comprometido
+                      + {formatearNumero(comprometido[p.id]!)} {p.unidad} comprometido
                     </div>
                   )}
                 </td>
@@ -490,14 +491,14 @@ function DetalleProducto({ productoId, onVolver }: { productoId: string; onVolve
           <div className="kpi-card" style={{ maxWidth: 240 }}>
             <div className="label">Stock disponible</div>
             <div className="value">
-              {total} {producto?.unidad}
+              {formatearNumero(total)} {producto?.unidad}
             </div>
           </div>
           {comprometido > 0 && (
             <div className="kpi-card" style={{ maxWidth: 280 }}>
               <div className="label">Comprometido pendiente de entregar</div>
               <div className="value">
-                {comprometido} {producto?.unidad}
+                {formatearNumero(comprometido)} {producto?.unidad}
               </div>
             </div>
           )}
@@ -520,7 +521,7 @@ function DetalleProducto({ productoId, onVolver }: { productoId: string; onVolve
                 <tr key={l.id}>
                   <td>{l.lote}</td>
                   <td>{formatearFecha(l.fechaCaducidad)}</td>
-                  <td>{l.cantidadActual}</td>
+                  <td>{formatearNumero(l.cantidadActual)}</td>
                 </tr>
               ))}
               {lotes.length === 0 && (
@@ -550,7 +551,7 @@ function DetalleProducto({ productoId, onVolver }: { productoId: string; onVolve
             <tr key={m.id}>
               <td>{formatearFecha(m.fecha)}</td>
               <td>{ETIQUETAS_MOVIMIENTO[m.tipo]}</td>
-              <td>{m.cantidad}</td>
+              <td>{formatearNumero(m.cantidad)}</td>
               <td>{m.motivoAjuste ?? "—"}</td>
             </tr>
           ))}

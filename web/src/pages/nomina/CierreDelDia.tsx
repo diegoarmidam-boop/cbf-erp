@@ -4,6 +4,7 @@ import { api, ApiError } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
 import { useHuertas } from "../../lib/useHuertas";
 import type { CapturaHuertaTodasUPs, DiaCerradoInfo, ResumenCierreHuerta } from "../../lib/types";
+import { formatearDinero, formatearNumero } from "../../lib/numero";
 import FechaInput from "../../components/FechaInput";
 import { formatearFecha } from "../../lib/fecha";
 
@@ -91,7 +92,7 @@ export default function CierreDelDia() {
                   {r.huerta.nombre} {r.cerrado ? <span className="tag tag-neutral">Cerrado</span> : tagEstadoPlazo(r.estadoPlazo)}
                 </div>
                 <div style={{ fontSize: 12, color: "var(--ink-soft)" }}>
-                  {r.cantidadPersonas} personas · {r.totalActividades} actividades · Total bruto ${r.totalBruto.toFixed(2)}
+                  {formatearNumero(r.cantidadPersonas)} personas · {formatearNumero(r.totalActividades)} actividades · Total bruto {formatearDinero(r.totalBruto)}
                 </div>
               </div>
               <button className="btn-primary" onClick={() => setHuertaDetalle(r.huerta)}>

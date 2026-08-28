@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api, ApiError } from "../../lib/api";
 import { useHuertas } from "../../lib/useHuertas";
 import type { AlmacenLocalEntrada, CandadoAlmacenLocal } from "../../lib/types";
+import { formatearNumero } from "../../lib/numero";
 
 export default function AlmacenLocalPage() {
   const { huertas, cargando: cargandoHuertas } = useHuertas();
@@ -84,10 +85,10 @@ export default function AlmacenLocalPage() {
             return (
               <tr key={e.id}>
                 <td>{e.producto.nombreComercial}</td>
-                <td>{e.cantidadRecibidaAcumulada}</td>
-                <td>{e.cantidadReportadaAcumulada}</td>
+                <td>{formatearNumero(e.cantidadRecibidaAcumulada)}</td>
+                <td>{formatearNumero(e.cantidadReportadaAcumulada)}</td>
                 <td>
-                  {candado?.saldoSinJustificar.toFixed(2)}{" "}
+                  {candado ? formatearNumero(candado.saldoSinJustificar, 2) : ""}{" "}
                   {candado?.alertaActiva && <span className="tag tag-danger">Descuadre &gt;15 días</span>}
                 </td>
                 <td>{candado?.diasDesdeUltimaEntrega ?? "—"}</td>

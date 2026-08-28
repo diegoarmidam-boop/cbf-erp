@@ -1,7 +1,7 @@
 import { prisma } from "../../core/db.js";
 
 export function listarSeccionesRiego(huertaId: string) {
-  return prisma.seccionRiego.findMany({ where: { huertaId }, include: { cuadros: { include: { cuadro: true } } } });
+  return prisma.seccionRiego.findMany({ where: { huertaId }, include: { cuadros: { include: { cuadro: true } } }, orderBy: { nombre: "asc" } });
 }
 
 export async function crearSeccionRiego(huertaId: string, nombre: string, cuadroIds: string[]) {

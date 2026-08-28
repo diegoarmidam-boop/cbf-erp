@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { api, ApiError } from "../../lib/api";
 import type { BonoConfig, BonoOtorgado, TipoBono } from "../../lib/types";
+import { formatearDinero } from "../../lib/numero";
 
 export default function Bonos() {
   const [bonos, setBonos] = useState<BonoConfig[]>([]);
@@ -225,7 +226,7 @@ export default function Bonos() {
             <tr key={p.id}>
               <td>{p.personal?.nombreCompleto}</td>
               <td>{p.bonoConfig?.nombre}</td>
-              <td>${Number(p.montoCalculado).toFixed(2)}</td>
+              <td>{formatearDinero(p.montoCalculado)}</td>
               <td style={{ display: "flex", gap: 6 }}>
                 <button className="btn-primary" onClick={() => resolver(p.id, "autorizar")}>
                   Autorizar

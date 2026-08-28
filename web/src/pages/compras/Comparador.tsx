@@ -3,6 +3,7 @@ import { api, ApiError } from "../../lib/api";
 import { useProductos } from "../../lib/useProductos";
 import type { ComparacionCalculada, ComparacionResumen, Proveedor } from "../../lib/types";
 import { formatearInstante } from "../../lib/fecha";
+import { formatearDinero } from "../../lib/numero";
 
 interface CotizacionForm {
   proveedorId: string;
@@ -139,12 +140,12 @@ export default function Comparador() {
                     <td>
                       {c.cantidadPresentacion} {c.unidadPresentacion}
                     </td>
-                    <td>${c.precioPresentacion.toFixed(2)}</td>
+                    <td>{formatearDinero(c.precioPresentacion)}</td>
                     <td>{c.unidadesAPedir}</td>
                     <td>
                       {c.cantidadComprada} {c.unidadPresentacion}
                     </td>
-                    <td>${c.precioFinal.toFixed(2)}</td>
+                    <td>{formatearDinero(c.precioFinal)}</td>
                     <td>{c.porcentajeAprovechamiento.toFixed(1)}%</td>
                     <td>{c.recomendado && <span className="tag tag-success">Recomendado</span>}</td>
                   </tr>
@@ -153,7 +154,7 @@ export default function Comparador() {
             </table>
             {item.recomendacion && (
               <div style={{ marginTop: 10, fontSize: 12.5 }}>
-                Comprar a <strong>{item.recomendacion.proveedorNombre}</strong> — ahorro de ${item.recomendacion.ahorro.toFixed(2)} contra
+                Comprar a <strong>{item.recomendacion.proveedorNombre}</strong> — ahorro de {formatearDinero(item.recomendacion.ahorro)} contra
                 el promedio de los proveedores cotizados.
               </div>
             )}

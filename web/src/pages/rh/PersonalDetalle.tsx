@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { api, ApiError, getToken } from "../../lib/api";
 import type { Personal, PersonalDocumento } from "../../lib/types";
 import { formatearFecha } from "../../lib/fecha";
+import { formatearDinero } from "../../lib/numero";
 
 const ETIQUETAS_DOC: Record<PersonalDocumento["tipoDocumento"], string> = {
   identificacion: "Identificación",
@@ -130,7 +131,7 @@ export default function PersonalDetalle() {
               </div>
               <div>
                 <div style={{ color: "var(--ink-soft)" }}>Sueldo</div>
-                <div>{persona.sueldo ? `$${persona.sueldo}` : "—"}</div>
+                <div>{persona.sueldo ? formatearDinero(persona.sueldo) : "—"}</div>
               </div>
               <div>
                 <div style={{ color: "var(--ink-soft)" }}>RFC</div>

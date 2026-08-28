@@ -1,7 +1,7 @@
 import { prisma } from "../../core/db.js";
 
 export function listarConceptos(equipoId: string) {
-  return prisma.mantenimientoConcepto.findMany({ where: { equipoId } });
+  return prisma.mantenimientoConcepto.findMany({ where: { equipoId }, orderBy: { nombre: "asc" } });
 }
 
 export function crearConcepto(equipoId: string, nombre: string, umbralHoras: number) {

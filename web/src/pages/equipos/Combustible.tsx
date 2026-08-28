@@ -4,6 +4,7 @@ import { useProductos } from "../../lib/useProductos";
 import { useEquipos } from "../../lib/useEquipos";
 import { useEquipoSeleccionado } from "./EquipoSeleccionadoContext";
 import type { AlertaRendimiento, CombustibleCarga } from "../../lib/types";
+import { formatearNumero } from "../../lib/numero";
 import FechaInput from "../../components/FechaInput";
 import { formatearFecha } from "../../lib/fecha";
 
@@ -72,7 +73,7 @@ export default function Combustible() {
     <div>
       {alerta?.anomalo && (
         <div className="tag tag-danger" style={{ display: "block", padding: "8px 12px", marginBottom: 16 }}>
-          Consumo anómalo: {alerta.tasaActual.toFixed(2)} {alerta.unidad} vs. promedio histórico {alerta.promedioHistorico.toFixed(2)}{" "}
+          Consumo anómalo: {formatearNumero(alerta.tasaActual, 2)} {alerta.unidad} vs. promedio histórico {formatearNumero(alerta.promedioHistorico, 2)}{" "}
           {alerta.unidad} ({(alerta.desviacionPorcentual * 100).toFixed(0)}%)
         </div>
       )}

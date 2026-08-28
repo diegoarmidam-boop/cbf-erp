@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, ApiError, getToken } from "../../lib/api";
 import type { ReporteNominaSemanal } from "../../lib/types";
+import { formatearDinero } from "../../lib/numero";
 
 export default function ReporteSemanal() {
   const [reporte, setReporte] = useState<ReporteNominaSemanal | null>(null);
@@ -70,11 +71,11 @@ export default function ReporteSemanal() {
         </div>
         <div className="kpi-card">
           <div className="label">Total neto a pagar</div>
-          <div className="value">${totalNeto.toFixed(2)}</div>
+          <div className="value">{formatearDinero(totalNeto)}</div>
         </div>
         <div className="kpi-card">
           <div className="label">Descuentos de préstamo</div>
-          <div className="value">${totalDescuentos.toFixed(2)}</div>
+          <div className="value">{formatearDinero(totalDescuentos)}</div>
         </div>
         <div className="kpi-card">
           <div className="label">Personas</div>
@@ -107,10 +108,10 @@ export default function ReporteSemanal() {
             <tr key={f.personalId}>
               <td>{f.nombreCompleto}</td>
               <td>{f.tipo}</td>
-              <td>${f.bruto.toFixed(2)}</td>
-              <td>${f.bonos.toFixed(2)}</td>
-              <td>-${f.descuentoPrestamos.toFixed(2)}</td>
-              <td style={{ fontWeight: 700 }}>${f.neto.toFixed(2)}</td>
+              <td>{formatearDinero(f.bruto)}</td>
+              <td>{formatearDinero(f.bonos)}</td>
+              <td>-{formatearDinero(f.descuentoPrestamos)}</td>
+              <td style={{ fontWeight: 700 }}>{formatearDinero(f.neto)}</td>
             </tr>
           ))}
         </tbody>
@@ -130,7 +131,7 @@ export default function ReporteSemanal() {
           <div className="card" style={{ width: 380 }}>
             <h3 style={{ marginBottom: 10 }}>Confirmar semana de nómina</h3>
             <p style={{ fontSize: 12.5, color: "var(--ink-soft)" }}>
-              Esto aplica de verdad los descuentos de préstamo de esta semana (${totalDescuentos.toFixed(2)} en total) — no se puede
+              Esto aplica de verdad los descuentos de préstamo de esta semana ({formatearDinero(totalDescuentos)} en total) — no se puede
               deshacer desde aquí.
             </p>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>

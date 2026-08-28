@@ -1,5 +1,6 @@
 import { api, getToken } from "../lib/api";
 import type { OrdenFertirriego } from "../lib/types";
+import { formatearNumero } from "../lib/numero";
 
 /**
  * Orden de Fertirriego (9.5 Camino 2, 25-ago-2026): vista en pantalla para
@@ -51,7 +52,7 @@ export default function OrdenFertirriegoView({ fertirriegoId, orden, onCerrar }:
           </div>
           <div style={filaEstilo}>
             <span>Válvulas del lote</span>
-            <strong>{e.valvulasDelLote}</strong>
+            <strong>{formatearNumero(e.valvulasDelLote)}</strong>
           </div>
           <div style={filaEstilo}>
             <span>Receta</span>
@@ -63,11 +64,11 @@ export default function OrdenFertirriegoView({ fertirriegoId, orden, onCerrar }:
           </div>
           <div style={filaEstilo}>
             <span>Riegos en la semana</span>
-            <strong>{e.riegosEnLaSemana}</strong>
+            <strong>{formatearNumero(e.riegosEnLaSemana)}</strong>
           </div>
           <div style={{ ...filaEstilo, borderBottom: "none" }}>
             <span>Hectáreas totales</span>
-            <strong>{e.hectareasTotales} ha</strong>
+            <strong>{formatearNumero(e.hectareasTotales)} ha</strong>
           </div>
         </div>
 
@@ -88,12 +89,12 @@ export default function OrdenFertirriegoView({ fertirriegoId, orden, onCerrar }:
               {orden.valvulas.map((v, i) => (
                 <tr key={v.seccionId} style={{ background: i % 2 === 1 ? "var(--bg)" : "transparent" }}>
                   <td style={{ padding: "6px 8px", whiteSpace: "nowrap" }}>{v.nombre}</td>
-                  <td style={{ padding: "6px 8px", textAlign: "right", whiteSpace: "nowrap" }}>{v.hectareas}</td>
+                  <td style={{ padding: "6px 8px", textAlign: "right", whiteSpace: "nowrap" }}>{formatearNumero(v.hectareas)}</td>
                   {orden.productos.map((p) => {
                     const c = p.porValvula.find((pv) => pv.seccionId === v.seccionId)!.cantidad;
                     return (
                       <td key={p.productoId} style={{ padding: "6px 8px", textAlign: "right", whiteSpace: "nowrap" }}>
-                        {c.valor} {c.unidad}
+                        {formatearNumero(c.valor)} {c.unidad}
                       </td>
                     );
                   })}
@@ -101,10 +102,10 @@ export default function OrdenFertirriegoView({ fertirriegoId, orden, onCerrar }:
               ))}
               <tr style={{ fontWeight: 700, borderTop: "2px solid var(--border)" }}>
                 <td style={{ padding: "6px 8px", whiteSpace: "nowrap" }}>Total por riego</td>
-                <td style={{ padding: "6px 8px", textAlign: "right", whiteSpace: "nowrap" }}>{e.hectareasTotales}</td>
+                <td style={{ padding: "6px 8px", textAlign: "right", whiteSpace: "nowrap" }}>{formatearNumero(e.hectareasTotales)}</td>
                 {orden.productos.map((p) => (
                   <td key={p.productoId} style={{ padding: "6px 8px", textAlign: "right", whiteSpace: "nowrap" }}>
-                    {p.totalPorRiego.valor} {p.totalPorRiego.unidad}
+                    {formatearNumero(p.totalPorRiego.valor)} {p.totalPorRiego.unidad}
                   </td>
                 ))}
               </tr>
@@ -113,7 +114,7 @@ export default function OrdenFertirriegoView({ fertirriegoId, orden, onCerrar }:
                 <td></td>
                 {orden.productos.map((p) => (
                   <td key={p.productoId} style={{ padding: "6px 8px", textAlign: "right", whiteSpace: "nowrap" }}>
-                    {p.totalSemana.valor} {p.totalSemana.unidad}
+                    {formatearNumero(p.totalSemana.valor)} {p.totalSemana.unidad}
                   </td>
                 ))}
               </tr>

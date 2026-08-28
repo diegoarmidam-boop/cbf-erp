@@ -14,6 +14,13 @@ const LOGO_PATH = path.resolve(process.cwd(), "src/assets/logo-chula-brand.jpg")
 
 const MARGEN = 40;
 
+// Separador de miles (27-ago-2026, pedido para todo el sistema) — mismo
+// criterio que web/src/lib/numero.ts, duplicado aquí porque el PDF corre
+// en el backend, sin acceso a ese módulo del frontend.
+function nf(valor: number, maxDecimales = 3): string {
+  return valor.toLocaleString("es-MX", { maximumFractionDigits: maxDecimales });
+}
+
 function encabezadoMarca(doc: PDFKit.PDFDocument, titulo: string) {
   try {
     doc.image(LOGO_PATH, MARGEN, 30, { width: 70 });
@@ -81,16 +88,16 @@ export function generarPdfOrdenAplicacion(orden: OrdenAplicacion): PDFKit.PDFDoc
     { etiqueta: "Lote / Huerta", valor: e.loteHuerta },
     { etiqueta: "No. de aplicación", valor: String(e.numeroAplicacion) },
     { etiqueta: "Fecha programada", valor: e.fechaProgramada },
-    { etiqueta: "Capacidad tanque/bomba", valor: `${e.capacidadTanque} L` },
+    { etiqueta: "Capacidad tanque/bomba", valor: `${nf(e.capacidadTanque)} L` },
     { etiqueta: "Tipo de aplicación", valor: e.tipoAplicacion ?? "Sin especificar" },
-    { etiqueta: "Hectáreas a aplicar", valor: `${e.hectareasAAplicar} ha` },
-    { etiqueta: "Gasto de agua", valor: `${e.gastoAguaLHa} L/ha` },
-    { etiqueta: "Volumen total de agua", valor: `${e.volumenTotalAguaL} L` },
-    { etiqueta: "Tanques a preparar", valor: String(e.tanquesAPreparar) },
-    { etiqueta: "Plantas a tratar", valor: e.plantasATratar != null ? String(Math.round(e.plantasATratar)) : "No disponible" },
-    { etiqueta: "Productos en la mezcla", valor: String(e.numeroProductos) },
+    { etiqueta: "Hectáreas a aplicar", valor: `${nf(e.hectareasAAplicar)} ha` },
+    { etiqueta: "Gasto de agua", valor: `${nf(e.gastoAguaLHa)} L/ha` },
+    { etiqueta: "Volumen total de agua", valor: `${nf(e.volumenTotalAguaL)} L` },
+    { etiqueta: "Tanques a preparar", valor: nf(e.tanquesAPreparar) },
+    { etiqueta: "Plantas a tratar", valor: e.plantasATratar != null ? nf(Math.round(e.plantasATratar)) : "No disponible" },
+    { etiqueta: "Productos en la mezcla", valor: nf(e.numeroProductos) },
     { etiqueta: "Equipo de aplicación", valor: e.equipoAplicacion },
-    { etiqueta: "Hectáreas por tanque", valor: `${e.hectareasPorTanque} ha` },
+    { etiqueta: "Hectáreas por tanque", valor: `${nf(e.hectareasPorTanque)} ha` },
   ]);
 
   y += 6;
@@ -109,11 +116,11 @@ export function generarPdfOrdenAplicacion(orden: OrdenAplicacion): PDFKit.PDFDoc
       String(p.numero),
       p.nombreComercial,
       p.ingredienteActivo,
-      String(p.dosisValor),
+      nf(p.dosisValor),
       p.unidadDosis,
-      `${p.cantidadTotalLote.valor} ${p.cantidadTotalLote.unidad}`,
-      `${p.cantidadPorTanqueCompleto.valor} ${p.cantidadPorTanqueCompleto.unidad}`,
-      `${p.cantidadUltimoTanque.valor} ${p.cantidadUltimoTanque.unidad}`,
+      `${nf(p.cantidadTotalLote.valor)} ${p.cantidadTotalLote.unidad}`,
+      `${nf(p.cantidadPorTanqueCompleto.valor)} ${p.cantidadPorTanqueCompleto.unidad}`,
+      `${nf(p.cantidadUltimoTanque.valor)} ${p.cantidadUltimoTanque.unidad}`,
     ])
   );
 
@@ -132,11 +139,11 @@ export function generarPdfOrdenFertirriego(orden: OrdenFertirriego): PDFKit.PDFD
       { etiqueta: "Lote", valor: e.lote },
       { etiqueta: "Semana", valor: `${e.semana.inicio} al ${e.semana.fin}` },
       { etiqueta: "Fecha", valor: e.fecha },
-      { etiqueta: "Válvulas del lote", valor: String(e.valvulasDelLote) },
+      { etiqueta: "Válvulas del lote", valor: nf(e.valvulasDelLote) },
       { etiqueta: "Receta", valor: e.receta ?? "Programación libre" },
       { etiqueta: "Frecuencia", valor: e.frecuencia },
-      { etiqueta: "Riegos en la semana", valor: String(e.riegosEnLaSemana) },
-      { etiqueta: "Hectáreas totales", valor: `${e.hectareasTotales} ha` },
+      { etiqueta: "Riegos en la semana", valor: nf(e.riegosEnLaSemana) },
+      { etiqueta: "Hectáreas totales", valor: `${nf(e.hectareasTotales)} ha` },
     ],
     4
   );
@@ -150,21 +157,21 @@ export function generarPdfOrdenFertirriego(orden: OrdenFertirriego): PDFKit.PDFD
 
   const filas = orden.valvulas.map((v) => [
     v.nombre,
-    String(v.hectareas),
+    nf(v.hectareas),
     ...orden.productos.map((p) => {
       const c = p.porValvula.find((pv) => pv.seccionId === v.seccionId)!.cantidad;
-      return `${c.valor} ${c.unidad}`;
+      return `${nf(c.valor)} ${c.unidad}`;
     }),
   ]);
   filas.push([
     "Total por riego",
-    String(e.hectareasTotales),
-    ...orden.productos.map((p) => `${p.totalPorRiego.valor} ${p.totalPorRiego.unidad}`),
+    nf(e.hectareasTotales),
+    ...orden.productos.map((p) => `${nf(p.totalPorRiego.valor)} ${p.totalPorRiego.unidad}`),
   ]);
   filas.push([
     "Total de la semana",
     "",
-    ...orden.productos.map((p) => `${p.totalSemana.valor} ${p.totalSemana.unidad}`),
+    ...orden.productos.map((p) => `${nf(p.totalSemana.valor)} ${p.totalSemana.unidad}`),
   ]);
 
   tabla(doc, y, anchos, encabezados, filas);

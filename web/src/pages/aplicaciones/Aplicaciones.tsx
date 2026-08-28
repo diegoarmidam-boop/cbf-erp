@@ -8,6 +8,7 @@ import { useCatalogoAbierto } from "../../lib/useCatalogoAbierto";
 import type { Aplicacion, AplicacionRealizadaLinea, ConcentracionUnidad, Cuadro, Equipo, ModalidadAplicacion, OrdenAplicacion, Producto } from "../../lib/types";
 import FechaInput from "../../components/FechaInput";
 import { formatearFecha, formatearInstante } from "../../lib/fecha";
+import { formatearNumero } from "../../lib/numero";
 import { presentacionTexto } from "../../lib/producto";
 import RecetarioPanel, { ROLES_PUEDEN_RECETAS } from "../../components/RecetarioPanel";
 import MezclaPorTanque from "../../components/MezclaPorTanque";
@@ -37,11 +38,6 @@ function tagEstado(estado: string) {
 function hoyISO(): string {
   const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
-function formaEntero(valor: string): string {
-  const n = Number(valor);
-  return Number.isFinite(n) ? n.toLocaleString("es-MX", { maximumFractionDigits: 3 }) : valor;
 }
 
 let contadorKey = 0;
@@ -734,7 +730,7 @@ export default function Aplicaciones() {
                   </div>
                   {a.productos.map((p) => (
                     <div key={p.id} style={{ fontSize: 12, color: "var(--ink-soft)" }}>
-                      {p.producto.nombreComercial}: {formaEntero(p.cantidadTotalCalculada)} {p.producto.unidad} · {p.concentracionValor}{" "}
+                      {p.producto.nombreComercial}: {formatearNumero(p.cantidadTotalCalculada)} {p.producto.unidad} · {p.concentracionValor}{" "}
                       {p.concentracionUnidad.replace("_", "/")}
                     </div>
                   ))}
@@ -753,7 +749,7 @@ export default function Aplicaciones() {
                   )}
                   {a.realizadas.length > 0 && (
                     <div style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: 4 }}>
-                      {(a.porcentajeAvance ?? 0).toFixed(1)}% avance · {a.horasHombreTotales ?? 0} horas-hombre totales · {a.realizadas.length}{" "}
+                      {(a.porcentajeAvance ?? 0).toFixed(1)}% avance · {formatearNumero(a.horasHombreTotales ?? 0)} horas-hombre totales · {a.realizadas.length}{" "}
                       reporte{a.realizadas.length === 1 ? "" : "s"}
                     </div>
                   )}

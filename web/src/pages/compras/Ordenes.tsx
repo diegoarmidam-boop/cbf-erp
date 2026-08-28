@@ -4,6 +4,7 @@ import { useProductos } from "../../lib/useProductos";
 import type { MejorProveedor, OrdenCompra, Proveedor } from "../../lib/types";
 import FechaInput from "../../components/FechaInput";
 import { formatearFecha, formatearInstante } from "../../lib/fecha";
+import { formatearDinero } from "../../lib/numero";
 import { presentacionTexto } from "../../lib/producto";
 
 const ETIQUETAS_ESTADO: Record<string, string> = {
@@ -172,7 +173,7 @@ export default function Ordenes() {
                 </div>
                 {o.proveedor && (
                   <div style={{ fontSize: 12, color: "var(--ink-soft)" }}>
-                    {o.proveedor.nombre} · ${o.precioUnitario}/{o.producto.unidad}
+                    {o.proveedor.nombre} · {formatearDinero(o.precioUnitario ?? 0)}/{o.producto.unidad}
                     {o.fechaEsperada && ` · esperada ${formatearFecha(o.fechaEsperada)}`}
                   </div>
                 )}
@@ -212,7 +213,7 @@ export default function Ordenes() {
               <div style={{ marginTop: 12, borderTop: "1px solid var(--border)", paddingTop: 12 }}>
                 {mejores.length > 0 && (
                   <div style={{ fontSize: 11.5, color: "var(--ink-soft)", marginBottom: 8 }}>
-                    Mejores anteriores: {mejores.map((m) => `${m.proveedor.nombre} ($${m.precioUnitario})`).join(" · ")}
+                    Mejores anteriores: {mejores.map((m) => `${m.proveedor.nombre} (${formatearDinero(m.precioUnitario)})`).join(" · ")}
                   </div>
                 )}
                 <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>

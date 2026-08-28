@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api, ApiError } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
@@ -114,6 +114,15 @@ export default function CapturaDelDia() {
     if (t.tipo === "individual") return personal.find((p) => p.id === t.personalId)?.nombreCompleto ?? "—";
     return grupos.find((g) => g.id === t.grupoId)?.nombre ?? "Grupo sin nombre";
   }
+
+  // Orden alfabético (27-ago-2026, pedido para toda lista de personas):
+  // se ordena aquí, no al guardar `tarjetas` — el nombre depende de
+  // `personal`/`grupos`, que pueden llegar después de la primera carga
+  // (evita quedar ordenado por como sea que haya llegado la respuesta).
+  const tarjetasOrdenadas = useMemo(
+    () => [...tarjetas].sort((a, b) => nombreDeTarjeta(a).localeCompare(nombreDeTarjeta(b), "es-MX")),
+    [tarjetas, personal, grupos]
+  );
 
   function huertaCerrada(huertaId: string): boolean {
     return datos.find((d) => d.huerta.id === huertaId)?.cerrado ?? false;
@@ -279,7 +288,7 @@ export default function CapturaDelDia() {
           </div>
 
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            {tarjetas.map((t) => {
+            {tarjetasOrdenadas.map((t) => {
               const grupoInfo = t.tipo === "grupal" ? grupos.find((g) => g.id === t.grupoId) : undefined;
               return (
                 <div key={t.key} className="card">

@@ -10,7 +10,11 @@ export interface VersionCuadroInput {
 }
 
 export function listarCuadros(huertaId: string) {
-  return prisma.cuadro.findMany({ where: { huertaId }, include: { versiones: { orderBy: { vigenteDesde: "desc" } } } });
+  return prisma.cuadro.findMany({
+    where: { huertaId },
+    include: { versiones: { orderBy: { vigenteDesde: "desc" } } },
+    orderBy: { nombre: "asc" },
+  });
 }
 
 export async function crearCuadro(huertaId: string, nombre: string, version: VersionCuadroInput, vigenteDesde: string) {

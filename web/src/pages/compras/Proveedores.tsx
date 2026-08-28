@@ -3,6 +3,7 @@ import { api, ApiError } from "../../lib/api";
 import type { Proveedor } from "../../lib/types";
 import FechaInput from "../../components/FechaInput";
 import { formatearFecha } from "../../lib/fecha";
+import { formatearDinero } from "../../lib/numero";
 
 export default function Proveedores() {
   const [proveedores, setProveedores] = useState<Proveedor[]>([]);
@@ -144,7 +145,7 @@ export default function Proveedores() {
           {proveedores.map((p) => (
             <tr key={p.id}>
               <td>{p.nombre}</td>
-              <td>{p.creditoMonto ? `$${p.creditoMonto}` : "—"}</td>
+              <td>{p.creditoMonto ? formatearDinero(p.creditoMonto) : "—"}</td>
               <td>{formatearFecha(p.creditoVencimiento)}</td>
               <td>
                 {editandoDiasId === p.id ? (

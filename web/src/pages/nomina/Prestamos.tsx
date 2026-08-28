@@ -4,6 +4,7 @@ import { usePersonal } from "../../lib/usePersonal";
 import type { Prestamo } from "../../lib/types";
 import FechaInput from "../../components/FechaInput";
 import { formatearFecha } from "../../lib/fecha";
+import { formatearDinero } from "../../lib/numero";
 
 interface PeriodoNomina {
   inicio: string;
@@ -163,8 +164,8 @@ export default function Prestamos() {
               return (
                 <tr key={p.id} style={pendiente ? { background: "var(--pink-soft, #fdeef1)" } : undefined}>
                   <td>{p.personal?.nombreCompleto}</td>
-                  <td>${Number(p.saldoPendiente).toFixed(2)}</td>
-                  <td>${Number(p.montoPorDescuento).toFixed(2)}</td>
+                  <td>{formatearDinero(p.saldoPendiente)}</td>
+                  <td>{formatearDinero(p.montoPorDescuento)}</td>
                   <td>{formatearFecha(p.proximoDescuento)}</td>
                   <td>
                     <span className={`tag ${pendiente ? "tag-warning" : "tag-neutral"}`}>
@@ -192,7 +193,7 @@ export default function Prestamos() {
             <h3 style={{ marginBottom: 10 }}>¿Adelantar el descuento?</h3>
             <p style={{ fontSize: 13, marginBottom: 14 }}>
               El descuento de este periodo para <strong>{confirmandoAdelanto.personal?.nombreCompleto}</strong> ya se aplicó. ¿Quieres
-              descontar ${Number(confirmandoAdelanto.montoPorDescuento).toFixed(2)} correspondiente al periodo de{" "}
+              descontar {formatearDinero(confirmandoAdelanto.montoPorDescuento)} correspondiente al periodo de{" "}
               {confirmandoAdelanto.periodicidad === "quincenal" ? "quincena" : "semana"} que termina el{" "}
               {formatearFecha(confirmandoAdelanto.proximoDescuento)}?
             </p>
