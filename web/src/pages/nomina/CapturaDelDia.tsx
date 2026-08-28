@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api, ApiError } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
@@ -61,8 +61,15 @@ function construirTarjetas(datos: CapturaHuertaTodasUPs[]): Tarjeta[] {
         key: esRegistro ? (r as RegistroNomina).id : nuevaKey(),
         huertaId: h.huerta.id,
         actividadId: r.actividadId,
-        cuadroId: r.cuadroId,
-        cantidad: r.cantidad,
+        // El backend manda cuadroId como `null` (no `undefined`) y cantidad
+        // como string (Decimal de Prisma serializado a JSON) — si se
+        // reenvían tal cual al guardar una línea que nadie tocó, el
+        // schema del POST las rechaza (cuadroId no acepta null, cantidad
+        // no acepta string), tumbando el día COMPLETO con un 400 silencioso
+        // apenas se agrega o toca una sola línea. Normalizamos aquí, una
+        // sola vez, al construir el estado local.
+        cuadroId: r.cuadroId ?? undefined,
+        cantidad: r.cantidad === null || r.cantidad === undefined ? null : Number(r.cantidad),
         automatico: esRegistro && (r as RegistroNomina).origen !== "manual",
         origenLabel: esRegistro ? ETIQUETAS_ORIGEN[(r as RegistroNomina).origen] : undefined,
       });
@@ -74,7 +81,7 @@ function construirTarjetas(datos: CapturaHuertaTodasUPs[]): Tarjeta[] {
 export default function CapturaDelDia() {
   const { usuario } = useAuth();
   const { actividades } = useActividades();
-  const { personal } = usePersonal(true);
+  const { personal, refetch: refetchPersonal } = usePersonal(true);
   const puedeEditarCerrado = usuario ? ROLES_EDITAR_NOMINA.includes(usuario.rol) : false;
 
   const [searchParams] = useSearchParams();
@@ -89,6 +96,17 @@ export default function CapturaDelDia() {
 
   const [agregarTipo, setAgregarTipo] = useState<"individual" | "grupal">("individual");
   const [agregarId, setAgregarId] = useState("");
+
+  // Alta rápida de personal nuevo sin salir de la pantalla (27-ago-2026):
+  // antes, si a medio llenar la captura del día faltaba dar de alta a
+  // alguien, había que salirse a RH, perder lo ya llenado (o guardar
+  // primero y volver, arriesgándose a que la persona nueva no quedara
+  // bien agregada). Con esto se da de alta ahí mismo, como destajo — el
+  // caso normal — y queda disponible al instante en "+ Agregar persona".
+  const [mostrarNuevaPersona, setMostrarNuevaPersona] = useState(false);
+  const [nuevoNombrePersona, setNuevoNombrePersona] = useState("");
+  const [creandoPersona, setCreandoPersona] = useState(false);
+  const errorRef = useRef<HTMLDivElement>(null);
 
   function cargar() {
     if (!fecha) return;
@@ -106,6 +124,13 @@ export default function CapturaDelDia() {
   }
 
   useEffect(cargar, [fecha]);
+
+  // Con 70+ tarjetas la página es larga y "Guardar" queda hasta abajo —
+  // si guardar() falla por una línea incompleta, el error aparece arriba
+  // y puede pasar totalmente desapercibido. Lo llevamos a la vista.
+  useEffect(() => {
+    if (error) errorRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [error]);
 
   const multiRancho = datos.length > 1;
   const huertaUnica = datos[0]?.huerta.id;
@@ -189,6 +214,32 @@ export default function CapturaDelDia() {
     setAgregarId("");
   }
 
+  // Da de alta a la persona como "destajo" (caso normal en Captura del
+  // día) y la deja lista para agregar como tarjeta sin recargar la
+  // página ni perder lo que ya se llenó.
+  async function crearPersona() {
+    const nombre = nuevoNombrePersona.trim();
+    if (!nombre) return;
+    setCreandoPersona(true);
+    setError(null);
+    try {
+      const nueva = await api.post<{ id: string }>("/personal", {
+        nombreCompleto: nombre,
+        tipo: "destajo",
+        ...(!multiRancho && huertaUnica ? { huertaId: huertaUnica } : {}),
+      });
+      await refetchPersonal();
+      setAgregarTipo("individual");
+      setAgregarId(nueva.id);
+      setNuevoNombrePersona("");
+      setMostrarNuevaPersona(false);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "No se pudo dar de alta a la persona.");
+    } finally {
+      setCreandoPersona(false);
+    }
+  }
+
   async function guardar() {
     setGuardando(true);
     setError(null);
@@ -239,9 +290,16 @@ export default function CapturaDelDia() {
       }
     }
     setGuardando(false);
-    if (errores.length > 0) setError(errores.join(" · "));
-    else setMensaje("Captura guardada.");
-    cargar();
+    if (errores.length > 0) {
+      // Si falló, NO recargamos: `cargar()` trae de vuelta lo que ya
+      // había en el servidor y borraría del estado local justo la
+      // tarjeta/línea que el usuario acaba de agregar y todavía no logra
+      // guardar — obligándolo a volver a escribirla desde cero.
+      setError(errores.join(" · "));
+    } else {
+      setMensaje("Captura guardada.");
+      cargar();
+    }
   }
 
   const personalDisponible = personal.filter((p) => !tarjetas.some((t) => t.key === `p:${p.id}`));
@@ -258,7 +316,7 @@ export default function CapturaDelDia() {
       </div>
 
       {error && (
-        <div className="tag tag-danger" style={{ marginBottom: 12, display: "block", padding: "8px 12px" }}>
+        <div ref={errorRef} className="tag tag-danger" style={{ marginBottom: 12, display: "block", padding: "8px 12px" }}>
           {error}
         </div>
       )}
@@ -418,6 +476,37 @@ export default function CapturaDelDia() {
             <button className="btn-secondary" onClick={agregarTarjeta} disabled={!agregarId}>
               + Agregar persona
             </button>
+            {agregarTipo === "individual" &&
+              (mostrarNuevaPersona ? (
+                <>
+                  <label className="field" style={{ minWidth: 220 }}>
+                    Nombre de la persona nueva
+                    <input
+                      type="text"
+                      value={nuevoNombrePersona}
+                      onChange={(e) => setNuevoNombrePersona(e.target.value)}
+                      placeholder="Nombre completo"
+                    />
+                  </label>
+                  <button className="btn-primary" onClick={crearPersona} disabled={creandoPersona || !nuevoNombrePersona.trim()}>
+                    {creandoPersona ? "Dando de alta…" : "Dar de alta"}
+                  </button>
+                  <button
+                    className="btn-secondary"
+                    onClick={() => {
+                      setMostrarNuevaPersona(false);
+                      setNuevoNombrePersona("");
+                    }}
+                    disabled={creandoPersona}
+                  >
+                    Cancelar
+                  </button>
+                </>
+              ) : (
+                <button className="btn-secondary" onClick={() => setMostrarNuevaPersona(true)}>
+                  + Nueva persona (aún no dada de alta)
+                </button>
+              ))}
           </div>
 
           <div style={{ marginTop: 16 }}>
