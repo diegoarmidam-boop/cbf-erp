@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { api, ApiError } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
 import { useHuertas } from "../../lib/useHuertas";
@@ -26,12 +26,18 @@ export default function CierreDelDia() {
   const { huertas } = useHuertas();
   const puedeVerCerrados = usuario ? ROLES_EDITAR_NOMINA.includes(usuario.rol) : false;
 
-  const [fecha, setFecha] = useState(hoyISO());
+  // Pre-llenado de contexto desde una notificación (29-ago-2026, "cierre
+  // de día pendiente"): ?fecha= precarga el día; ?huertaId= (si matchea una
+  // fila del resumen de ese día) salta directo al detalle de esa Huerta,
+  // en vez de dejar al usuario buscarla a mano entre las tarjetas.
+  const [searchParams] = useSearchParams();
+  const [fecha, setFecha] = useState(searchParams.get("fecha") || hoyISO());
   const [resumen, setResumen] = useState<ResumenCierreHuerta[]>([]);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const [huertaDetalle, setHuertaDetalle] = useState<{ id: string; nombre: string } | null>(null);
+  const autoAbrioDetalle = useRef(false);
 
   const [mostrarCerrados, setMostrarCerrados] = useState(false);
 
@@ -47,6 +53,15 @@ export default function CierreDelDia() {
   }
 
   useEffect(cargarResumen, [fecha]);
+
+  useEffect(() => {
+    if (autoAbrioDetalle.current || resumen.length === 0) return;
+    const huertaIdBuscada = searchParams.get("huertaId");
+    if (!huertaIdBuscada) return;
+    const fila = resumen.find((r) => r.huerta.id === huertaIdBuscada);
+    if (fila) setHuertaDetalle(fila.huerta);
+    autoAbrioDetalle.current = true;
+  }, [resumen, searchParams]);
 
   if (huertaDetalle) {
     return (

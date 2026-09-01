@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { api, ApiError } from "../../lib/api";
 import { useHuertas } from "../../lib/useHuertas";
 import type { AlmacenLocalEntrada, CandadoAlmacenLocal } from "../../lib/types";
@@ -6,7 +7,11 @@ import { formatearNumero } from "../../lib/numero";
 
 export default function AlmacenLocalPage() {
   const { huertas, cargando: cargandoHuertas } = useHuertas();
-  const [huertaId, setHuertaId] = useState("");
+  // ?huertaId= (29-ago-2026): pre-llenado desde una notificación de
+  // descuadre — si trae una Huerta válida, se usa esa en vez de la primera
+  // de la lista.
+  const [searchParams] = useSearchParams();
+  const [huertaId, setHuertaId] = useState(searchParams.get("huertaId") || "");
   const [entradas, setEntradas] = useState<AlmacenLocalEntrada[]>([]);
   const [candados, setCandados] = useState<CandadoAlmacenLocal[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -82,8 +87,9 @@ export default function AlmacenLocalPage() {
         <tbody>
           {entradas.map((e) => {
             const candado = candados.find((c) => c.productoId === e.productoId);
+            const resaltada = searchParams.get("productoId") === e.productoId;
             return (
-              <tr key={e.id}>
+              <tr key={e.id} style={resaltada ? { background: "var(--pink-soft)" } : undefined}>
                 <td>{e.producto.nombreComercial}</td>
                 <td>{formatearNumero(e.cantidadRecibidaAcumulada)}</td>
                 <td>{formatearNumero(e.cantidadReportadaAcumulada)}</td>

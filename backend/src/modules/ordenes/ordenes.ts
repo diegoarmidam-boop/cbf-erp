@@ -1,4 +1,15 @@
-import { calcularCantidadTotal, formatearCantidadProducto, mlSolucionPorPlanta, plantasTotalesCuadro, riegosEnSemana, semanaDeFecha } from "@cbf/shared";
+import {
+  calcularCantidadTotal,
+  calcularCantidadTotalFertirriego,
+  compararNombreNumerico,
+  formatearCantidadProducto,
+  formatearCantidadProductoFertirriego,
+  mlSolucionPorPlanta,
+  plantasTotalesCuadro,
+  riegosEnSemana,
+  riegosEnVentana,
+  semanaDeFecha,
+} from "@cbf/shared";
 import { prisma } from "../../core/db.js";
 import { obtenerAplicacion } from "../aplicaciones/aplicaciones.js";
 import { obtenerFertirriego } from "../fertilizantes/fertirriego.js";
@@ -12,6 +23,7 @@ const ETIQUETA_FRECUENCIA: Record<string, string> = {
   patron_2_1: "2 sí, 1 no",
 };
 const ETIQUETA_UNIDAD_DOSIS: Record<string, string> = { ml_l: "mL/L", g_l: "g/L", kg_l: "kg/L" };
+const ETIQUETA_UNIDAD_DOSIS_FERTIRRIEGO: Record<string, string> = { kg_ha: "kg/ha", l_ha: "L/ha", g_ha: "g/ha" };
 
 export class OrdenSinCapacidadTanqueError extends Error {
   constructor() {
@@ -124,20 +136,16 @@ export async function construirOrdenAplicacion(aplicacionId: string) {
 export type OrdenAplicacion = Awaited<ReturnType<typeof construirOrdenAplicacion>>;
 
 /**
- * Orden de Fertirriego (9.5 Camino 2, 25-ago-2026): documento para el
- * Encargado de Riego. Desglose por válvula = Sección de Riego, usando las
- * hectáreas ya existentes de cada una (9.1) — no requiere ningún campo
- * nuevo. Reutiliza calcularCantidadTotal indirectamente vía la misma
- * proporción hectáreas-de-la-válvula/hectáreas-totales que ya usa el
- * cálculo de mezcla por tanque.
+ * Orden de Fertirriego (9.5 Camino 2, 25-ago-2026, corregida 27-ago-2026):
+ * documento para el Encargado de Riego. Desglose por válvula = Sección de
+ * Riego, usando las hectáreas ya existentes de cada una (9.1) — no
+ * requiere ningún campo nuevo. Dosis directa × hectáreas de la válvula, ya
+ * no concentración × litros de agua/ha × hectáreas ni capacidad de tanque
+ * (esa versión anterior copiaba el modelo de Aplicaciones por error — ver
+ * detalle completo en el schema, FertirriegoProgramacion).
  */
 export async function construirOrdenFertirriego(fertirriegoId: string) {
   const fertirriego = await obtenerFertirriego(fertirriegoId);
-  if (fertirriego.capacidadTanque == null) {
-    throw new OrdenSinCapacidadTanqueError();
-  }
-
-  const litrosAguaPorHa = Number(fertirriego.litrosAguaPorHa);
   const fechaInicioISO = fertirriego.fechaInicio.toISOString().slice(0, 10);
 
   const valvulas: { seccionId: string; nombre: string; hectareas: number }[] = [];
@@ -150,29 +158,37 @@ export async function construirOrdenFertirriego(fertirriegoId: string) {
     }
     valvulas.push({ seccionId, nombre: seccion.nombre, hectareas });
   }
+  // 9.15 (31-ago-2026): orden numérico, no alfabético — "Válvula 2" antes
+  // que "Válvula 10". Se ordena aquí (y no solo al programar) para que la
+  // Orden salga correcta también para programaciones ya guardadas con el
+  // orden alfabético viejo.
+  valvulas.sort((a, b) => compararNombreNumerico(a.nombre, b.nombre));
   const hectareasTotales = valvulas.reduce((s, v) => s + v.hectareas, 0);
 
   const riegos = riegosEnSemana(fertirriego.frecuencia as "diario" | "cada_2_dias" | "cada_3_dias" | "patron_2_1");
+  const diasCampania = Math.round((fertirriego.fechaFin.getTime() - fertirriego.fechaInicio.getTime()) / 86_400_000) + 1;
+  const riegosCampania = riegosEnVentana(fertirriego.frecuencia as "diario" | "cada_2_dias" | "cada_3_dias" | "patron_2_1", diasCampania);
 
-  // Cantidad de cada producto por válvula: misma fórmula ya construida
-  // (concentración × litros de agua/ha × hectáreas), aplicada con las
-  // hectáreas propias de esa válvula en vez de las hectáreas totales.
+  // Cantidad de cada producto por válvula: dosis del producto × hectáreas
+  // de esa válvula específica (misma fórmula que el total, aplicada con
+  // las hectáreas propias de la válvula en vez de las hectáreas totales).
   const productosTabla = fertirriego.productos.map((p) => {
     const porValvula = valvulas.map((v) => ({
       seccionId: v.seccionId,
-      cantidad: formatearCantidadProducto(p.dosisUnidad, calcularCantidadTotal(Number(p.dosisValor), p.dosisUnidad, litrosAguaPorHa, v.hectareas)),
+      cantidad: formatearCantidadProductoFertirriego(p.dosisUnidad, calcularCantidadTotalFertirriego(Number(p.dosisValor), p.dosisUnidad, v.hectareas)),
     }));
-    const totalPorRiego = formatearCantidadProducto(p.dosisUnidad, Number(p.cantidadTotalCalculada));
+    const totalPorRiego = formatearCantidadProductoFertirriego(p.dosisUnidad, Number(p.cantidadTotalCalculada));
     const totalSemanaBase = Number(p.cantidadTotalCalculada) * riegos;
     return {
       productoId: p.productoId,
       nombreComercial: p.producto.nombreComercial,
       ingredienteActivo: p.producto.ingredienteActivo ?? "—",
       dosisValor: Number(p.dosisValor),
-      unidadDosis: ETIQUETA_UNIDAD_DOSIS[p.dosisUnidad],
+      unidadDosis: ETIQUETA_UNIDAD_DOSIS_FERTIRRIEGO[p.dosisUnidad],
       porValvula,
       totalPorRiego,
-      totalSemana: formatearCantidadProducto(p.dosisUnidad, totalSemanaBase),
+      totalSemana: formatearCantidadProductoFertirriego(p.dosisUnidad, totalSemanaBase),
+      totalCampania: formatearCantidadProductoFertirriego(p.dosisUnidad, Number(p.cantidadTotalCalculada) * riegosCampania),
     };
   });
 
@@ -185,6 +201,8 @@ export async function construirOrdenFertirriego(fertirriegoId: string) {
       receta: fertirriego.receta?.nombre ?? null,
       frecuencia: ETIQUETA_FRECUENCIA[fertirriego.frecuencia] ?? fertirriego.frecuencia,
       riegosEnLaSemana: riegos,
+      riegosEnCampania: riegosCampania,
+      fechaFinCampania: fertirriego.fechaFin.toISOString().slice(0, 10),
       hectareasTotales: Math.round(hectareasTotales * 100) / 100,
     },
     valvulas: valvulas.map((v) => ({ ...v, hectareas: Math.round(v.hectareas * 100) / 100 })),

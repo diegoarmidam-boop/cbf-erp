@@ -2,15 +2,15 @@ import { useEffect, useState, type FormEvent } from "react";
 import { api, ApiError } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
 import { useHuertas } from "../../lib/useHuertas";
-import { useRecetas } from "../../lib/useRecetas";
-import type { ConcentracionUnidad, FertirriegoProgramacion, FrecuenciaFertirriego, OrdenFertirriego, Producto, SeccionRiego } from "../../lib/types";
+import { useRecetasFertirriego } from "../../lib/useRecetasFertirriego";
+import type { ModoDosisFertirriego, FertirriegoProgramacion, FrecuenciaFertirriego, OrdenFertirriego, Producto, SeccionRiego } from "../../lib/types";
 import FechaInput from "../../components/FechaInput";
 import { formatearFecha } from "../../lib/fecha";
 import { formatearNumero } from "../../lib/numero";
 import { presentacionTexto } from "../../lib/producto";
-import RecetarioPanel, { ROLES_PUEDEN_RECETAS } from "../../components/RecetarioPanel";
-import MezclaPorTanque from "../../components/MezclaPorTanque";
+import RecetarioFertirriegoPanel, { ROLES_PUEDEN_RECETAS_FERTIRRIEGO } from "../../components/RecetarioFertirriegoPanel";
 import OrdenFertirriegoView from "../../components/OrdenFertirriegoView";
+import ConfirmModal from "../../components/ConfirmModal";
 
 const ETIQUETAS_ESTADO: Record<string, string> = {
   programada: "Programada",
@@ -40,18 +40,18 @@ function hoyISO(): string {
 interface ProductoFertirriegoForm {
   productoId: string;
   dosisValor: string;
-  dosisUnidad: ConcentracionUnidad;
+  dosisUnidad: ModoDosisFertirriego;
 }
 
 function productoFertirriegoFormVacio(): ProductoFertirriegoForm {
-  return { productoId: "", dosisValor: "", dosisUnidad: "ml_l" };
+  return { productoId: "", dosisValor: "", dosisUnidad: "kg_ha" };
 }
 
 export default function Fertirriego() {
   const { usuario } = useAuth();
   const { huertas } = useHuertas();
-  const { recetas, cargando: cargandoRecetas, refetch: refetchRecetas } = useRecetas("fertirriego");
-  const puedeAjustarReceta = usuario ? ROLES_PUEDEN_RECETAS.includes(usuario.rol) : false;
+  const { recetas, cargando: cargandoRecetas, refetch: refetchRecetas } = useRecetasFertirriego();
+  const puedeAjustarReceta = usuario ? ROLES_PUEDEN_RECETAS_FERTIRRIEGO.includes(usuario.rol) : false;
 
   const [lista, setLista] = useState<FertirriegoProgramacion[]>([]);
   const [cargando, setCargando] = useState(true);
@@ -63,22 +63,24 @@ export default function Fertirriego() {
   const [huertaId, setHuertaId] = useState("");
   const [seccionesHuerta, setSeccionesHuerta] = useState<SeccionRiego[]>([]);
   const [seccionIds, setSeccionIds] = useState<string[]>([]);
-  // Varios productos en el mismo fertirriego (10-ago-2026): mismo mecanismo
-  // que Aplicaciones — cada uno con su propia concentración, todos
-  // comparten litrosAguaPorHa (abajo).
+  // Varios productos en el mismo fertirriego (10-ago-2026): cada uno con su
+  // propia dosis por hectárea, calculada de forma independiente (27-ago-2026
+  // — ya no hay litros de agua/ha compartidos, ver Fertilizantes 9.5).
   const [productosForm, setProductosForm] = useState<ProductoFertirriegoForm[]>([productoFertirriegoFormVacio()]);
-  const [litrosAguaPorHa, setLitrosAguaPorHa] = useState("");
   const [frecuencia, setFrecuencia] = useState<FrecuenciaFertirriego>("diario");
   const [fechaInicio, setFechaInicio] = useState(hoyISO());
   const [fechaFin, setFechaFin] = useState(hoyISO());
+  // Editar programación ya guardada (1.9, 31-ago-2026): permitido mientras
+  // Riego no tenga todavía ningún día registrado sobre ella.
+  const [editandoProgramadaId, setEditandoProgramadaId] = useState<string | null>(null);
 
-  // ---- Recetario (20-ago-2026) ----
+  // ---- Recetario (20-ago-2026, modelo dosis/ha propio desde 27-ago-2026) ----
   const [recetaId, setRecetaId] = useState("");
-  const [capacidadTanque, setCapacidadTanque] = useState("");
   const [confirmandoDesvioReceta, setConfirmandoDesvioReceta] = useState(false);
 
   // ---- Orden de Fertirriego (25-ago-2026) ----
   const [verOrdenId, setVerOrdenId] = useState<string | null>(null);
+  const [confirmandoLiberarId, setConfirmandoLiberarId] = useState<string | null>(null);
   const [ordenData, setOrdenData] = useState<OrdenFertirriego | null>(null);
 
   async function verOrden(f: FertirriegoProgramacion) {
@@ -92,16 +94,21 @@ export default function Fertirriego() {
     }
   }
 
+  // Las "vencida" (liberadas) y "cancelada" no se muestran por default —
+  // se quedaban en la lista para siempre (31-ago-2026, reportado por
+  // Diego). Siguen existiendo, solo se piden aparte con este toggle.
+  const [mostrarCerradas, setMostrarCerradas] = useState(false);
+
   function cargar() {
     setCargando(true);
     api
-      .get<FertirriegoProgramacion[]>("/fertilizantes/fertirriego")
+      .get<FertirriegoProgramacion[]>(`/fertilizantes/fertirriego${mostrarCerradas ? "?incluirCerradas=true" : ""}`)
       .then(setLista)
       .catch((err) => setError(err instanceof ApiError ? err.message : "No se pudo cargar."))
       .finally(() => setCargando(false));
   }
 
-  useEffect(cargar, []);
+  useEffect(cargar, [mostrarCerradas]);
 
   useEffect(() => {
     api.get<Producto[]>("/fertilizantes/granular/productos").then(setProductos);
@@ -131,56 +138,55 @@ export default function Fertirriego() {
     setProductosForm((prev) => (prev.length === 1 ? prev : prev.filter((_, i) => i !== index)));
   }
 
-  // Recetario: precarga productos + litros de agua/ha de la receta elegida
+  // Recetario: precarga productos (dosis por hectárea) de la receta elegida
   // — editable, no bloqueado (el candado real es de rol, ver `disabled`).
   function elegirReceta(id: string) {
     setRecetaId(id);
     if (!id) return;
     const receta = recetas.find((r) => r.id === id);
     if (!receta) return;
-    setLitrosAguaPorHa(String(receta.litrosPorHa));
-    setProductosForm(receta.productos.map((p) => ({ productoId: p.productoId, dosisValor: String(p.concentracionValor), dosisUnidad: p.concentracionUnidad })));
+    setProductosForm(receta.productos.map((p) => ({ productoId: p.productoId, dosisValor: String(p.dosisValor), dosisUnidad: p.dosisUnidad })));
   }
 
   function huboDesvioDeReceta(): boolean {
     if (!recetaId) return false;
     const receta = recetas.find((r) => r.id === recetaId);
     if (!receta) return false;
-    if (Number(receta.litrosPorHa) !== Number(litrosAguaPorHa)) return true;
     if (receta.productos.length !== productosForm.length) return true;
     return receta.productos.some((rp) => {
       const actual = productosForm.find((p) => p.productoId === rp.productoId);
-      return !actual || Number(rp.concentracionValor) !== Number(actual.dosisValor) || rp.concentracionUnidad !== actual.dosisUnidad;
+      return !actual || Number(rp.dosisValor) !== Number(actual.dosisValor) || rp.dosisUnidad !== actual.dosisUnidad;
     });
   }
 
   function limpiarFormProgramar() {
     setMostrarForm(false);
+    setEditandoProgramadaId(null);
     setSeccionIds([]);
     setProductosForm([productoFertirriegoFormVacio()]);
-    setLitrosAguaPorHa("");
     setFechaInicio(hoyISO());
     setFechaFin(hoyISO());
     setRecetaId("");
-    setCapacidadTanque("");
   }
 
   async function enviarProgramacion(actualizarRecetaOriginal?: boolean) {
     setError(null);
     setConfirmandoDesvioReceta(false);
+    const payload = {
+      seccionIds,
+      productos: productosForm.map((p) => ({ productoId: p.productoId, dosisValor: Number(p.dosisValor), dosisUnidad: p.dosisUnidad })),
+      frecuencia,
+      fechaInicio,
+      fechaFin,
+      recetaId: recetaId || undefined,
+      actualizarRecetaOriginal,
+    };
     try {
-      await api.post("/fertilizantes/fertirriego", {
-        huertaId,
-        seccionIds,
-        productos: productosForm.map((p) => ({ productoId: p.productoId, dosisValor: Number(p.dosisValor), dosisUnidad: p.dosisUnidad })),
-        litrosAguaPorHa: Number(litrosAguaPorHa),
-        frecuencia,
-        fechaInicio,
-        fechaFin,
-        recetaId: recetaId || undefined,
-        capacidadTanque: capacidadTanque ? Number(capacidadTanque) : undefined,
-        actualizarRecetaOriginal,
-      });
+      if (editandoProgramadaId) {
+        await api.patch(`/fertilizantes/fertirriego/${editandoProgramadaId}`, payload);
+      } else {
+        await api.post("/fertilizantes/fertirriego", { huertaId, ...payload });
+      }
       limpiarFormProgramar();
       cargar();
       if (actualizarRecetaOriginal) refetchRecetas();
@@ -196,6 +202,19 @@ export default function Fertirriego() {
       return;
     }
     enviarProgramacion(false);
+  }
+
+  function iniciarEdicionProgramada(f: FertirriegoProgramacion) {
+    setEditandoProgramadaId(f.id);
+    setHuertaId(f.huertaId);
+    setSeccionIds(f.secciones.map((s) => s.seccion.id));
+    setProductosForm(f.productos.map((p) => ({ productoId: p.productoId, dosisValor: p.dosisValor, dosisUnidad: p.dosisUnidad })));
+    setFrecuencia(f.frecuencia);
+    setFechaInicio(f.fechaInicio.slice(0, 10));
+    setFechaFin(f.fechaFin.slice(0, 10));
+    setRecetaId(f.recetaId ?? "");
+    setError(null);
+    setMostrarForm(true);
   }
 
   async function entregar(id: string) {
@@ -221,16 +240,20 @@ export default function Fertirriego() {
   return (
     <div>
       <div style={{ marginBottom: 14, display: "flex", gap: 10 }}>
-        <button className="btn-primary" onClick={() => setMostrarForm((v) => !v)}>
+        <button className="btn-primary" onClick={() => (mostrarForm ? limpiarFormProgramar() : setMostrarForm(true))}>
           {mostrarForm ? "Cancelar" : "+ Programar fertirriego"}
         </button>
         <button className="btn-secondary" onClick={() => setMostrarRecetario((v) => !v)}>
           {mostrarRecetario ? "Ocultar Recetario" : "Recetario"}
         </button>
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "var(--ink-soft)" }}>
+          <input type="checkbox" checked={mostrarCerradas} onChange={(e) => setMostrarCerradas(e.target.checked)} />
+          Mostrar vencidas/canceladas
+        </label>
       </div>
 
       {mostrarRecetario && (
-        <RecetarioPanel modulo="fertirriego" productos={productos} recetas={recetas} cargando={cargandoRecetas} refetch={refetchRecetas} />
+        <RecetarioFertirriegoPanel productos={productos} recetas={recetas} cargando={cargandoRecetas} refetch={refetchRecetas} />
       )}
 
       <p style={{ fontSize: 12, color: "var(--ink-soft)", marginBottom: 14 }}>
@@ -242,7 +265,12 @@ export default function Fertirriego() {
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
             <label className="field">
               Huerta
-              <select value={huertaId} onChange={(e) => { setHuertaId(e.target.value); setSeccionIds([]); }} required>
+              <select
+                value={huertaId}
+                onChange={(e) => { setHuertaId(e.target.value); setSeccionIds([]); }}
+                required
+                disabled={!!editandoProgramadaId}
+              >
                 <option value="">Selecciona…</option>
                 {huertas.map((h) => (
                   <option key={h.id} value={h.id}>
@@ -280,7 +308,7 @@ export default function Fertirriego() {
           )}
 
           <div className="field">
-            Productos (mismo fertirriego — cada uno con su propia concentración)
+            Productos (mismo fertirriego — cada uno con su propia dosis por hectárea)
             {recetaId && !puedeAjustarReceta && (
               <div style={{ fontSize: 11, color: "var(--ink-soft)", marginBottom: 4 }}>
                 Receta seleccionada — tu rol no puede ajustar la dosis, se usa tal cual está guardada.
@@ -321,12 +349,12 @@ export default function Fertirriego() {
                     Unidad
                     <select
                       value={p.dosisUnidad}
-                      onChange={(e) => actualizarProductoForm(i, { dosisUnidad: e.target.value as ConcentracionUnidad })}
+                      onChange={(e) => actualizarProductoForm(i, { dosisUnidad: e.target.value as ModoDosisFertirriego })}
                       disabled={!!recetaId && !puedeAjustarReceta}
                     >
-                      <option value="ml_l">ml/L</option>
-                      <option value="g_l">g/L</option>
-                      <option value="kg_l">kg/L</option>
+                      <option value="kg_ha">kg/ha</option>
+                      <option value="l_ha">L/ha</option>
+                      <option value="g_ha">g/ha</option>
                     </select>
                   </label>
                   {productosForm.length > 1 && (!recetaId || puedeAjustarReceta) && (
@@ -345,21 +373,6 @@ export default function Fertirriego() {
           </div>
 
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-            <label className="field">
-              Litros de agua / ha
-              <input
-                type="number"
-                step="0.0001"
-                value={litrosAguaPorHa}
-                onChange={(e) => setLitrosAguaPorHa(e.target.value)}
-                required
-                disabled={!!recetaId && !puedeAjustarReceta}
-              />
-            </label>
-            <label className="field">
-              Capacidad del tanque/recipiente (L, opcional)
-              <input type="number" step="0.01" style={{ width: 140 }} value={capacidadTanque} onChange={(e) => setCapacidadTanque(e.target.value)} />
-            </label>
             <label className="field">
               Frecuencia
               <select value={frecuencia} onChange={(e) => setFrecuencia(e.target.value as FrecuenciaFertirriego)}>
@@ -381,7 +394,7 @@ export default function Fertirriego() {
               <FechaInput value={fechaFin} onChange={setFechaFin} required />
             </label>
             <button className="btn-primary" type="submit">
-              Programar
+              {editandoProgramadaId ? "Guardar cambios" : "Programar"}
             </button>
           </div>
         </form>
@@ -430,28 +443,27 @@ export default function Fertirriego() {
                   </div>
                   {f.productos.map((p) => (
                     <div key={p.id} style={{ fontSize: 12, color: "var(--ink-soft)" }}>
-                      {p.producto.nombreComercial}: {formatearNumero(p.cantidadTotalCalculada)} {p.producto.unidad} · {p.dosisValor}{" "}
+                      {p.producto.nombreComercial}: {formatearNumero(p.cantidadTotalCalculada)} {p.producto.unidad} por riego · {p.dosisValor}{" "}
                       {p.dosisUnidad.replace("_", "/")}
+                      {" · "}
+                      <strong>
+                        {p.cantidadCampania.valor} {p.cantidadCampania.unidad} total de campaña
+                      </strong>
                     </div>
                   ))}
                   <div style={{ fontSize: 12, color: "var(--ink-soft)" }}>
-                    {f.litrosAguaPorHa} L agua/ha · {ETIQUETAS_FRECUENCIA[f.frecuencia]} · {formatearFecha(f.fechaInicio)} a {formatearFecha(f.fechaFin)}
+                    {ETIQUETAS_FRECUENCIA[f.frecuencia]} · {formatearFecha(f.fechaInicio)} a {formatearFecha(f.fechaFin)}
+                    {f.riegosEnCampania != null && ` · ${f.riegosEnCampania} riegos en la campaña`}
                   </div>
-                  {f.mezclaPorTanque && f.mezclaPorTanque.length > 0 && (
-                    <div style={{ marginTop: 8, maxWidth: 460 }}>
-                      <MezclaPorTanque
-                        mezcla={f.mezclaPorTanque}
-                        capacidadTanque={Number(f.capacidadTanque)}
-                        productos={f.productos.map((p) => ({ productoId: p.productoId, nombreComercial: p.producto.nombreComercial, concentracionUnidad: p.dosisUnidad }))}
-                      />
-                    </div>
-                  )}
                 </div>
 
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                  {f.capacidadTanque != null && (
-                    <button className="btn-secondary" onClick={() => verOrden(f)}>
-                      Ver Orden
+                  <button className="btn-secondary" onClick={() => verOrden(f)}>
+                    Ver Orden
+                  </button>
+                  {(f.estado === "programada" || f.estado === "entregada") && !f.tieneAvanceRegistrado && (
+                    <button className="btn-secondary" onClick={() => iniciarEdicionProgramada(f)}>
+                      Editar
                     </button>
                   )}
                   {f.estado === "programada" && f.comprometido && (
@@ -460,7 +472,7 @@ export default function Fertirriego() {
                     </button>
                   )}
                   {f.estado === "programada" && (
-                    <button className="btn-secondary" onClick={() => liberar(f.id)}>
+                    <button className="btn-secondary" onClick={() => setConfirmandoLiberarId(f.id)}>
                       Liberar
                     </button>
                   )}
@@ -479,6 +491,18 @@ export default function Fertirriego() {
           onCerrar={() => {
             setVerOrdenId(null);
             setOrdenData(null);
+          }}
+        />
+      )}
+
+      {confirmandoLiberarId && (
+        <ConfirmModal
+          titulo="Liberar fertirriego"
+          mensaje="Se libera el producto comprometido en Almacén y la programación queda como vencida — ya no se podrá entregar ni programar sobre ella. ¿Confirmar?"
+          onCancelar={() => setConfirmandoLiberarId(null)}
+          onConfirmar={async () => {
+            await liberar(confirmandoLiberarId);
+            setConfirmandoLiberarId(null);
           }}
         />
       )}

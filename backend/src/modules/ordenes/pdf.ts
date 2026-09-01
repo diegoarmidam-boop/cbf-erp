@@ -143,6 +143,7 @@ export function generarPdfOrdenFertirriego(orden: OrdenFertirriego): PDFKit.PDFD
       { etiqueta: "Receta", valor: e.receta ?? "Programación libre" },
       { etiqueta: "Frecuencia", valor: e.frecuencia },
       { etiqueta: "Riegos en la semana", valor: nf(e.riegosEnLaSemana) },
+      { etiqueta: "Riegos en la campaña", valor: `${nf(e.riegosEnCampania)} (hasta ${e.fechaFinCampania})` },
       { etiqueta: "Hectáreas totales", valor: `${nf(e.hectareasTotales)} ha` },
     ],
     4
@@ -172,6 +173,11 @@ export function generarPdfOrdenFertirriego(orden: OrdenFertirriego): PDFKit.PDFD
     "Total de la semana",
     "",
     ...orden.productos.map((p) => `${nf(p.totalSemana.valor)} ${p.totalSemana.unidad}`),
+  ]);
+  filas.push([
+    `Total de campaña (hasta ${e.fechaFinCampania})`,
+    "",
+    ...orden.productos.map((p) => `${nf(p.totalCampania.valor)} ${p.totalCampania.unidad}`),
   ]);
 
   tabla(doc, y, anchos, encabezados, filas);

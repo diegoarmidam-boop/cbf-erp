@@ -552,6 +552,23 @@ model DiaCerrado {
   @@id([huertaId, fecha])
 }
 
+// Semana de Nómina confirmada/pagada (29-ago-2026) — candado de solo
+// lectura PERMANENTE, distinto de DiaCerrado: DiaCerrado es por día y por
+// Huerta, y es reversible (existe "Reabrir", y ROLES_EDITAR_NOMINA puede
+// pasarlo). Esto es por semana completa (identificada por su fecha de
+// corte/fin de periodo, global — el Reporte de Nómina semanal no distingue
+// por Huerta), se crea al confirmar la semana, y NO tiene ningún mecanismo
+// de reapertura ni excepción de rol — ni siquiera Director General puede
+// volver a tocar una semana ya pagada. Por eso el candado vive en la
+// lógica de negocio misma (ver semana-confirmada.ts), no solo en el
+// middleware de permisos (que Director General/Encargado de Sistemas
+// ignoran vía ROLES_ACCESO_UNIVERSAL).
+model NominaSemanaConfirmada {
+  fechaFin          DateTime @id @db.Date
+  confirmadoPorId   String
+  fechaConfirmacion DateTime @default(now())
+}
+
 model Prestamo {
   id                   String       @id @default(uuid())
   personalId           String
@@ -884,10 +901,11 @@ model Producto {
   fertilizacionGranularProductos FertilizacionGranularProducto[]
   fertirriegoProductos           FertirriegoProgramacionProducto[]
   riegoRegistroDiarioProductos   RiegoRegistroDiarioProducto[]
-  comparacionItems               ComparacionItem[]
+  comparaciones                  Comparacion[]
   preferidoDe                    IngredienteActivo[]              @relation("ProductoPreferidoDe")
   sustitutoDe                    IngredienteActivoSustituto[]      @relation("ProductoSustitutoDe")
   recetaProductos                RecetaProducto[]
+  recetaFertirriegoProductos     RecetaFertirriegoProducto[]
 
   @@index([categoria])
 }
@@ -1048,41 +1066,75 @@ model OrdenCompraRecepcion {
   recibidoPorId    String
 }
 
-// Submódulo Comparador de Cotizaciones (9.14): herramienta aparte, no genera
-// órdenes — solo ayuda a decidir a qué proveedor comprarle antes de cotizar
-// formalmente. Se guarda para poder retomarla/consultarla después.
+// Submódulo Comparador de Cotizaciones (9.14, rediseño completo 29-ago-2026
+// a partir del Excel real "Cotizador CBF"): herramienta aparte de apoyo, no
+// genera órdenes — compara precio + flete por Zona para un solo Producto a
+// la vez (elegido de la lista de compra ya generada, ver OrdenCompra
+// pendiente_cotizar), con líneas de cotización por Proveedor debajo. Se
+// guarda para poder retomarla/consultarla después.
 model Comparacion {
-  id            String            @id @default(uuid())
-  nombre        String?
-  creadoPorId   String
-  fechaCreacion DateTime          @default(now())
-  items         ComparacionItem[]
+  id                 String   @id @default(uuid())
+  productoId         String
+  producto           Producto @relation(fields: [productoId], references: [id])
+  cantidadNecesaria  Decimal  @db.Decimal(12, 3)
+  unidad             String
+  // Umbral de alerta "REVISAR" de % Excedente — inicial 20%, editable por
+  // Diego en cualquier momento (por comparación, no global, para no
+  // afectar comparaciones ya hechas si se ajusta después).
+  umbralExcedentePct Decimal  @default(20) @db.Decimal(5, 2)
+  creadoPorId        String
+  fechaCreacion      DateTime @default(now())
+
+  cotizaciones ComparacionCotizacion[]
 }
 
-model ComparacionItem {
-  id                String                  @id @default(uuid())
-  comparacionId     String
-  comparacion       Comparacion             @relation(fields: [comparacionId], references: [id])
-  productoId        String
-  producto          Producto                @relation(fields: [productoId], references: [id])
-  cantidadNecesaria Decimal                 @db.Decimal(12, 3)
-  unidad            String
-  cotizaciones      ComparacionCotizacion[]
+enum MonedaCotizacion {
+  MXN
+  USD
+}
+
+model ComparacionCotizacion {
+  id            String           @id @default(uuid())
+  comparacionId String
+  comparacion   Comparacion      @relation(fields: [comparacionId], references: [id])
+  proveedorId   String
+  proveedor     Proveedor        @relation(fields: [proveedorId], references: [id])
+  zonaId        String
+  zona          ZonaFlete        @relation(fields: [zonaId], references: [id])
+  // Cómo le llama ESTE proveedor a ESTE producto — puede diferir del
+  // nombreComercial del catálogo interno, es la referencia para verificar
+  // que es el mismo insumo entre cotizaciones de distintos proveedores.
+  nombreComercial String
+  moneda        MonedaCotizacion @default(MXN)
+  // Precio de la presentación completa, en la moneda capturada (`moneda`)
+  // — si moneda=USD, se convierte con `tipoCambio` (capturado a mano cada
+  // vez, no un valor compartido del sistema: cada proveedor puede manejar
+  // un tipo de cambio distinto ese día).
+  precioValor   Decimal          @db.Decimal(10, 2)
+  tipoCambio    Decimal?         @db.Decimal(10, 4)
+  // Tamaño del bulto/costal/bidón que vende este proveedor, en la misma
+  // unidad del Producto (Comparacion.unidad) — no se vuelve a capturar la
+  // unidad aquí, ya viene fija del producto elegido.
+  presentacionCantidad Decimal   @db.Decimal(10, 3)
+  fechaCreacion DateTime         @default(now())
 
   @@index([comparacionId])
 }
 
-model ComparacionCotizacion {
-  id                   String          @id @default(uuid())
-  itemId               String
-  item                 ComparacionItem @relation(fields: [itemId], references: [id])
-  proveedorId          String
-  proveedor            Proveedor       @relation(fields: [proveedorId], references: [id])
-  precioPresentacion   Decimal         @db.Decimal(10, 2)
-  cantidadPresentacion Decimal         @db.Decimal(10, 3)
-  unidadPresentacion   String
+// Catálogo abierto de Zonas y flete (29-ago-2026) — exclusivo del
+// Comparador de insumos agrícolas, no es un campo general de Proveedores
+// ni se usa en otro módulo. Costo de flete $/kg editable por Diego en
+// cualquier momento. Exactamente una Zona debe ser "la Zona del
+// comprador" (Campeche) — su flete queda fijo en $0 por definición,
+// forzado en el backend sin importar qué se capture (ver zonas.ts).
+model ZonaFlete {
+  id              String   @id @default(uuid())
+  nombre          String   @unique
+  costoFleteKg    Decimal  @db.Decimal(10, 4)
+  esZonaComprador Boolean  @default(false)
+  activo          Boolean  @default(true)
 
-  @@index([itemId])
+  cotizaciones ComparacionCotizacion[]
 }
 
 // ============================================================
@@ -1260,7 +1312,6 @@ model Receta {
 
   productos    RecetaProducto[]
   aplicaciones Aplicacion[]
-  fertirriegos FertirriegoProgramacion[]
 }
 
 model RecetaProducto {
@@ -1508,35 +1559,73 @@ enum FrecuenciaFertirriego {
   patron_2_1
 }
 
+enum ModoDosisFertirriego {
+  kg_ha
+  l_ha
+  g_ha
+}
+
+// Recetario de Fertirriego (27-ago-2026, reversión): modelo propio,
+// separado del Receta/RecetaProducto compartido de Aplicaciones — dosis
+// directa por hectárea, sin litros de mezcla/agua ni Tipo de aplicación
+// (esos campos son exclusivos del proceso físico de Aplicaciones, ver
+// comentario completo en FertirriegoProgramacion más abajo).
+model RecetaFertirriego {
+  id            String   @id @default(uuid())
+  nombre        String
+  activo        Boolean  @default(true)
+  creadoPorId   String
+  fechaCreacion DateTime @default(now())
+
+  productos    RecetaFertirriegoProducto[]
+  fertirriegos FertirriegoProgramacion[]
+}
+
+model RecetaFertirriegoProducto {
+  id          String               @id @default(uuid())
+  recetaId    String
+  receta      RecetaFertirriego    @relation(fields: [recetaId], references: [id], onDelete: Cascade)
+  productoId  String
+  producto    Producto             @relation(fields: [productoId], references: [id])
+  dosisValor  Decimal              @db.Decimal(10, 4)
+  dosisUnidad ModoDosisFertirriego
+
+  @@index([recetaId])
+}
+
 // Se programa aquí (por Sección de Riego, no por Cuadro); se ejecuta día a
 // día desde Riego (9.6). No genera mano de obra.
+//
+// REVERSIÓN 27-ago-2026: hasta el 25-ago-2026 este modelo copiaba el de
+// Aplicaciones (concentración + litros de agua/ha compartidos + tanque) —
+// esa decisión estaba mal. En Fertirriego se prepara un solo tanque de
+// mezcla concentrada que se inyecta al sistema de riego; es el agua del
+// riego, no la del tanque, la que reparte el producto por presión — el
+// tamaño del tanque no limita ni determina cuántas hectáreas se cubren. Se
+// quitaron litrosAguaPorHa y capacidadTanque; el Recetario ahora usa el
+// modelo propio RecetaFertirriego (dosis/ha), no el Receta de Aplicaciones.
 model FertirriegoProgramacion {
-  id              String                @id @default(uuid())
-  huertaId        String
-  huerta          Huerta                @relation(fields: [huertaId], references: [id])
-  // Litros de agua/ha compartidos por todos los productos (10-ago-2026,
-  // varios productos en el mismo fertirriego, mismo mecanismo que
-  // Aplicaciones) — cada producto conserva su propia concentración.
-  litrosAguaPorHa Decimal               @db.Decimal(10, 4)
-  // Recetario (20-ago-2026): mismo mecanismo de trazabilidad que
-  // Aplicacion — ver ahí el detalle del comentario.
-  recetaId        String?
-  receta          Receta?               @relation(fields: [recetaId], references: [id])
-  capacidadTanque Decimal?              @db.Decimal(10, 2)
-  frecuencia      FrecuenciaFertirriego
-  fechaInicio     DateTime              @db.Date
-  fechaFin        DateTime              @db.Date
-  estado          EstadoAplicacion      @default(programada)
-  creadoPorId     String
-  fechaCreacion   DateTime              @default(now())
+  id            String                @id @default(uuid())
+  huertaId      String
+  huerta        Huerta                @relation(fields: [huertaId], references: [id])
+  recetaId      String?
+  receta        RecetaFertirriego?    @relation(fields: [recetaId], references: [id])
+  frecuencia    FrecuenciaFertirriego
+  fechaInicio   DateTime              @db.Date
+  fechaFin      DateTime              @db.Date
+  estado        EstadoAplicacion      @default(programada)
+  creadoPorId   String
+  fechaCreacion DateTime              @default(now())
 
   productos FertirriegoProgramacionProducto[]
   secciones FertirriegoSeccion[]
 }
 
-// Varios productos en el mismo fertirriego (10-ago-2026, 9.5): mismo
-// mecanismo que Aplicaciones — cada producto tiene su propia concentración,
-// todos comparten los mismos litros de agua/ha (en FertirriegoProgramacion).
+// Varios productos en el mismo fertirriego (10-ago-2026, 9.5): cada
+// producto conserva su propia dosis por hectárea (kg/ha, L/ha o g/ha,
+// corregido 27-ago-2026) — ya no hay litros de agua/ha compartidos, cada
+// dosis ya es una cantidad completa por sí misma (mismo criterio que
+// Fertilización Granular, no como Aplicaciones).
 model FertirriegoProgramacionProducto {
   id                     String                  @id @default(uuid())
   fertirriegoId          String
@@ -1544,7 +1633,7 @@ model FertirriegoProgramacionProducto {
   productoId             String
   producto               Producto                @relation(fields: [productoId], references: [id])
   dosisValor             Decimal                 @db.Decimal(10, 4)
-  dosisUnidad            ConcentracionUnidad
+  dosisUnidad            ModoDosisFertirriego
   cantidadTotalCalculada Decimal                 @db.Decimal(12, 4)
 
   @@index([fertirriegoId])

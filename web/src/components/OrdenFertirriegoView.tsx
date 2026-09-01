@@ -118,6 +118,15 @@ export default function OrdenFertirriegoView({ fertirriegoId, orden, onCerrar }:
                   </td>
                 ))}
               </tr>
+              <tr style={{ fontWeight: 700, color: "var(--pink)" }}>
+                <td style={{ padding: "6px 8px", whiteSpace: "nowrap" }}>Total de campaña (hasta {e.fechaFinCampania})</td>
+                <td></td>
+                {orden.productos.map((p) => (
+                  <td key={p.productoId} style={{ padding: "6px 8px", textAlign: "right", whiteSpace: "nowrap" }}>
+                    {formatearNumero(p.totalCampania.valor)} {p.totalCampania.unidad}
+                  </td>
+                ))}
+              </tr>
             </tbody>
           </table>
         </div>

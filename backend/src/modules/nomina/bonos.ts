@@ -9,6 +9,7 @@ import {
 } from "@cbf/shared";
 import { prisma } from "../../core/db.js";
 import { gananciaDestajoEnRango } from "./captura.js";
+import { verificarSemanaFinNoConfirmada } from "./semana-confirmada.js";
 
 interface AsistenciaPerfectaParams {
   diasRequeridos: number;
@@ -133,10 +134,14 @@ export async function generarBonosPendientes(periodoInicio: FechaISO, periodoFin
 }
 
 export async function autorizarBono(id: string, autorizadoPorId: string) {
+  const bono = await prisma.bonoOtorgado.findUniqueOrThrow({ where: { id } });
+  await verificarSemanaFinNoConfirmada(bono.periodoFin.toISOString().slice(0, 10));
   return prisma.bonoOtorgado.update({ where: { id }, data: { estado: "autorizado", autorizadoPorId } });
 }
 
 export async function rechazarBono(id: string, autorizadoPorId: string) {
+  const bono = await prisma.bonoOtorgado.findUniqueOrThrow({ where: { id } });
+  await verificarSemanaFinNoConfirmada(bono.periodoFin.toISOString().slice(0, 10));
   return prisma.bonoOtorgado.update({ where: { id }, data: { estado: "rechazado", autorizadoPorId } });
 }
 

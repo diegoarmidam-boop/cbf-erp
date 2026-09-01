@@ -4,6 +4,7 @@ import { api, ApiError, getToken } from "../../lib/api";
 import type { Personal, PersonalDocumento } from "../../lib/types";
 import { formatearFecha } from "../../lib/fecha";
 import { formatearDinero } from "../../lib/numero";
+import ConfirmModal from "../../components/ConfirmModal";
 
 const ETIQUETAS_DOC: Record<PersonalDocumento["tipoDocumento"], string> = {
   identificacion: "Identificación",
@@ -21,6 +22,7 @@ export default function PersonalDetalle() {
   const [motivoBaja, setMotivoBaja] = useState("");
   const [tipoDoc, setTipoDoc] = useState<PersonalDocumento["tipoDocumento"]>("identificacion");
   const [origenDoc, setOrigenDoc] = useState<"foto_celular" | "escaneo">("escaneo");
+  const [confirmandoDocId, setConfirmandoDocId] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   function cargar() {
@@ -46,7 +48,7 @@ export default function PersonalDetalle() {
   }
 
   async function eliminarDocumento(documentoId: string) {
-    if (!id || !confirm("¿Borrar este documento?")) return;
+    if (!id) return;
     setError(null);
     try {
       await api.delete(`/personal/${id}/documentos/${documentoId}`);
@@ -156,7 +158,7 @@ export default function PersonalDetalle() {
               <a href={`${api.apiUrl}${d.archivoUrl}`} target="_blank" rel="noreferrer">
                 {ETIQUETAS_DOC[d.tipoDocumento]} — {d.origen === "foto_celular" ? "foto" : "escaneo"}
               </a>
-              <button className="btn-secondary" onClick={() => eliminarDocumento(d.id)}>
+              <button className="btn-secondary" onClick={() => setConfirmandoDocId(d.id)}>
                 Borrar
               </button>
             </li>
@@ -207,6 +209,19 @@ export default function PersonalDetalle() {
             </div>
           </div>
         </div>
+      )}
+
+      {confirmandoDocId && (
+        <ConfirmModal
+          titulo="Borrar documento"
+          mensaje="¿Borrar este documento? Esto no se puede deshacer."
+          peligroso
+          onCancelar={() => setConfirmandoDocId(null)}
+          onConfirmar={async () => {
+            await eliminarDocumento(confirmandoDocId);
+            setConfirmandoDocId(null);
+          }}
+        />
       )}
     </div>
   );

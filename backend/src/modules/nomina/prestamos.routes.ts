@@ -6,6 +6,7 @@ import { prisma } from "../../core/db.js";
 import { obtenerConfigNomina } from "./config.js";
 import { calcularPeriodoNomina, hoyISO } from "@cbf/shared";
 import { aplicarDescuento, cancelarPrestamo, crearPrestamo, historialPrestamo, listarPrestamos, PrestamoConDescuentosError } from "./prestamos.js";
+import { SemanaConfirmadaError } from "./semana-confirmada.js";
 
 export const prestamosRouter = Router();
 prestamosRouter.use(requireAuth);
@@ -59,8 +60,16 @@ prestamosRouter.post("/:id/aplicar-descuento", requirePermission("nomina", "edit
   const prestamo = await prisma.prestamo.findUniqueOrThrow({ where: { id } });
   const config = await obtenerConfigNomina();
   const periodo = calcularPeriodoNomina(prestamo.proximoDescuento.toISOString().slice(0, 10), config.diaCorteIndex);
-  const monto = await aplicarDescuento(id, req.usuario!.usuarioId, periodo.fin);
-  res.json({ montoAplicado: monto });
+  try {
+    const monto = await aplicarDescuento(id, req.usuario!.usuarioId, periodo.fin);
+    res.json({ montoAplicado: monto });
+  } catch (err) {
+    if (err instanceof SemanaConfirmadaError) {
+      res.status(423).json({ error: err.message });
+      return;
+    }
+    throw err;
+  }
 });
 
 prestamosRouter.post("/:id/cancelar", requirePermission("nomina", "editar"), async (req, res) => {

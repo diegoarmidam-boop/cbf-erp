@@ -3,6 +3,7 @@ import { api, ApiError } from "../../lib/api";
 import { useCuadros } from "../../lib/useCuadros";
 import type { SeccionRiego } from "../../lib/types";
 import { useHuertaSeleccionada } from "./HuertaSeleccionadaContext";
+import ConfirmModal from "../../components/ConfirmModal";
 
 export default function SeccionesRiego() {
   const { huertaId } = useHuertaSeleccionada();
@@ -10,6 +11,7 @@ export default function SeccionesRiego() {
   const [secciones, setSecciones] = useState<SeccionRiego[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [mostrarForm, setMostrarForm] = useState(false);
+  const [confirmandoId, setConfirmandoId] = useState<string | null>(null);
   const [nombre, setNombre] = useState("");
   const [cuadroIds, setCuadroIds] = useState<string[]>([]);
 
@@ -28,7 +30,6 @@ export default function SeccionesRiego() {
   }
 
   async function eliminar(id: string) {
-    if (!confirm("¿Borrar esta Sección de Riego?")) return;
     setError(null);
     try {
       await api.delete(`/secciones-riego/${id}`);
@@ -97,7 +98,7 @@ export default function SeccionesRiego() {
               <td>{s.nombre}</td>
               <td>{s.cuadros.map((c) => c.cuadro.nombre).join(", ") || "—"}</td>
               <td>
-                <button className="btn-secondary" onClick={() => eliminar(s.id)}>
+                <button className="btn-secondary" onClick={() => setConfirmandoId(s.id)}>
                   Borrar
                 </button>
               </td>
@@ -105,6 +106,19 @@ export default function SeccionesRiego() {
           ))}
         </tbody>
       </table>
+
+      {confirmandoId && (
+        <ConfirmModal
+          titulo="Borrar Sección de Riego"
+          mensaje="¿Borrar esta Sección de Riego? Esto no se puede deshacer."
+          peligroso
+          onCancelar={() => setConfirmandoId(null)}
+          onConfirmar={async () => {
+            await eliminar(confirmandoId);
+            setConfirmandoId(null);
+          }}
+        />
+      )}
     </div>
   );
 }

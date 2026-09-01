@@ -6,6 +6,7 @@ import { requireAuth, requirePermission } from "../../middleware/auth.js";
 import { mensajeErrorValidacion, unoSolo } from "../../core/http.js";
 import { obtenerConfigNomina } from "./config.js";
 import { autorizarBono, generarBonosPendientes, rechazarBono } from "./bonos.js";
+import { SemanaConfirmadaError } from "./semana-confirmada.js";
 
 export const bonosRouter = Router();
 bonosRouter.use(requireAuth);
@@ -63,11 +64,27 @@ bonosRouter.get("/pendientes", requirePermission("nomina", "editar"), async (_re
 });
 
 bonosRouter.post("/pendientes/:id/autorizar", requirePermission("nomina", "autoriza"), async (req, res) => {
-  res.json(await autorizarBono(unoSolo(req.params.id), req.usuario!.usuarioId));
+  try {
+    res.json(await autorizarBono(unoSolo(req.params.id), req.usuario!.usuarioId));
+  } catch (err) {
+    if (err instanceof SemanaConfirmadaError) {
+      res.status(423).json({ error: err.message });
+      return;
+    }
+    throw err;
+  }
 });
 
 bonosRouter.post("/pendientes/:id/rechazar", requirePermission("nomina", "autoriza"), async (req, res) => {
-  res.json(await rechazarBono(unoSolo(req.params.id), req.usuario!.usuarioId));
+  try {
+    res.json(await rechazarBono(unoSolo(req.params.id), req.usuario!.usuarioId));
+  } catch (err) {
+    if (err instanceof SemanaConfirmadaError) {
+      res.status(423).json({ error: err.message });
+      return;
+    }
+    throw err;
+  }
 });
 
 bonosRouter.patch("/:id", requirePermission("nomina", "editar"), async (req, res) => {

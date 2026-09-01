@@ -76,7 +76,7 @@ aplicacionesRouter.get("/", requirePermission("aplicaciones", "ver"), async (req
     res.status(403).json({ error: "Tu acceso está restringido a tu propia Huerta." });
     return;
   }
-  res.json(await listarAplicaciones(huertaId ?? alcance ?? undefined));
+  res.json(await listarAplicaciones(huertaId ?? alcance ?? undefined, req.query.incluirCerradas === "true"));
 });
 
 aplicacionesRouter.get("/productos", requirePermission("aplicaciones", "ver"), async (_req, res) => {

@@ -3,6 +3,7 @@ import { prisma } from "../../core/db.js";
 import { obtenerConfigNomina } from "./config.js";
 import { miembrosDeGrupoEnFecha } from "./grupos.js";
 import { aActividadCalc } from "./util.js";
+import { verificarSemanaNoConfirmada } from "./semana-confirmada.js";
 
 // Nombre real de la actividad "Empacador" (individual_caja) — de ahí sale
 // el número de cajas del que dependen los esquemas "Depende de Empacadores"
@@ -137,6 +138,11 @@ export async function guardarCapturaDelDia(
   capturadoPorId: string,
   opciones: { permitirDiaCerrado?: boolean } = {}
 ): Promise<void> {
+  // Semana ya confirmada/pagada (29-ago-2026): candado permanente, SIN
+  // excepción de rol — a diferencia del candado de abajo (día cerrado, que
+  // sí tiene override para ROLES_EDITAR_NOMINA), este nunca se puede pasar.
+  await verificarSemanaNoConfirmada(fecha);
+
   // Edición después de cerrado (9.11): solo para quien tiene permiso de
   // "editar" en Nómina (verificado en la ruta) — el propio Supervisor sigue
   // bloqueado por el candado normal.
@@ -199,11 +205,20 @@ export async function guardarCapturaDelDia(
   });
 }
 
-/** Ganancia por destajo de una persona en un rango de fechas — individual directo, grupal prorrateado entre quienes estaban ese día. */
-export async function gananciaDestajoEnRango(personalId: string, fechaIni: FechaISO, fechaFin: FechaISO): Promise<number> {
+/**
+ * Ganancia por destajo de una persona en un rango de fechas — individual
+ * directo, grupal prorrateado entre quienes estaban ese día.
+ * `huertaId` (29-ago-2026, vista "por Huerta" del Reporte semanal):
+ * opcional — sin él, agrega en todas las Huertas donde trabajó (default,
+ * sin cambios de comportamiento); con él, solo lo ganado en esa Huerta esa
+ * semana, para responder "cuánto le debemos a esta persona con cargo a
+ * esta Huerta", no su ganancia total.
+ */
+export async function gananciaDestajoEnRango(personalId: string, fechaIni: FechaISO, fechaFin: FechaISO, huertaId?: string): Promise<number> {
   const registros = await prisma.registroNomina.findMany({
     where: {
       fecha: { gte: new Date(fechaIni), lte: new Date(fechaFin) },
+      ...(huertaId ? { huertaId } : {}),
       OR: [{ personalId }, { grupo: { miembros: { some: { personalId } } } }],
     },
     include: { actividad: true },

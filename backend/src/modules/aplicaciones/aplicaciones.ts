@@ -1,4 +1,4 @@
-import { calcularCantidadTotal, calcularMezclaPorTanque, tarifaEfectiva, type ConcentracionUnidad } from "@cbf/shared";
+import { calcularCantidadTotal, calcularMezclaPorTanque, ordenarPorNombreNumerico, tarifaEfectiva, type ConcentracionUnidad } from "@cbf/shared";
 import type { Prisma, Rol } from "@prisma/client";
 import { prisma } from "../../core/db.js";
 import type { TransactionClient } from "../../core/db.js";
@@ -360,12 +360,29 @@ const INCLUDE_APLICACION = {
   },
 };
 
-export async function listarAplicaciones(huertaId?: string) {
+/** 9.15 (31-ago-2026): Cuadros en orden numérico ("Cuadro 2" antes que "Cuadro 10"), no alfabético. */
+function ordenarCuadrosDe<T extends { cuadros: { cuadro: { nombre: string } }[]; realizadas: { cuadros: { cuadro: { nombre: string } }[] }[] }>(
+  item: T
+): T {
+  item.cuadros = ordenarPorNombreNumerico(item.cuadros, (c) => c.cuadro.nombre);
+  for (const r of item.realizadas) r.cuadros = ordenarPorNombreNumerico(r.cuadros, (c) => c.cuadro.nombre);
+  return item;
+}
+
+/**
+ * Por default no trae las "vencida" (liberadas) ni "cancelada" — se
+ * quedaban en la lista para siempre sin forma de dejar de verlas (bug real
+ * reportado por Diego, 31-ago-2026, ampliado a "cancelada" el mismo día).
+ * Siguen existiendo en la base (no se borran, por trazabilidad de
+ * Almacén); `incluirCerradas` las trae de vuelta.
+ */
+export async function listarAplicaciones(huertaId?: string, incluirCerradas?: boolean) {
   const aplicaciones = await prisma.aplicacion.findMany({
-    where: { huertaId },
+    where: { huertaId, ...(incluirCerradas ? {} : { estado: { notIn: ["vencida", "cancelada"] } }) },
     include: INCLUDE_APLICACION,
     orderBy: { fechaCreacion: "desc" },
   });
+  aplicaciones.forEach(ordenarCuadrosDe);
   return Promise.all(aplicaciones.map((a) => enriquecerConAlertas(a)));
 }
 
@@ -458,6 +475,7 @@ export async function obtenerAplicacion(id: string) {
     where: { id },
     include: INCLUDE_APLICACION,
   });
+  ordenarCuadrosDe(aplicacion);
   return enriquecerConAlertas(aplicacion);
 }
 

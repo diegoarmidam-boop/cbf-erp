@@ -12,6 +12,7 @@ import {
   obtenerSugerenciaDesdeAyer,
   diaEstaCerrado,
 } from "./captura.js";
+import { SemanaConfirmadaError } from "./semana-confirmada.js";
 
 export const capturaRouter = Router();
 capturaRouter.use(requireAuth);
@@ -71,6 +72,10 @@ capturaRouter.post("/:huertaId/:fecha", requirePermission("nomina", "capturar"),
     await guardarCapturaDelDia(huertaId, fecha, parsed.data.filas, req.usuario!.usuarioId, { permitirDiaCerrado: puedeEditarCerrado });
     res.status(204).end();
   } catch (err) {
+    if (err instanceof SemanaConfirmadaError) {
+      res.status(423).json({ error: err.message });
+      return;
+    }
     if (err instanceof DiaCerradoError) {
       res.status(423).json({ error: err.message });
       return;

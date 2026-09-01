@@ -1,4 +1,5 @@
-import { Fragment, useEffect, useState, type FormEvent } from "react";
+import { Fragment, useEffect, useRef, useState, type FormEvent } from "react";
+import { useSearchParams } from "react-router-dom";
 import { api, ApiError } from "../../lib/api";
 import { useHuertas } from "../../lib/useHuertas";
 import { usePersonal } from "../../lib/usePersonal";
@@ -7,6 +8,7 @@ import FechaInput from "../../components/FechaInput";
 import { formatearFecha, formatearInstante } from "../../lib/fecha";
 import { formatearNumero } from "../../lib/numero";
 import { presentacionTexto } from "../../lib/producto";
+import ConfirmModal from "../../components/ConfirmModal";
 
 const ETIQUETAS_ESTADO: Record<string, string> = {
   programada: "Programada",
@@ -44,6 +46,12 @@ export default function Granular() {
 
   const [lista, setLista] = useState<FertilizacionGranular[]>([]);
   const [cargando, setCargando] = useState(true);
+
+  // Pre-llenado de contexto desde una notificación (29-ago-2026): ?id=
+  // resalta y hace scroll a la Fertilización correspondiente.
+  const [searchParams] = useSearchParams();
+  const idResaltado = searchParams.get("id");
+  const refResaltada = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
 
   const [mostrarForm, setMostrarForm] = useState(false);
@@ -63,6 +71,7 @@ export default function Granular() {
   // Editar Paso 1 (15-ago-2026): solo mientras no haya reportes de avance —
   // mismo criterio que Aplicaciones (9.7).
   const [editandoProgramadaId, setEditandoProgramadaId] = useState<string | null>(null);
+  const [confirmando, setConfirmando] = useState<{ tipo: "liberar" | "cancelar"; id: string } | null>(null);
 
   const [registrando, setRegistrando] = useState<string | null>(null);
   const [gruposHuerta, setGruposHuerta] = useState<GrupoPago[]>([]);
@@ -76,16 +85,25 @@ export default function Granular() {
   const [editHoras, setEditHoras] = useState("");
   const [editAvanceCuadros, setEditAvanceCuadros] = useState<Record<string, string>>({});
 
+  // Las "vencida" (liberadas) y "cancelada" no se muestran por default —
+  // se quedaban en la lista para siempre (31-ago-2026, reportado por
+  // Diego). Siguen existiendo, solo se piden aparte con este toggle.
+  const [mostrarCerradas, setMostrarCerradas] = useState(false);
+
   function cargar() {
     setCargando(true);
     api
-      .get<FertilizacionGranular[]>("/fertilizantes/granular")
+      .get<FertilizacionGranular[]>(`/fertilizantes/granular${mostrarCerradas ? "?incluirCerradas=true" : ""}`)
       .then(setLista)
       .catch((err) => setError(err instanceof ApiError ? err.message : "No se pudo cargar."))
       .finally(() => setCargando(false));
   }
 
-  useEffect(cargar, []);
+  useEffect(cargar, [mostrarCerradas]);
+
+  useEffect(() => {
+    if (idResaltado) refResaltada.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [idResaltado, lista]);
 
   useEffect(() => {
     api.get<Producto[]>("/fertilizantes/granular/productos").then(setProductos);
@@ -268,7 +286,6 @@ export default function Granular() {
   }
 
   async function cancelar(id: string) {
-    if (!confirm("¿Cancelar esta fertilización? Se regresará a bodega central el producto no aplicado y se generará un abono al Rancho.")) return;
     setError(null);
     try {
       await api.post(`/fertilizantes/granular/${id}/cancelar`);
@@ -290,7 +307,7 @@ export default function Granular() {
 
   return (
     <div>
-      <div style={{ marginBottom: 14 }}>
+      <div style={{ marginBottom: 14, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
         <button
           className="btn-primary"
           onClick={() => {
@@ -305,6 +322,10 @@ export default function Granular() {
         >
           {mostrarForm ? "Cancelar" : "+ Programar fertilización"}
         </button>
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "var(--ink-soft)" }}>
+          <input type="checkbox" checked={mostrarCerradas} onChange={(e) => setMostrarCerradas(e.target.checked)} />
+          Mostrar vencidas/canceladas
+        </label>
       </div>
 
       {mostrarForm && (
@@ -442,7 +463,12 @@ export default function Granular() {
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           {lista.map((f) => (
-            <div key={f.id} className="card">
+            <div
+              key={f.id}
+              ref={f.id === idResaltado ? refResaltada : undefined}
+              className="card"
+              style={f.id === idResaltado ? { outline: "2px solid var(--pink)", outlineOffset: 2 } : undefined}
+            >
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 10 }}>
                 <div>
                   <span className={`tag ${tagEstado(f.estado)}`}>{ETIQUETAS_ESTADO[f.estado]}</span>{" "}
@@ -493,7 +519,7 @@ export default function Granular() {
                     </button>
                   )}
                   {f.estado === "programada" && (
-                    <button className="btn-secondary" onClick={() => liberar(f.id)}>
+                    <button className="btn-secondary" onClick={() => setConfirmando({ tipo: "liberar", id: f.id })}>
                       Liberar
                     </button>
                   )}
@@ -503,7 +529,7 @@ export default function Granular() {
                     </button>
                   )}
                   {(f.estado === "entregada" || f.estado === "realizada") && f.alertaPendienteAplicar && (
-                    <button className="btn-danger" onClick={() => cancelar(f.id)}>
+                    <button className="btn-danger" onClick={() => setConfirmando({ tipo: "cancelar", id: f.id })}>
                       Cancelar (15+ días sin terminar)
                     </button>
                   )}
@@ -698,6 +724,30 @@ export default function Granular() {
           ))}
           {lista.length === 0 && <p style={{ color: "var(--ink-soft)" }}>No hay fertilizaciones granulares.</p>}
         </div>
+      )}
+
+      {confirmando && confirmando.tipo === "liberar" && (
+        <ConfirmModal
+          titulo="Liberar fertilización"
+          mensaje="Se libera el producto comprometido en Almacén y la programación queda como vencida — ya no se podrá entregar ni programar sobre ella. ¿Confirmar?"
+          onCancelar={() => setConfirmando(null)}
+          onConfirmar={async () => {
+            await liberar(confirmando.id);
+            setConfirmando(null);
+          }}
+        />
+      )}
+      {confirmando && confirmando.tipo === "cancelar" && (
+        <ConfirmModal
+          titulo="Cancelar fertilización"
+          mensaje="Se regresará a bodega central el producto no aplicado y se generará un abono al Rancho. ¿Confirmar?"
+          peligroso
+          onCancelar={() => setConfirmando(null)}
+          onConfirmar={async () => {
+            await cancelar(confirmando.id);
+            setConfirmando(null);
+          }}
+        />
       )}
     </div>
   );

@@ -1,7 +1,15 @@
+import { ordenarPorNombreNumerico } from "@cbf/shared";
 import { prisma } from "../../core/db.js";
 
-export function listarSeccionesRiego(huertaId: string) {
-  return prisma.seccionRiego.findMany({ where: { huertaId }, include: { cuadros: { include: { cuadro: true } } }, orderBy: { nombre: "asc" } });
+export async function listarSeccionesRiego(huertaId: string) {
+  const secciones = await prisma.seccionRiego.findMany({
+    where: { huertaId },
+    include: { cuadros: { include: { cuadro: true } } },
+  });
+  for (const s of secciones) {
+    s.cuadros = ordenarPorNombreNumerico(s.cuadros, (sc) => sc.cuadro.nombre);
+  }
+  return ordenarPorNombreNumerico(secciones, (s) => s.nombre);
 }
 
 export async function crearSeccionRiego(huertaId: string, nombre: string, cuadroIds: string[]) {

@@ -1,86 +1,66 @@
 import { useState, type FormEvent } from "react";
 import { api, ApiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import { useCatalogoAbierto } from "../lib/useCatalogoAbierto";
-import type { ConcentracionUnidad, ModuloReceta, Producto, Receta } from "../lib/types";
+import type { ModoDosisFertirriego, Producto, RecetaFertirriego } from "../lib/types";
 import { presentacionTexto } from "../lib/producto";
 
-export const ROLES_PUEDEN_RECETAS = ["director_general", "encargado_sistemas", "gerente_tecnico_produccion"];
+export const ROLES_PUEDEN_RECETAS_FERTIRRIEGO = ["director_general", "encargado_sistemas", "gerente_tecnico_produccion"];
 
-interface ProductoRecetaForm {
+interface ProductoRecetaFertirriegoForm {
   productoId: string;
-  concentracionValor: string;
-  concentracionUnidad: ConcentracionUnidad;
+  dosisValor: string;
+  dosisUnidad: ModoDosisFertirriego;
 }
 
-function productoFormVacio(): ProductoRecetaForm {
-  return { productoId: "", concentracionValor: "", concentracionUnidad: "ml_l" };
+function productoFormVacio(): ProductoRecetaFertirriegoForm {
+  return { productoId: "", dosisValor: "", dosisUnidad: "kg_ha" };
 }
 
 /**
- * Recetario (20-ago-2026): alta/edición/lista de recetas maestras, más el
- * catálogo abierto de Tipo de Aplicación — exclusivo de Aplicaciones (9.7)
- * desde la reversión de Fertirriego (27-ago-2026, ver Fertilizantes 9.5),
- * que ahora usa su propio componente (RecetarioFertirriegoPanel) y su
- * propio modelo de datos (dosis/ha, sin concentración ni Tipo de
- * aplicación). El prop `modulo` sigue existiendo por el tipo `Receta`
- * compartido con el backend, pero en la práctica solo se invoca con
- * "aplicaciones". El candado real de quién puede crear/editar vive en el
- * backend; aquí solo se ocultan los controles para el resto de roles.
+ * Recetario de Fertirriego (27-ago-2026, reversión): componente propio,
+ * separado de RecetarioPanel (Aplicaciones) — sin Tipo de aplicación, sin
+ * litros de mezcla/agua por ha, solo nombre + productos con su dosis por
+ * hectárea (kg/ha, L/ha o g/ha). Ver comentario completo en el schema,
+ * FertirriegoProgramacion.
  */
-export default function RecetarioPanel({
-  modulo,
+export default function RecetarioFertirriegoPanel({
   productos,
   recetas,
   cargando,
   refetch,
 }: {
-  modulo: ModuloReceta;
   productos: Producto[];
-  // Recetas/refetch vienen del padre (Aplicaciones), que ya llama
-  // useRecetas para el selector "Usar receta" del formulario de Programar
-  // — si este panel tuviera su propia instancia del hook, crear una
-  // receta aquí no se reflejaría en ese selector hasta refrescar la
-  // página entera (bug real, encontrado probando el flujo completo).
-  recetas: Receta[];
+  recetas: RecetaFertirriego[];
   cargando: boolean;
   refetch: () => void;
 }) {
   const { usuario } = useAuth();
-  const puedeAdministrar = usuario ? ROLES_PUEDEN_RECETAS.includes(usuario.rol) : false;
-  const { items: tiposAplicacion, agregar: agregarTipoAplicacion } = useCatalogoAbierto("/tipos-aplicacion");
+  const puedeAdministrar = usuario ? ROLES_PUEDEN_RECETAS_FERTIRRIEGO.includes(usuario.rol) : false;
 
   const [error, setError] = useState<string | null>(null);
   const [mostrarForm, setMostrarForm] = useState(false);
   const [editandoId, setEditandoId] = useState<string | null>(null);
   const [nombre, setNombre] = useState("");
-  const [tipoAplicacionId, setTipoAplicacionId] = useState("");
-  const [nuevoTipo, setNuevoTipo] = useState("");
-  const [litrosPorHa, setLitrosPorHa] = useState("");
-  const [productosForm, setProductosForm] = useState<ProductoRecetaForm[]>([productoFormVacio()]);
+  const [productosForm, setProductosForm] = useState<ProductoRecetaFertirriegoForm[]>([productoFormVacio()]);
 
-  const productosDisponibles = productos.filter((p) => p.categoria === (modulo === "aplicaciones" ? "agroquimico" : "fertilizante"));
+  const productosDisponibles = productos.filter((p) => p.categoria === "fertilizante");
 
   function limpiarForm() {
     setEditandoId(null);
     setNombre("");
-    setTipoAplicacionId("");
-    setLitrosPorHa("");
     setProductosForm([productoFormVacio()]);
     setMostrarForm(false);
   }
 
-  function iniciarEdicion(r: Receta) {
+  function iniciarEdicion(r: RecetaFertirriego) {
     setEditandoId(r.id);
     setNombre(r.nombre);
-    setTipoAplicacionId(r.tipoAplicacionId ?? "");
-    setLitrosPorHa(String(r.litrosPorHa));
-    setProductosForm(r.productos.map((p) => ({ productoId: p.productoId, concentracionValor: String(p.concentracionValor), concentracionUnidad: p.concentracionUnidad })));
+    setProductosForm(r.productos.map((p) => ({ productoId: p.productoId, dosisValor: String(p.dosisValor), dosisUnidad: p.dosisUnidad })));
     setError(null);
     setMostrarForm(true);
   }
 
-  function actualizarProducto(index: number, cambios: Partial<ProductoRecetaForm>) {
+  function actualizarProducto(index: number, cambios: Partial<ProductoRecetaFertirriegoForm>) {
     setProductosForm((prev) => prev.map((p, i) => (i !== index ? p : { ...p, ...cambios })));
   }
 
@@ -92,32 +72,18 @@ export default function RecetarioPanel({
     setProductosForm((prev) => (prev.length === 1 ? prev : prev.filter((_, i) => i !== index)));
   }
 
-  async function agregarTipoNuevo() {
-    if (!nuevoTipo.trim()) return;
-    const creado = await agregarTipoAplicacion(nuevoTipo.trim());
-    setTipoAplicacionId(creado.id);
-    setNuevoTipo("");
-  }
-
   async function guardar(e: FormEvent) {
     e.preventDefault();
     setError(null);
     const payload = {
       nombre,
-      modulo,
-      tipoAplicacionId: tipoAplicacionId || undefined,
-      litrosPorHa: Number(litrosPorHa),
-      productos: productosForm.map((p) => ({
-        productoId: p.productoId,
-        concentracionValor: Number(p.concentracionValor),
-        concentracionUnidad: p.concentracionUnidad,
-      })),
+      productos: productosForm.map((p) => ({ productoId: p.productoId, dosisValor: Number(p.dosisValor), dosisUnidad: p.dosisUnidad })),
     };
     try {
       if (editandoId) {
-        await api.patch(`/recetario/${editandoId}`, payload);
+        await api.patch(`/fertilizantes/fertirriego/recetario/${editandoId}`, payload);
       } else {
-        await api.post("/recetario", payload);
+        await api.post("/fertilizantes/fertirriego/recetario", payload);
       }
       limpiarForm();
       refetch();
@@ -126,10 +92,10 @@ export default function RecetarioPanel({
     }
   }
 
-  async function alternarActivo(r: Receta) {
+  async function alternarActivo(r: RecetaFertirriego) {
     setError(null);
     try {
-      await api.patch(`/recetario/${r.id}/activo`, { activo: !r.activo });
+      await api.patch(`/fertilizantes/fertirriego/recetario/${r.id}/activo`, { activo: !r.activo });
       refetch();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "No se pudo cambiar.");
@@ -151,39 +117,13 @@ export default function RecetarioPanel({
 
       {mostrarForm && puedeAdministrar && (
         <form onSubmit={guardar} style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 16, borderBottom: "1px solid var(--border)", paddingBottom: 14 }}>
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            <label className="field">
-              Nombre de la receta
-              <input value={nombre} onChange={(e) => setNombre(e.target.value)} required />
-            </label>
-            <label className="field">
-              Tipo de aplicación
-              <select value={tipoAplicacionId} onChange={(e) => setTipoAplicacionId(e.target.value)}>
-                <option value="">Sin especificar</option>
-                {tiposAplicacion.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.nombre}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="field">
-              + Tipo nuevo
-              <div style={{ display: "flex", gap: 4 }}>
-                <input value={nuevoTipo} onChange={(e) => setNuevoTipo(e.target.value)} placeholder="ej. Foliar" style={{ width: 120 }} />
-                <button type="button" className="btn-secondary" onClick={agregarTipoNuevo} disabled={!nuevoTipo.trim()}>
-                  +
-                </button>
-              </div>
-            </label>
-            <label className="field">
-              Litros de mezcla/agua por ha (un tanque para toda la receta)
-              <input type="number" step="0.0001" value={litrosPorHa} onChange={(e) => setLitrosPorHa(e.target.value)} required />
-            </label>
-          </div>
+          <label className="field">
+            Nombre de la receta
+            <input value={nombre} onChange={(e) => setNombre(e.target.value)} required />
+          </label>
 
           <div className="field">
-            Productos de la receta
+            Productos de la receta (cada uno con su propia dosis por hectárea)
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {productosForm.map((p, i) => (
                 <div key={i} style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
@@ -199,22 +139,22 @@ export default function RecetarioPanel({
                     </select>
                   </label>
                   <label className="field">
-                    Concentración
+                    Dosis
                     <input
                       type="number"
                       step="0.0001"
                       style={{ width: 100 }}
-                      value={p.concentracionValor}
-                      onChange={(e) => actualizarProducto(i, { concentracionValor: e.target.value })}
+                      value={p.dosisValor}
+                      onChange={(e) => actualizarProducto(i, { dosisValor: e.target.value })}
                       required
                     />
                   </label>
                   <label className="field">
                     Unidad
-                    <select value={p.concentracionUnidad} onChange={(e) => actualizarProducto(i, { concentracionUnidad: e.target.value as ConcentracionUnidad })}>
-                      <option value="ml_l">ml/L</option>
-                      <option value="g_l">g/L</option>
-                      <option value="kg_l">kg/L</option>
+                    <select value={p.dosisUnidad} onChange={(e) => actualizarProducto(i, { dosisUnidad: e.target.value as ModoDosisFertirriego })}>
+                      <option value="kg_ha">kg/ha</option>
+                      <option value="l_ha">L/ha</option>
+                      <option value="g_ha">g/ha</option>
                     </select>
                   </label>
                   {productosForm.length > 1 && (
@@ -246,12 +186,9 @@ export default function RecetarioPanel({
             <div key={r.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
               <div>
                 <span style={{ fontSize: 12.5, fontWeight: 600 }}>{r.nombre}</span>{" "}
-                {r.tipoAplicacion && <span className="tag tag-neutral">{r.tipoAplicacion.nombre}</span>}{" "}
                 {!r.activo && <span className="tag tag-danger">Inactiva</span>}
                 <div style={{ fontSize: 11.5, color: "var(--ink-soft)" }}>
-                  {r.productos.map((p) => `${p.producto.nombreComercial} (${p.concentracionValor} ${p.concentracionUnidad.replace("_", "/")})`).join(" + ")}
-                  {" · "}
-                  {r.litrosPorHa} L/ha
+                  {r.productos.map((p) => `${p.producto.nombreComercial} (${p.dosisValor} ${p.dosisUnidad.replace("_", "/")})`).join(" + ")}
                 </div>
               </div>
               {puedeAdministrar && (

@@ -1,4 +1,5 @@
-import { Fragment, useEffect, useState, type FormEvent } from "react";
+import { Fragment, useEffect, useRef, useState, type FormEvent } from "react";
+import { useSearchParams } from "react-router-dom";
 import { api, ApiError } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
 import { useHuertas } from "../../lib/useHuertas";
@@ -13,6 +14,7 @@ import { presentacionTexto } from "../../lib/producto";
 import RecetarioPanel, { ROLES_PUEDEN_RECETAS } from "../../components/RecetarioPanel";
 import MezclaPorTanque from "../../components/MezclaPorTanque";
 import OrdenAplicacionView from "../../components/OrdenAplicacionView";
+import ConfirmModal from "../../components/ConfirmModal";
 
 const ETIQUETAS_ESTADO: Record<string, string> = {
   programada: "Programada",
@@ -112,6 +114,13 @@ export default function Aplicaciones() {
   const [error, setError] = useState<string | null>(null);
   const [mostrarRecetario, setMostrarRecetario] = useState(false);
 
+  // Pre-llenado de contexto desde una notificación (29-ago-2026): ?id=
+  // resalta y hace scroll a la Aplicación correspondiente (vencida o
+  // pendiente de terminar).
+  const [searchParams] = useSearchParams();
+  const idResaltado = searchParams.get("id");
+  const refResaltada = useRef<HTMLDivElement>(null);
+
   // ---- Programar ----
   const [mostrarForm, setMostrarForm] = useState(false);
   const [productos, setProductos] = useState<Producto[]>([]);
@@ -128,6 +137,7 @@ export default function Aplicaciones() {
   // Editar Paso 1 (15-ago-2026): solo mientras no haya reportes de avance —
   // reutiliza el mismo formulario de arriba, sin poder cambiar de Huerta.
   const [editandoProgramadaId, setEditandoProgramadaId] = useState<string | null>(null);
+  const [confirmando, setConfirmando] = useState<{ tipo: "liberar" | "cancelar"; id: string } | null>(null);
 
   // ---- Recetario (20-ago-2026) ----
   const [recetaId, setRecetaId] = useState("");
@@ -160,16 +170,25 @@ export default function Aplicaciones() {
   const [editAvanceCuadros, setEditAvanceCuadros] = useState<Record<string, string>>({});
   const [editLineas, setEditLineas] = useState<LineaForm[]>([]);
 
+  // Las "vencida" (liberadas) y "cancelada" no se muestran por default —
+  // se quedaban en la lista para siempre (31-ago-2026, reportado por
+  // Diego). Siguen existiendo, solo se piden aparte con este toggle.
+  const [mostrarCerradas, setMostrarCerradas] = useState(false);
+
   function cargar() {
     setCargando(true);
     api
-      .get<Aplicacion[]>("/aplicaciones")
+      .get<Aplicacion[]>(`/aplicaciones${mostrarCerradas ? "?incluirCerradas=true" : ""}`)
       .then(setAplicaciones)
       .catch((err) => setError(err instanceof ApiError ? err.message : "No se pudo cargar."))
       .finally(() => setCargando(false));
   }
 
-  useEffect(cargar, []);
+  useEffect(cargar, [mostrarCerradas]);
+
+  useEffect(() => {
+    if (idResaltado) refResaltada.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [idResaltado, aplicaciones]);
 
   useEffect(() => {
     api.get<Producto[]>("/aplicaciones/productos").then(setProductos);
@@ -455,7 +474,6 @@ export default function Aplicaciones() {
   }
 
   async function cancelar(id: string) {
-    if (!confirm("¿Cancelar esta aplicación? Se regresará a bodega central el producto no aplicado y se generará un abono al Rancho.")) return;
     setError(null);
     try {
       await api.post(`/aplicaciones/${id}/cancelar`);
@@ -497,6 +515,10 @@ export default function Aplicaciones() {
         <button className="btn-secondary" onClick={() => setMostrarRecetario((v) => !v)}>
           {mostrarRecetario ? "Ocultar Recetario" : "Recetario"}
         </button>
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "var(--ink-soft)" }}>
+          <input type="checkbox" checked={mostrarCerradas} onChange={(e) => setMostrarCerradas(e.target.checked)} />
+          Mostrar vencidas/canceladas
+        </label>
       </div>
 
       {mostrarRecetario && (
@@ -715,7 +737,12 @@ export default function Aplicaciones() {
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           {aplicaciones.map((a) => (
-            <div key={a.id} className="card">
+            <div
+              key={a.id}
+              ref={a.id === idResaltado ? refResaltada : undefined}
+              className="card"
+              style={a.id === idResaltado ? { outline: "2px solid var(--pink)", outlineOffset: 2 } : undefined}
+            >
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 10 }}>
                 <div>
                   <span className={`tag ${tagEstado(a.estado)}`}>{ETIQUETAS_ESTADO[a.estado]}</span>{" "}
@@ -780,7 +807,7 @@ export default function Aplicaciones() {
                     </button>
                   )}
                   {a.estado === "programada" && (
-                    <button className="btn-secondary" onClick={() => liberar(a.id)}>
+                    <button className="btn-secondary" onClick={() => setConfirmando({ tipo: "liberar", id: a.id })}>
                       Liberar
                     </button>
                   )}
@@ -790,7 +817,7 @@ export default function Aplicaciones() {
                     </button>
                   )}
                   {(a.estado === "entregada" || a.estado === "realizada") && a.alertaPendienteAplicar && (
-                    <button className="btn-danger" onClick={() => cancelar(a.id)}>
+                    <button className="btn-danger" onClick={() => setConfirmando({ tipo: "cancelar", id: a.id })}>
                       Cancelar (15+ días sin terminar)
                     </button>
                   )}
@@ -964,6 +991,30 @@ export default function Aplicaciones() {
           onCerrar={() => {
             setVerOrdenId(null);
             setOrdenData(null);
+          }}
+        />
+      )}
+
+      {confirmando && confirmando.tipo === "liberar" && (
+        <ConfirmModal
+          titulo="Liberar aplicación"
+          mensaje="Se libera el producto comprometido en Almacén y la programación queda como vencida — ya no se podrá entregar ni programar sobre ella. ¿Confirmar?"
+          onCancelar={() => setConfirmando(null)}
+          onConfirmar={async () => {
+            await liberar(confirmando.id);
+            setConfirmando(null);
+          }}
+        />
+      )}
+      {confirmando && confirmando.tipo === "cancelar" && (
+        <ConfirmModal
+          titulo="Cancelar aplicación"
+          mensaje="Se regresará a bodega central el producto no aplicado y se generará un abono al Rancho. ¿Confirmar?"
+          peligroso
+          onCancelar={() => setConfirmando(null)}
+          onConfirmar={async () => {
+            await cancelar(confirmando.id);
+            setConfirmando(null);
           }}
         />
       )}

@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { api, ApiError } from "../../lib/api";
 import { usePersonal } from "../../lib/usePersonal";
 import type { GrupoPago } from "../../lib/types";
+import ConfirmModal from "../../components/ConfirmModal";
 
 function hoyISO(): string {
   const d = new Date();
@@ -17,6 +18,7 @@ export default function Grupos() {
   const [persistenteGrupo, setPersistenteGrupo] = useState(true);
   const [miembrosGrupo, setMiembrosGrupo] = useState<string[]>([]);
   const [agregarA, setAgregarA] = useState<Record<string, string>>({});
+  const [confirmandoBorrarId, setConfirmandoBorrarId] = useState<string | null>(null);
 
   function cargar() {
     api.get<GrupoPago[]>(`/nomina/grupos?fecha=${hoyISO()}`).then(setGrupos);
@@ -71,7 +73,6 @@ export default function Grupos() {
   }
 
   async function borrarGrupo(grupoId: string) {
-    if (!confirm("¿Borrar este grupo? Solo se puede si nunca se usó en una captura.")) return;
     setError(null);
     try {
       await api.delete(`/nomina/grupos/${grupoId}`);
@@ -152,7 +153,7 @@ export default function Grupos() {
                   {(g.miembrosHoy ?? []).length === 0 && <span>Sin miembros hoy.</span>}
                 </div>
               </div>
-              <button className="btn-secondary" onClick={() => borrarGrupo(g.id)}>
+              <button className="btn-secondary" onClick={() => setConfirmandoBorrarId(g.id)}>
                 Borrar grupo
               </button>
             </div>
@@ -175,6 +176,19 @@ export default function Grupos() {
         ))}
         {grupos.length === 0 && <p style={{ color: "var(--ink-soft)" }}>No hay grupos de pago todavía.</p>}
       </div>
+
+      {confirmandoBorrarId && (
+        <ConfirmModal
+          titulo="Borrar grupo de pago"
+          mensaje="Solo se puede si nunca se usó en una captura. ¿Confirmar?"
+          peligroso
+          onCancelar={() => setConfirmandoBorrarId(null)}
+          onConfirmar={async () => {
+            await borrarGrupo(confirmandoBorrarId);
+            setConfirmandoBorrarId(null);
+          }}
+        />
+      )}
     </div>
   );
 }

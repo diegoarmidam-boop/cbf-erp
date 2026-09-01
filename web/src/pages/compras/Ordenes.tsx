@@ -1,4 +1,5 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useSearchParams } from "react-router-dom";
 import { api, ApiError } from "../../lib/api";
 import { useProductos } from "../../lib/useProductos";
 import type { MejorProveedor, OrdenCompra, Proveedor } from "../../lib/types";
@@ -27,6 +28,13 @@ export default function Ordenes() {
   const [proveedores, setProveedores] = useState<Proveedor[]>([]);
   const [ordenes, setOrdenes] = useState<OrdenCompra[]>([]);
   const [error, setError] = useState<string | null>(null);
+
+  // Pre-llenado de contexto desde una notificación (29-ago-2026): ?id=
+  // resalta y hace scroll a la orden correspondiente en vez de dejar al
+  // usuario buscarla entre todas.
+  const [searchParams] = useSearchParams();
+  const idResaltado = searchParams.get("id");
+  const refResaltada = useRef<HTMLDivElement>(null);
   const [mostrarForm, setMostrarForm] = useState(false);
   const [productoId, setProductoId] = useState("");
   const [cantidadSolicitada, setCantidadSolicitada] = useState("");
@@ -51,6 +59,10 @@ export default function Ordenes() {
   }
 
   useEffect(cargar, []);
+
+  useEffect(() => {
+    if (idResaltado) refResaltada.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [idResaltado, ordenes]);
 
   async function crearOrden(e: FormEvent) {
     e.preventDefault();
@@ -163,7 +175,12 @@ export default function Ordenes() {
 
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         {ordenes.map((o) => (
-          <div key={o.id} className="card">
+          <div
+            key={o.id}
+            ref={o.id === idResaltado ? refResaltada : undefined}
+            className="card"
+            style={o.id === idResaltado ? { outline: "2px solid var(--pink)", outlineOffset: 2 } : undefined}
+          >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 10 }}>
               <div style={{ minWidth: 0, flex: "1 1 220px" }}>
                 <span className={`tag ${tagEstado(o.estado)}`}>{ETIQUETAS_ESTADO[o.estado]}</span>{" "}

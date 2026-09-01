@@ -1,5 +1,6 @@
 import { sumarDias, type FechaISO } from "@cbf/shared";
 import { prisma } from "../../core/db.js";
+import { verificarSemanaFinNoConfirmada } from "./semana-confirmada.js";
 
 export interface NuevoPrestamoInput {
   personalId: string;
@@ -34,6 +35,7 @@ export function prestamoAplicaEnPeriodo(proximoDescuento: FechaISO, periodoFin: 
 }
 
 export async function aplicarDescuento(prestamoId: string, aplicadoPorId: string, periodoFin: FechaISO): Promise<number> {
+  await verificarSemanaFinNoConfirmada(periodoFin);
   const prestamo = await prisma.prestamo.findUniqueOrThrow({ where: { id: prestamoId } });
   const saldoActual = Number(prestamo.saldoPendiente);
   const montoDescuento = Math.min(Number(prestamo.montoPorDescuento), saldoActual);

@@ -1,3 +1,4 @@
+import { ordenarPorNombreNumerico } from "@cbf/shared";
 import { prisma } from "../../core/db.js";
 import type { TransactionClient } from "../../core/db.js";
 
@@ -160,7 +161,10 @@ export async function estadoRiegoTodasUPs(fecha: string, huertaIdAlcance?: strin
 
   return Promise.all(
     huertas.map(async (huerta) => {
-      const secciones = await prisma.seccionRiego.findMany({ where: { huertaId: huerta.id }, orderBy: { nombre: "asc" } });
+      const secciones = ordenarPorNombreNumerico(
+        await prisma.seccionRiego.findMany({ where: { huertaId: huerta.id } }),
+        (s) => s.nombre
+      );
       const filas = await Promise.all(
         secciones.map(async (seccion) => {
           const [registro, fertirriegoActivo] = await Promise.all([
@@ -196,7 +200,10 @@ function semanaLunesADomingo(fechaRef: Date): Date[] {
 /** Historial visual semanal (9.6): tabla tipo calendario, Secciones × días, con indicador de fertirriego aplicado. */
 export async function historialSemanal(huertaId: string, fechaRef: string) {
   const dias = semanaLunesADomingo(new Date(fechaRef));
-  const secciones = await prisma.seccionRiego.findMany({ where: { huertaId }, orderBy: { nombre: "asc" } });
+  const secciones = ordenarPorNombreNumerico(
+    await prisma.seccionRiego.findMany({ where: { huertaId } }),
+    (s) => s.nombre
+  );
   const registros = await prisma.riegoRegistroDiario.findMany({
     where: { seccionId: { in: secciones.map((s) => s.id) }, fecha: { gte: dias[0], lte: dias[6] } },
   });

@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { api, ApiError } from "../../lib/api";
 import type { OrdenCxP } from "../../lib/types";
 import { formatearFecha, formatearInstante } from "../../lib/fecha";
@@ -7,6 +8,12 @@ export default function CxP() {
   const [ordenes, setOrdenes] = useState<OrdenCxP[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [cargando, setCargando] = useState(true);
+
+  // Pre-llenado de contexto desde una notificación (29-ago-2026): ?id=
+  // resalta y hace scroll a la CxP correspondiente.
+  const [searchParams] = useSearchParams();
+  const idResaltado = searchParams.get("id");
+  const refResaltada = useRef<HTMLTableRowElement>(null);
 
   function cargar() {
     setCargando(true);
@@ -18,6 +25,10 @@ export default function CxP() {
   }
 
   useEffect(cargar, []);
+
+  useEffect(() => {
+    if (idResaltado) refResaltada.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [idResaltado, ordenes]);
 
   async function marcarPagada(id: string) {
     if (!confirm("¿Marcar esta orden como pagada?")) return;
@@ -56,7 +67,14 @@ export default function CxP() {
           </thead>
           <tbody>
             {ordenes.map((o) => (
-              <tr key={o.id} style={o.alertaVisible ? { background: "var(--pink-soft, #fdeef1)" } : undefined}>
+              <tr
+                key={o.id}
+                ref={o.id === idResaltado ? refResaltada : undefined}
+                style={{
+                  ...(o.alertaVisible ? { background: "var(--pink-soft, #fdeef1)" } : {}),
+                  ...(o.id === idResaltado ? { outline: "2px solid var(--pink)" } : {}),
+                }}
+              >
                 <td>{o.proveedor.nombre}</td>
                 <td>{o.producto.nombreComercial}</td>
                 <td>{formatearInstante(o.fechaFormalizacion)}</td>

@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { api, ApiError } from "../../lib/api";
 import type { RiegoHuertaTodasUPs } from "../../lib/types";
 import FechaInput from "../../components/FechaInput";
@@ -14,16 +15,25 @@ interface FilaEdit {
   // Cantidad aplicada ese día, por producto (10-ago-2026, varios productos
   // en el mismo fertirriego) — cada uno se lee en su propio medidor/inyector.
   cantidades: Record<string, string>;
+  // Ajuste del día (1.7, 31-ago-2026): si ese día no se tuvo alguno de los
+  // productos programados, se quita solo de HOY sin tocar la programación
+  // ni los demás días — el registro diario ya es un modelo separado
+  // (RiegoRegistroDiario), así que basta con no mandarlo en el payload.
+  omitidos: Record<string, boolean>;
   motivoNoAplicado: string;
 }
 
 export default function Riego() {
-  const [fecha, setFecha] = useState(hoyISO());
+  const [searchParams] = useSearchParams();
+  const [fecha, setFecha] = useState(searchParams.get("fecha") || hoyISO());
   const [datos, setDatos] = useState<RiegoHuertaTodasUPs[]>([]);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [guardandoId, setGuardandoId] = useState<string | null>(null);
   const [ediciones, setEdiciones] = useState<Record<string, FilaEdit>>({});
+  const huertaResaltadaId = searchParams.get("huertaId");
+  const refHuertaResaltada = useRef<HTMLDivElement>(null);
+  const yaHizoScroll = useRef(false);
 
   function cargar() {
     setCargando(true);
@@ -37,10 +47,21 @@ export default function Riego() {
           for (const fila of h.secciones) {
             const cantidades: Record<string, string> = {};
             for (const p of fila.registro?.productos ?? []) cantidades[p.productoId] = p.cantidadAplicada;
+            // Si ya hay un registro guardado de este día, cualquier producto
+            // programado que no aparezca en él es porque ya se había
+            // quitado ese día — se respeta al recargar. Si todavía no hay
+            // registro (día nuevo), ninguno arranca omitido.
+            const omitidos: Record<string, boolean> = {};
+            if (fila.registro) {
+              for (const p of fila.fertirriegoActivo?.productos ?? []) {
+                if (!fila.registro.productos.some((rp) => rp.productoId === p.id)) omitidos[p.id] = true;
+              }
+            }
             nuevas[fila.seccion.id] = {
               horas: fila.registro ? fila.registro.horas : "",
               fertirriegoConfirmado: fila.registro?.fertirriegoConfirmado ?? false,
               cantidades,
+              omitidos,
               motivoNoAplicado: fila.registro?.motivoNoAplicado ?? "",
             };
           }
@@ -53,6 +74,12 @@ export default function Riego() {
 
   useEffect(cargar, [fecha]);
 
+  useEffect(() => {
+    if (yaHizoScroll.current || !huertaResaltadaId || datos.length === 0) return;
+    refHuertaResaltada.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    yaHizoScroll.current = true;
+  }, [huertaResaltadaId, datos]);
+
   function actualizarFila(seccionId: string, campo: "horas" | "fertirriegoConfirmado" | "motivoNoAplicado", valor: string | boolean) {
     setEdiciones((prev) => ({ ...prev, [seccionId]: { ...prev[seccionId]!, [campo]: valor } }));
   }
@@ -64,17 +91,28 @@ export default function Riego() {
     }));
   }
 
+  function alternarOmitido(seccionId: string, productoId: string, omitido: boolean) {
+    setEdiciones((prev) => ({
+      ...prev,
+      [seccionId]: { ...prev[seccionId]!, omitidos: { ...prev[seccionId]!.omitidos, [productoId]: omitido } },
+    }));
+  }
+
   async function guardarFila(seccionId: string, productoIds: string[]) {
     const fila = ediciones[seccionId];
     if (!fila) return;
     setError(null);
     setGuardandoId(seccionId);
     try {
+      // 1.7 (31-ago-2026): los productos marcados "no se tuvo hoy" se
+      // excluyen del payload — el registro del día solo lleva lo que de
+      // verdad se aplicó, sin tocar la programación ni otros días.
+      const productoIdsAplicados = productoIds.filter((id) => !fila.omitidos[id]);
       await api.post(`/riego/${seccionId}/${fecha}`, {
         horas: Number(fila.horas),
         fertirriegoConfirmado: fila.fertirriegoConfirmado,
         cantidadesAplicadas: fila.fertirriegoConfirmado
-          ? productoIds.map((productoId) => ({ productoId, cantidadAplicada: Number(fila.cantidades[productoId] ?? 0) }))
+          ? productoIdsAplicados.map((productoId) => ({ productoId, cantidadAplicada: Number(fila.cantidades[productoId] ?? 0) }))
           : undefined,
         motivoNoAplicado: !fila.fertirriegoConfirmado ? fila.motivoNoAplicado || undefined : undefined,
       });
@@ -100,7 +138,12 @@ export default function Riego() {
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           {datos.map(({ huerta, secciones }) => (
-            <div key={huerta.id} className="card">
+            <div
+              key={huerta.id}
+              className="card"
+              ref={huerta.id === huertaResaltadaId ? refHuertaResaltada : undefined}
+              style={huerta.id === huertaResaltadaId ? { outline: "2px solid var(--pink)", outlineOffset: 2 } : undefined}
+            >
               <h3 style={{ marginBottom: 10 }}>{huerta.nombre}</h3>
               {secciones.length === 0 ? (
                 <p style={{ color: "var(--ink-soft)", fontSize: 12.5 }}>Sin Secciones de Riego dadas de alta.</p>
@@ -143,17 +186,30 @@ export default function Riego() {
                                   ¿Se metió? ({fertirriegoActivo.productos.map((p) => p.nombreComercial).join(" + ")})
                                 </label>
                                 {fila.fertirriegoConfirmado ? (
-                                  fertirriegoActivo.productos.map((p) => (
-                                    <input
-                                      key={p.id}
-                                      type="number"
-                                      step="0.0001"
-                                      placeholder={`${p.nombreComercial} (${p.unidad})`}
-                                      style={{ width: 160 }}
-                                      value={fila.cantidades[p.id] ?? ""}
-                                      onChange={(e) => actualizarCantidad(seccion.id, p.id, e.target.value)}
-                                    />
-                                  ))
+                                  fertirriegoActivo.productos.map((p) => {
+                                    const omitido = fila.omitidos[p.id] ?? false;
+                                    return (
+                                      <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                        <input
+                                          type="number"
+                                          step="0.0001"
+                                          placeholder={`${p.nombreComercial} (${p.unidad})`}
+                                          style={{ width: 160 }}
+                                          disabled={omitido}
+                                          value={fila.cantidades[p.id] ?? ""}
+                                          onChange={(e) => actualizarCantidad(seccion.id, p.id, e.target.value)}
+                                        />
+                                        <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "var(--ink-soft)" }}>
+                                          <input
+                                            type="checkbox"
+                                            checked={omitido}
+                                            onChange={(e) => alternarOmitido(seccion.id, p.id, e.target.checked)}
+                                          />
+                                          No se tuvo hoy
+                                        </label>
+                                      </div>
+                                    );
+                                  })
                                 ) : (
                                   <input
                                     placeholder="Motivo por el que no se metió (obligatorio)"

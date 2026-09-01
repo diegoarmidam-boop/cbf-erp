@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useSearchParams } from "react-router-dom";
 import { api, ApiError } from "../../lib/api";
 import { useProductos } from "../../lib/useProductos";
 import { useCatalogoAbierto } from "../../lib/useCatalogoAbierto";
@@ -61,6 +62,15 @@ export default function Inventario() {
       .catch(() => setCancelacionesPendientes([]));
   }
   useEffect(cargarCancelacionesPendientes, []);
+
+  // Pre-llenado de contexto desde una notificación (29-ago-2026): ?id=
+  // resalta y hace scroll a la cancelación/ajuste correspondiente.
+  const [searchParams] = useSearchParams();
+  const idResaltado = searchParams.get("id");
+  const refResaltada = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (idResaltado) refResaltada.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [idResaltado, cancelacionesPendientes]);
 
   async function confirmarRecepcion(item: CancelacionPendienteBodega) {
     setError(null);
@@ -208,8 +218,16 @@ export default function Inventario() {
           {cancelacionesPendientes.map((c, i) => (
             <div
               key={`${c.tipo}-${c.id}-${i}`}
+              ref={c.id === idResaltado ? refResaltada : undefined}
               className="card"
-              style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: 10,
+                flexWrap: "wrap",
+                ...(c.id === idResaltado ? { outline: "2px solid var(--pink)", outlineOffset: 2 } : {}),
+              }}
             >
               <div>
                 <span className="tag tag-warning">

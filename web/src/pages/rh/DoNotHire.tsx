@@ -3,6 +3,7 @@ import { api, ApiError } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
 import type { DoNotHireEntry } from "../../lib/types";
 import { formatearFecha } from "../../lib/fecha";
+import ConfirmModal from "../../components/ConfirmModal";
 
 export default function DoNotHire() {
   const { modulosVisibles } = useAuth();
@@ -10,6 +11,7 @@ export default function DoNotHire() {
   const [entradas, setEntradas] = useState<DoNotHireEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [mostrarForm, setMostrarForm] = useState(false);
+  const [confirmandoId, setConfirmandoId] = useState<string | null>(null);
   const [nombreReferencia, setNombreReferencia] = useState("");
   const [motivo, setMotivo] = useState("");
   const [condicionesSalida, setCondicionesSalida] = useState("");
@@ -24,7 +26,6 @@ export default function DoNotHire() {
   useEffect(cargar, []);
 
   async function eliminar(id: string) {
-    if (!confirm("¿Quitar a esta persona de la lista?")) return;
     setError(null);
     try {
       await api.delete(`/rh/do-not-hire/${id}`);
@@ -100,7 +101,7 @@ export default function DoNotHire() {
               <td>{formatearFecha(e.fecha)}</td>
               {puedeCapturar && (
                 <td>
-                  <button className="btn-secondary" onClick={() => eliminar(e.id)}>
+                  <button className="btn-secondary" onClick={() => setConfirmandoId(e.id)}>
                     Borrar
                   </button>
                 </td>
@@ -109,6 +110,19 @@ export default function DoNotHire() {
           ))}
         </tbody>
       </table>
+
+      {confirmandoId && (
+        <ConfirmModal
+          titulo="Quitar de la lista"
+          mensaje="¿Quitar a esta persona de la lista de No Contratar?"
+          peligroso
+          onCancelar={() => setConfirmandoId(null)}
+          onConfirmar={async () => {
+            await eliminar(confirmandoId);
+            setConfirmandoId(null);
+          }}
+        />
+      )}
     </div>
   );
 }

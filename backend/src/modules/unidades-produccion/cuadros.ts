@@ -1,4 +1,4 @@
-import { plantasTotalesCuadro } from "@cbf/shared";
+import { ordenarPorNombreNumerico, plantasTotalesCuadro } from "@cbf/shared";
 import { prisma } from "../../core/db.js";
 
 export interface VersionCuadroInput {
@@ -9,12 +9,12 @@ export interface VersionCuadroInput {
   distPlantasM?: number;
 }
 
-export function listarCuadros(huertaId: string) {
-  return prisma.cuadro.findMany({
+export async function listarCuadros(huertaId: string) {
+  const cuadros = await prisma.cuadro.findMany({
     where: { huertaId },
     include: { versiones: { orderBy: { vigenteDesde: "desc" } } },
-    orderBy: { nombre: "asc" },
   });
+  return ordenarPorNombreNumerico(cuadros, (c) => c.nombre);
 }
 
 export async function crearCuadro(huertaId: string, nombre: string, version: VersionCuadroInput, vigenteDesde: string) {

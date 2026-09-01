@@ -1,3 +1,4 @@
+import { hoyISO } from "@cbf/shared";
 import { prisma } from "./db.js";
 import { tienePermiso } from "./permissions.js";
 import { solicitudesPendientes } from "./solicitudes.js";
@@ -8,6 +9,7 @@ import { listarCancelacionesPendientesConfirmarGranular, listarGranular } from "
 import { candadosDeHuerta } from "../modules/almacen/almacen-local.js";
 import { listarAjustesPendientesConfirmar } from "../modules/almacen/movimientos.js";
 import { diasPendientesDeCierre } from "../modules/nomina/cierre.js";
+import { estadoRiegoTodasUPs } from "../modules/riego/riego.js";
 import type { Rol } from "@prisma/client";
 
 // Firma digital de recepción de cancelaciones (9.7): el documento dice
@@ -73,7 +75,7 @@ export async function obtenerNotificaciones(rol: Rol, huertaIdAlcance: string | 
         detalle: `${o.producto.nombreComercial} — ${o.cantidadSolicitada} ${o.producto.unidad}`,
         urgente: false,
         fecha: o.fechaCreacion.toISOString(),
-        enlace: "/compras/ordenes",
+        enlace: `/compras/ordenes?id=${o.id}`,
       });
     }
   }
@@ -89,7 +91,7 @@ export async function obtenerNotificaciones(rol: Rol, huertaIdAlcance: string | 
         detalle: `${c.proveedor.nombre} — ${c.producto.nombreComercial}, vence el viernes ${c.viernesDePago.toISOString().slice(0, 10)}`,
         urgente: true,
         fecha: c.fechaLimitePago.toISOString(),
-        enlace: "/compras/cxp",
+        enlace: `/compras/cxp?id=${c.id}`,
       });
     }
   }
@@ -107,7 +109,7 @@ export async function obtenerNotificaciones(rol: Rol, huertaIdAlcance: string | 
           detalle: `${a.huerta.nombre} — ${a.productos.map((p) => p.producto.nombreComercial).join(" + ")}`,
           urgente: true,
           fecha: a.fechaCreacion.toISOString(),
-          enlace: "/aplicaciones",
+          enlace: `/aplicaciones?huertaId=${a.huertaId}&id=${a.id}`,
         });
       }
       if (a.alertaPendienteAplicar) {
@@ -118,7 +120,7 @@ export async function obtenerNotificaciones(rol: Rol, huertaIdAlcance: string | 
           detalle: `${a.huerta.nombre} — ${a.productos.map((p) => p.producto.nombreComercial).join(" + ")} (${(a.porcentajeAvance ?? 0).toFixed(0)}% avance)`,
           urgente: true,
           fecha: a.fechaCreacion.toISOString(),
-          enlace: "/aplicaciones",
+          enlace: `/aplicaciones?huertaId=${a.huertaId}&id=${a.id}`,
         });
       }
     }
@@ -135,7 +137,7 @@ export async function obtenerNotificaciones(rol: Rol, huertaIdAlcance: string | 
           detalle: `${f.huerta.nombre} — ${f.productos.map((p) => p.producto.nombreComercial).join(" + ")}`,
           urgente: true,
           fecha: f.fechaCreacion.toISOString(),
-          enlace: "/fertilizantes/granular",
+          enlace: `/fertilizantes/granular?huertaId=${f.huertaId}&id=${f.id}`,
         });
       }
       if (f.alertaPendienteAplicar) {
@@ -146,7 +148,7 @@ export async function obtenerNotificaciones(rol: Rol, huertaIdAlcance: string | 
           detalle: `${f.huerta.nombre} — ${f.productos.map((p) => p.producto.nombreComercial).join(" + ")} (${(f.porcentajeAvance ?? 0).toFixed(0)}% avance)`,
           urgente: true,
           fecha: f.fechaCreacion.toISOString(),
-          enlace: "/fertilizantes/granular",
+          enlace: `/fertilizantes/granular?huertaId=${f.huertaId}&id=${f.id}`,
         });
       }
     }
@@ -165,7 +167,7 @@ export async function obtenerNotificaciones(rol: Rol, huertaIdAlcance: string | 
           detalle: `${huerta.nombre} — ${c.nombreComercial}: ${c.saldoSinJustificar.toFixed(2)} sin justificar`,
           urgente: true,
           fecha: new Date().toISOString(),
-          enlace: "/almacen/local",
+          enlace: `/almacen/local?huertaId=${huerta.id}&productoId=${c.productoId}`,
         });
       }
     }
@@ -190,7 +192,7 @@ export async function obtenerNotificaciones(rol: Rol, huertaIdAlcance: string | 
         detalle: `${p.huerta.nombre} — se regresan ${p.cantidadRegresada} ${p.producto.unidad} de ${p.producto.nombreComercial}`,
         urgente: false,
         fecha: (p.fecha ?? new Date().toISOString()),
-        enlace: "/almacen/inventario",
+        enlace: `/almacen/inventario?id=${p.id}`,
       });
     }
   }
@@ -208,8 +210,36 @@ export async function obtenerNotificaciones(rol: Rol, huertaIdAlcance: string | 
           detalle: `${huerta.nombre} — ${p.fecha}`,
           urgente: p.estado === "vencido",
           fecha: p.fecha,
-          enlace: "/nomina/cierre",
+          enlace: `/nomina/cierre?fecha=${p.fecha}&huertaId=${huerta.id}`,
         });
+      }
+    }
+  }
+
+  // 7) Fertirriego programado para hoy y todavía sin registrar en Riego
+  // (1.8, 31-ago-2026) — recordatorio diario para quien captura Riego.
+  // "Encargado de Riego"/"Encargado del Rancho" no existen como roles en
+  // el sistema (auditado contra el enum Rol completo); se usa el permiso
+  // real del módulo "riego" en su lugar — hoy lo tienen regador,
+  // supervisor_huerta y gerente_tecnico_produccion (más los roles de
+  // acceso universal). Si Diego quiere otro conjunto de roles, es un
+  // cambio de una línea aquí, no una migración.
+  if (await tienePermiso(rol, "riego", "ver")) {
+    const hoy = hoyISO();
+    const huertasConSecciones = await estadoRiegoTodasUPs(hoy, huertaIdAlcance ?? undefined);
+    for (const { huerta, secciones } of huertasConSecciones) {
+      for (const { seccion, registro, fertirriegoActivo } of secciones) {
+        if (fertirriegoActivo && !registro) {
+          notificaciones.push({
+            id: `riego-pendiente-${seccion.id}-${hoy}`,
+            tipo: "riego_pendiente",
+            titulo: "Fertirriego programado hoy sin registrar",
+            detalle: `${huerta.nombre} — ${seccion.nombre}: ${fertirriegoActivo.productos.map((p) => p.nombreComercial).join(" + ")}`,
+            urgente: false,
+            fecha: hoy,
+            enlace: `/riego?fecha=${hoy}&huertaId=${huerta.id}`,
+          });
+        }
       }
     }
   }

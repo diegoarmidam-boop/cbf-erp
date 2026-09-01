@@ -4,6 +4,7 @@ import { useEquipoSeleccionado } from "./EquipoSeleccionadoContext";
 import type { AlertaMantenimiento, MantenimientoConcepto, MantenimientoEvento } from "../../lib/types";
 import FechaInput from "../../components/FechaInput";
 import { formatearFecha } from "../../lib/fecha";
+import ConfirmModal from "../../components/ConfirmModal";
 
 function hoyISO(): string {
   const d = new Date();
@@ -28,6 +29,7 @@ export default function Mantenimiento() {
   const [mecanicoInterno, setMecanicoInterno] = useState(true);
   const [costo, setCosto] = useState("");
   const [fechaEvento, setFechaEvento] = useState(hoyISO());
+  const [confirmandoConceptoId, setConfirmandoConceptoId] = useState<string | null>(null);
 
   function cargar() {
     if (!equipoId) return;
@@ -53,7 +55,6 @@ export default function Mantenimiento() {
   }
 
   async function eliminarConcepto(id: string) {
-    if (!confirm("¿Borrar este concepto de servicio?")) return;
     setError(null);
     try {
       await api.delete(`/equipos/mantenimiento/conceptos/${id}`);
@@ -134,7 +135,7 @@ export default function Mantenimiento() {
                   <td>{c.nombre}</td>
                   <td>{c.umbralHoras}h</td>
                   <td>
-                    <button className="btn-secondary" onClick={() => eliminarConcepto(c.id)}>
+                    <button className="btn-secondary" onClick={() => setConfirmandoConceptoId(c.id)}>
                       Borrar
                     </button>
                   </td>
@@ -218,6 +219,19 @@ export default function Mantenimiento() {
       </div>
 
       {error && <div className="tag tag-danger" style={{ display: "block", padding: "8px 12px", marginTop: 12 }}>{error}</div>}
+
+      {confirmandoConceptoId && (
+        <ConfirmModal
+          titulo="Borrar concepto de servicio"
+          mensaje="¿Borrar este concepto de servicio? Esto no se puede deshacer."
+          peligroso
+          onCancelar={() => setConfirmandoConceptoId(null)}
+          onConfirmar={async () => {
+            await eliminarConcepto(confirmandoConceptoId);
+            setConfirmandoConceptoId(null);
+          }}
+        />
+      )}
     </div>
   );
 }

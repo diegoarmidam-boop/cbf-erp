@@ -1,4 +1,4 @@
-import { calcularCantidadTotalGranular, plantasTotalesCuadro, tarifaEfectiva, type ModoDosisGranular } from "@cbf/shared";
+import { calcularCantidadTotalGranular, ordenarPorNombreNumerico, plantasTotalesCuadro, tarifaEfectiva, type ModoDosisGranular } from "@cbf/shared";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "../../core/db.js";
 import type { TransactionClient } from "../../core/db.js";
@@ -322,12 +322,29 @@ async function enriquecerConAlertas<T extends GranularConRealizadas>(fertilizaci
  * el botón "Confirmar entrega" del listado nunca aparecería (ver mismo
  * ajuste en Aplicaciones, encontrado probando la pantalla real).
  */
-export async function listarGranular(huertaId?: string) {
+/** 9.15 (31-ago-2026): Cuadros en orden numérico ("Cuadro 2" antes que "Cuadro 10"), no alfabético. */
+function ordenarCuadrosDe<T extends { cuadros: { cuadro: { nombre: string } }[]; realizadas: { cuadros: { cuadro: { nombre: string } }[] }[] }>(
+  item: T
+): T {
+  item.cuadros = ordenarPorNombreNumerico(item.cuadros, (c) => c.cuadro.nombre);
+  for (const r of item.realizadas) r.cuadros = ordenarPorNombreNumerico(r.cuadros, (c) => c.cuadro.nombre);
+  return item;
+}
+
+/**
+ * Por default no trae las "vencida" (liberadas) ni "cancelada" — se
+ * quedaban en la lista para siempre sin forma de dejar de verlas (bug real
+ * reportado por Diego, 31-ago-2026, ampliado a "cancelada" el mismo día).
+ * Siguen existiendo en la base (no se borran, por trazabilidad de
+ * Almacén); `incluirCerradas` las trae de vuelta.
+ */
+export async function listarGranular(huertaId?: string, incluirCerradas?: boolean) {
   const fertilizaciones = await prisma.fertilizacionGranular.findMany({
-    where: { huertaId },
+    where: { huertaId, ...(incluirCerradas ? {} : { estado: { notIn: ["vencida", "cancelada"] } }) },
     include: INCLUDE_GRANULAR,
     orderBy: { fechaCreacion: "desc" },
   });
+  fertilizaciones.forEach(ordenarCuadrosDe);
   return Promise.all(fertilizaciones.map((f) => enriquecerConAlertas(f)));
 }
 
@@ -336,6 +353,7 @@ export async function obtenerGranular(id: string) {
     where: { id },
     include: INCLUDE_GRANULAR,
   });
+  ordenarCuadrosDe(fertilizacion);
   return enriquecerConAlertas(fertilizacion);
 }
 

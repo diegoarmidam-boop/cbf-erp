@@ -1,11 +1,13 @@
 import { useState, type FormEvent } from "react";
 import { api, ApiError } from "../../lib/api";
 import { usePuestos } from "../../lib/usePuestos";
+import ConfirmModal from "../../components/ConfirmModal";
 
 export default function Puestos() {
   const { puestos, cargando, refetch } = usePuestos();
   const [error, setError] = useState<string | null>(null);
   const [mostrarForm, setMostrarForm] = useState(false);
+  const [confirmandoId, setConfirmandoId] = useState<string | null>(null);
 
   const [nombre, setNombre] = useState("");
   const [periodicidad, setPeriodicidad] = useState<"semanal" | "quincenal" | "mensual">("semanal");
@@ -14,7 +16,6 @@ export default function Puestos() {
   const [rangoMax, setRangoMax] = useState("");
 
   async function eliminar(id: string) {
-    if (!confirm("¿Borrar este puesto? Esto no se puede deshacer.")) return;
     setError(null);
     try {
       await api.delete(`/rh/puestos/${id}`);
@@ -113,7 +114,7 @@ export default function Puestos() {
                   {p.rangoSalarialMin ?? "—"} – {p.rangoSalarialMax ?? "—"}
                 </td>
                 <td>
-                  <button className="btn-secondary" onClick={() => eliminar(p.id)}>
+                  <button className="btn-secondary" onClick={() => setConfirmandoId(p.id)}>
                     Borrar
                   </button>
                 </td>
@@ -121,6 +122,19 @@ export default function Puestos() {
             ))}
           </tbody>
         </table>
+      )}
+
+      {confirmandoId && (
+        <ConfirmModal
+          titulo="Borrar puesto"
+          mensaje="Esto no se puede deshacer. ¿Confirmar?"
+          peligroso
+          onCancelar={() => setConfirmandoId(null)}
+          onConfirmar={async () => {
+            await eliminar(confirmandoId);
+            setConfirmandoId(null);
+          }}
+        />
       )}
     </div>
   );

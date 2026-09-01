@@ -5,6 +5,7 @@ import type { Prestamo } from "../../lib/types";
 import FechaInput from "../../components/FechaInput";
 import { formatearFecha } from "../../lib/fecha";
 import { formatearDinero } from "../../lib/numero";
+import ConfirmModal from "../../components/ConfirmModal";
 
 interface PeriodoNomina {
   inicio: string;
@@ -23,6 +24,7 @@ export default function Prestamos() {
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [confirmandoAdelanto, setConfirmandoAdelanto] = useState<Prestamo | null>(null);
+  const [confirmandoCancelarId, setConfirmandoCancelarId] = useState<string | null>(null);
 
   const [personalId, setPersonalId] = useState("");
   const [monto, setMonto] = useState("");
@@ -65,7 +67,6 @@ export default function Prestamos() {
   }
 
   async function cancelar(id: string) {
-    if (!confirm("¿Cancelar este préstamo? Solo se puede si todavía no tiene descuentos aplicados.")) return;
     setError(null);
     try {
       await api.post(`/nomina/prestamos/${id}/cancelar`);
@@ -176,7 +177,7 @@ export default function Prestamos() {
                     <button className={pendiente ? "btn-primary" : "btn-secondary"} onClick={() => clicAplicarDescuento(p)}>
                       Aplicar descuento
                     </button>
-                    <button className="btn-danger" onClick={() => cancelar(p.id)}>
+                    <button className="btn-danger" onClick={() => setConfirmandoCancelarId(p.id)}>
                       Cancelar
                     </button>
                   </td>
@@ -207,6 +208,19 @@ export default function Prestamos() {
             </div>
           </div>
         </div>
+      )}
+
+      {confirmandoCancelarId && (
+        <ConfirmModal
+          titulo="Cancelar préstamo"
+          mensaje="Solo se puede si todavía no tiene descuentos aplicados. ¿Confirmar?"
+          peligroso
+          onCancelar={() => setConfirmandoCancelarId(null)}
+          onConfirmar={async () => {
+            await cancelar(confirmandoCancelarId);
+            setConfirmandoCancelarId(null);
+          }}
+        />
       )}
     </div>
   );

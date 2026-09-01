@@ -279,6 +279,7 @@ export interface FilaReporteSemanal {
 export interface ReporteNominaSemanal {
   periodo: { inicio: string; fin: string };
   filas: FilaReporteSemanal[];
+  confirmada: boolean;
 }
 
 // ---- Liquidaciones (9.11, 15-ago-2026) — pago fuera de ciclo para
@@ -495,40 +496,61 @@ export interface OrdenCxP {
   alertaVisible: boolean;
 }
 
+// Comparador de Cotizaciones (9.14, rediseño 29-ago-2026) — precio + flete
+// por Zona, un Producto por Comparación, dos recomendaciones (Global con
+// flete vs. Local sin flete).
+export interface ZonaFlete {
+  id: string;
+  nombre: string;
+  costoFleteKg: string;
+  esZonaComprador: boolean;
+  activo: boolean;
+}
+
+export type MonedaCotizacion = "MXN" | "USD";
+
 export interface ComparacionResumen {
   id: string;
-  nombre: string | null;
   fechaCreacion: string;
-  items: { producto: { nombreComercial: string } }[];
+  producto: { id: string; nombreComercial: string };
+  cantidadNecesaria: string;
+  unidad: string;
 }
 
 export interface CotizacionCalculada {
   id: string;
   proveedor: { id: string; nombre: string };
-  precioPresentacion: number;
-  cantidadPresentacion: number;
-  unidadPresentacion: string;
+  zona: { id: string; nombre: string; esZonaComprador: boolean };
+  nombreComercial: string;
+  moneda: MonedaCotizacion;
+  precioValor: number;
+  tipoCambio: number | null;
+  precioValorMXN: number;
+  presentacionCantidad: number;
+  precioUnitarioMXN: number;
   unidadesAPedir: number;
   cantidadComprada: number;
-  precioFinal: number;
-  porcentajeAprovechamiento: number;
-  recomendado: boolean;
-}
-
-export interface ItemCalculado {
-  id: string;
-  producto: { id: string; nombreComercial: string };
-  cantidadNecesaria: number;
-  unidad: string;
-  cotizaciones: CotizacionCalculada[];
-  recomendacion: { proveedorId: string; proveedorNombre: string; ahorro: number } | null;
+  excedente: number;
+  porcentajeExcedente: number;
+  alertaExcedente: boolean;
+  fleteTotal: number;
+  precioTotalPresentaciones: number;
+  totalConFlete: number;
+  esMejorGlobal: boolean;
+  esMejorLocal: boolean;
 }
 
 export interface ComparacionCalculada {
   id: string;
-  nombre: string | null;
+  producto: { id: string; nombreComercial: string; unidad: string };
+  cantidadNecesaria: number;
+  unidad: string;
+  umbralExcedentePct: number;
   fechaCreacion: string;
-  items: ItemCalculado[];
+  cotizaciones: CotizacionCalculada[];
+  mejorGlobalId: string | null;
+  mejorLocalId: string | null;
+  ahorroForaneo: { monto: number; porcentaje: number } | null;
 }
 
 export type TipoEquipo = "tractor" | "camioneta" | "remolque" | "implemento";
@@ -891,13 +913,37 @@ export interface RiegoHistorialSemanal {
   secciones: { seccion: SeccionRiego; dias: RiegoHistorialSemanalDia[] }[];
 }
 
+export type ModoDosisFertirriego = "kg_ha" | "l_ha" | "g_ha";
+
+// Recetario de Fertirriego (27-ago-2026, reversión) — modelo propio,
+// separado de Receta (Aplicaciones): dosis directa por hectárea, sin
+// litros de mezcla/agua ni Tipo de aplicación.
+export interface RecetaFertirriegoProducto {
+  id: string;
+  productoId: string;
+  producto: Producto;
+  dosisValor: string;
+  dosisUnidad: ModoDosisFertirriego;
+}
+
+export interface RecetaFertirriego {
+  id: string;
+  nombre: string;
+  activo: boolean;
+  productos: RecetaFertirriegoProducto[];
+}
+
 export interface FertirriegoProgramacionProducto {
   id: string;
   productoId: string;
   producto: Producto;
   dosisValor: string;
-  dosisUnidad: ConcentracionUnidad;
+  dosisUnidad: ModoDosisFertirriego;
   cantidadTotalCalculada: string;
+  // Total de campaña completa (1.6, 31-ago-2026): suma de TODAS las
+  // ocasiones del rango fechaInicio-fechaFin según la Frecuencia — para
+  // comprar todo el volumen de un jalón.
+  cantidadCampania: { valor: number; unidad: "mL" | "L" | "g" | "kg" };
 }
 
 export interface FertirriegoProgramacion {
@@ -905,10 +951,8 @@ export interface FertirriegoProgramacion {
   huertaId: string;
   huerta: Huerta;
   productos: FertirriegoProgramacionProducto[];
-  litrosAguaPorHa: string;
   recetaId: string | null;
-  receta: Receta | null;
-  capacidadTanque: string | null;
+  receta: RecetaFertirriego | null;
   frecuencia: FrecuenciaFertirriego;
   fechaInicio: string;
   fechaFin: string;
@@ -918,7 +962,10 @@ export interface FertirriegoProgramacion {
   comprometido?: boolean;
   diasSinEntregar?: number | null;
   alertaVencimiento?: boolean;
-  mezclaPorTanque?: MezclaTanqueProducto[] | null;
+  riegosEnCampania?: number;
+  // 1.9 (31-ago-2026): true si Riego ya tiene al menos un día registrado
+  // sobre este fertirriego — a partir de ahí ya no se puede editar.
+  tieneAvanceRegistrado?: boolean;
 }
 
 // Orden de Aplicación / Orden de Fertirriego (25-ago-2026) — documentos de
@@ -976,6 +1023,7 @@ export interface OrdenFertirriegoProducto {
   porValvula: { seccionId: string; cantidad: CantidadFormateada }[];
   totalPorRiego: CantidadFormateada;
   totalSemana: CantidadFormateada;
+  totalCampania: CantidadFormateada;
 }
 
 export interface OrdenFertirriego {
@@ -987,6 +1035,8 @@ export interface OrdenFertirriego {
     receta: string | null;
     frecuencia: string;
     riegosEnLaSemana: number;
+    riegosEnCampania: number;
+    fechaFinCampania: string;
     hectareasTotales: number;
   };
   valvulas: { seccionId: string; nombre: string; hectareas: number }[];

@@ -63,7 +63,7 @@ granularRouter.get("/", requirePermission("fertilizantes", "ver"), async (req, r
     res.status(403).json({ error: "Tu acceso está restringido a tu propia Huerta." });
     return;
   }
-  res.json(await listarGranular(huertaId ?? alcance ?? undefined));
+  res.json(await listarGranular(huertaId ?? alcance ?? undefined, req.query.incluirCerradas === "true"));
 });
 
 granularRouter.get("/productos", requirePermission("fertilizantes", "ver"), async (_req, res) => {

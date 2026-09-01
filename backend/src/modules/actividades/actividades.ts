@@ -1,4 +1,4 @@
-import { tarifaEfectiva, TarifaGeneralNoConfiguradaError } from "@cbf/shared";
+import { ordenarPorNombreNumerico, tarifaEfectiva, TarifaGeneralNoConfiguradaError } from "@cbf/shared";
 import type { Prisma, TipoRecursoActividad } from "@prisma/client";
 import { prisma } from "../../core/db.js";
 import type { TransactionClient } from "../../core/db.js";
@@ -200,6 +200,15 @@ async function enriquecerConAlertas<T extends ActividadProgramadaConRealizadas>(
   };
 }
 
+/** 9.15 (31-ago-2026): Cuadros en orden numérico ("Cuadro 2" antes que "Cuadro 10"), no alfabético. */
+function ordenarCuadrosDe<T extends { cuadros: { cuadro: { nombre: string } }[]; realizadas: { cuadros: { cuadro: { nombre: string } }[] }[] }>(
+  item: T
+): T {
+  item.cuadros = ordenarPorNombreNumerico(item.cuadros, (c) => c.cuadro.nombre);
+  for (const r of item.realizadas) r.cuadros = ordenarPorNombreNumerico(r.cuadros, (c) => c.cuadro.nombre);
+  return item;
+}
+
 export async function listarActividadesProgramadas(huertaId?: string) {
   const config = await obtenerConfigNomina();
   const items = await prisma.actividadProgramada.findMany({
@@ -207,6 +216,7 @@ export async function listarActividadesProgramadas(huertaId?: string) {
     include: INCLUDE_ACTIVIDAD_PROGRAMADA,
     orderBy: { fechaCreacion: "desc" },
   });
+  items.forEach(ordenarCuadrosDe);
   return Promise.all(items.map((a) => enriquecerConAlertas(a, config.tarifaGeneralHora)));
 }
 
@@ -216,6 +226,7 @@ export async function obtenerActividadProgramada(id: string) {
     where: { id },
     include: INCLUDE_ACTIVIDAD_PROGRAMADA,
   });
+  ordenarCuadrosDe(programada);
   return enriquecerConAlertas(programada, config.tarifaGeneralHora);
 }
 
