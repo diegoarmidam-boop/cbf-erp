@@ -75,12 +75,17 @@ export default function OrdenFertirriegoView({ fertirriegoId, orden, onCerrar }:
         <div style={{ overflowX: "auto", marginBottom: 14 }}>
           <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 12 }}>
             <thead>
-              <tr style={{ background: "var(--wine)", color: "#fff" }}>
-                <th style={{ padding: "6px 8px", textAlign: "left", whiteSpace: "nowrap" }}>Válvula</th>
-                <th style={{ padding: "6px 8px", textAlign: "right", whiteSpace: "nowrap" }}>Hectáreas</th>
+              {/* 9.16 (2-sep-2026): el color va en cada <th>, no en el <tr> —
+                  la regla global `th { color: var(--ink-soft) }` de
+                  tokens.css tiene más especificidad que el color heredado
+                  del <tr> y le ganaba, dejando el encabezado ilegible sobre
+                  el fondo vino. */}
+              <tr style={{ background: "var(--wine)" }}>
+                <th style={{ padding: "6px 8px", textAlign: "left", whiteSpace: "nowrap", color: "#fff" }}>Válvula</th>
+                <th style={{ padding: "6px 8px", textAlign: "right", whiteSpace: "nowrap", color: "#fff" }}>Hectáreas</th>
                 {orden.productos.map((p) => (
-                  <th key={p.productoId} style={{ padding: "6px 8px", textAlign: "right", whiteSpace: "nowrap" }}>
-                    {p.nombreComercial}
+                  <th key={p.productoId} style={{ padding: "6px 8px", textAlign: "right", whiteSpace: "nowrap", color: "#fff" }}>
+                    {p.ingredienteActivo}
                   </th>
                 ))}
               </tr>

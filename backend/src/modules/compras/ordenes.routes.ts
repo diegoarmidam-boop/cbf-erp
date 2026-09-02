@@ -1,12 +1,14 @@
 import { Router } from "express";
 import { z } from "zod";
 import { requireAuth, requirePermission, requirePermissionAny } from "../../middleware/auth.js";
-import { mensajeErrorValidacion, unoSolo } from "../../core/http.js";
+import { mensajeErrorCaptura, mensajeErrorValidacion, unoSolo } from "../../core/http.js";
+import { prisma } from "../../core/db.js";
+import { opcionesRecepcionDeProducto } from "../almacen/preferencias.js";
 import {
   autorizarOrden,
-  cotizarOrden,
   crearOrdenManual,
   listarOrdenes,
+  listarPendientesPorIngredienteActivo,
   marcarOrdenPagada,
   ProductoNoAutorizadoError,
   recibirOrden,
@@ -14,13 +16,18 @@ import {
   SolicitudYaResueltaOrdenError,
   TransicionInvalidaError,
 } from "./ordenes.js";
+import { generarPdfOrdenCompra, obtenerOrdenCompraParaPdf } from "./ordenCompraPdf.js";
 
 export const ordenesRouter = Router();
 ordenesRouter.use(requireAuth);
 
+ordenesRouter.get("/pendientes-por-ingrediente-activo", requirePermission("compras", "ver"), async (_req, res) => {
+  res.json(await listarPendientesPorIngredienteActivo());
+});
+
 ordenesRouter.get("/", requirePermission("compras", "ver"), async (req, res) => {
   const estado = typeof req.query.estado === "string" ? req.query.estado : undefined;
-  res.json(await listarOrdenes(estado));
+  res.json(await listarOrdenes(estado, req.query.incluirCerradas === "true"));
 });
 
 const crearSchema = z.object({ productoId: z.string().min(1), cantidadSolicitada: z.number().positive() });
@@ -70,32 +77,31 @@ ordenesRouter.post("/:id/rechazar", requirePermission("compras", "autoriza"), as
   }
 });
 
-const cotizarSchema = z.object({ proveedorId: z.string().min(1), precioUnitario: z.number().positive(), fechaEsperada: z.string().optional() });
-
-ordenesRouter.post("/:id/cotizar", requirePermission("compras", "capturar"), async (req, res) => {
-  const parsed = cotizarSchema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
-    return;
-  }
-  try {
-    const orden = await cotizarOrden(unoSolo(req.params.id), parsed.data.proveedorId, parsed.data.precioUnitario, parsed.data.fechaEsperada);
-    res.json(orden);
-  } catch (err) {
-    if (err instanceof TransicionInvalidaError) {
-      res.status(409).json({ error: err.message });
-      return;
-    }
-    throw err;
-  }
-});
-
 // CxP (9.14): confirmación manual de pago — Encargado de Compras (editar) o quien autoriza gasto (Gerencia/Director).
 ordenesRouter.post("/:id/marcar-pagada", requirePermissionAny(["compras", "editar"], ["compras", "autoriza"]), async (req, res) => {
   res.json(await marcarOrdenPagada(unoSolo(req.params.id)));
 });
 
-const recibirSchema = z.object({ cantidadRecibida: z.number().positive(), lote: z.string().optional(), fechaCaducidad: z.string().optional() });
+// Opciones para confirmar "qué producto llegó de verdad" al recibir (2.3, 2-sep-2026).
+ordenesRouter.get(
+  "/:id/opciones-recepcion",
+  requirePermissionAny(["compras", "capturar"], ["almacen", "capturar"]),
+  async (req, res) => {
+    const orden = await prisma.ordenCompra.findUnique({ where: { id: unoSolo(req.params.id) }, select: { productoId: true } });
+    if (!orden) {
+      res.status(404).json({ error: "Orden no encontrada." });
+      return;
+    }
+    res.json(await opcionesRecepcionDeProducto(orden.productoId));
+  }
+);
+
+const recibirSchema = z.object({
+  cantidadRecibida: z.number().positive(),
+  lote: z.string().optional(),
+  fechaCaducidad: z.string().optional(),
+  productoRecibidoId: z.string().min(1),
+});
 
 // Recibir es, físicamente, una acción de Almacén ("Almacén la recibe" —
 // 9.14/9.15) aunque viva en el ciclo de la orden de Compras — se acepta
@@ -110,6 +116,7 @@ ordenesRouter.post("/:id/recibir", requirePermissionAny(["compras", "capturar"],
     const orden = await recibirOrden(unoSolo(req.params.id), parsed.data.cantidadRecibida, req.usuario!.usuarioId, {
       lote: parsed.data.lote,
       fechaCaducidad: parsed.data.fechaCaducidad,
+      productoRecibidoId: parsed.data.productoRecibidoId,
     });
     res.json(orden);
   } catch (err) {
@@ -118,5 +125,20 @@ ordenesRouter.post("/:id/recibir", requirePermissionAny(["compras", "capturar"],
       return;
     }
     throw err;
+  }
+});
+
+// Orden de Compra en PDF (3.1, 2-sep-2026) — solo tiene sentido para
+// órdenes ya "generada"/"recibida"/"cubierta" (tienen folio asignado).
+ordenesRouter.get("/:id/orden-compra.pdf", requirePermission("compras", "ver"), async (req, res) => {
+  try {
+    const orden = await obtenerOrdenCompraParaPdf(unoSolo(req.params.id));
+    const doc = generarPdfOrdenCompra(orden);
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `inline; filename="orden-compra-${orden.numero ?? unoSolo(req.params.id)}.pdf"`);
+    doc.pipe(res);
+    doc.end();
+  } catch (err) {
+    res.status(400).json({ error: mensajeErrorCaptura(err) });
   }
 });

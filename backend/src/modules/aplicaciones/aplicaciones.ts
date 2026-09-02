@@ -17,6 +17,7 @@ import { obtenerVersionVigente } from "../unidades-produccion/cuadros.js";
 import { obtenerConfigNomina } from "../nomina/config.js";
 import { aActividadCalc } from "../nomina/util.js";
 import { diaEstaCerrado } from "../nomina/captura.js";
+import { cancelarOrdenesDeReferencia } from "../compras/ordenes.js";
 
 // La actividad de Nómina a la que se liga la mano de obra automática de una
 // Aplicación (9.7/9.11) — "Fumigación" es la actividad confirmada del
@@ -859,6 +860,10 @@ export async function liberarAplicacionVencida(aplicacionId: string, capturadoPo
         );
       }
     }
+    // 1.5 (2-sep-2026): cualquier orden de compra ligada a esta Aplicación
+    // que todavía no haya llegado a Almacén se cancela junto con ella —
+    // ya no se puede pedir cotizar/comprar algo que ya no se necesita.
+    await cancelarOrdenesDeReferencia(tx, aplicacionId);
     return tx.aplicacion.update({ where: { id: aplicacionId }, data: { estado: "vencida" } });
   });
 }
@@ -931,6 +936,11 @@ export async function cancelarAplicacionEntregada(aplicacionId: string, cancelad
         },
       });
     }
+
+    // 1.5 (2-sep-2026): en la práctica ya no debería haber nada pendiente
+    // a estas alturas (el producto ya se recibió hace tiempo para poder
+    // llegar a "entregada"), pero se llama igual por consistencia/defensa.
+    await cancelarOrdenesDeReferencia(tx, aplicacionId);
 
     return tx.aplicacion.update({
       where: { id: aplicacionId },

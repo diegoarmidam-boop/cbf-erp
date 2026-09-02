@@ -14,6 +14,7 @@ import { obtenerVersionVigente } from "../unidades-produccion/cuadros.js";
 import { obtenerConfigNomina } from "../nomina/config.js";
 import { aActividadCalc } from "../nomina/util.js";
 import { diaEstaCerrado } from "../nomina/captura.js";
+import { cancelarOrdenesDeReferencia } from "../compras/ordenes.js";
 
 // Actividad de Nómina para la mano de obra automática de Fertilización
 // Granular (9.5/9.11) — decisión explícita del usuario: ninguna de las 12
@@ -626,6 +627,9 @@ export async function liberarGranularVencida(id: string, capturadoPorId: string)
         );
       }
     }
+    // 1.5 (2-sep-2026): cualquier orden de compra ligada a esta
+    // fertilización que todavía no haya llegado a Almacén se cancela junto.
+    await cancelarOrdenesDeReferencia(tx, id);
     return tx.fertilizacionGranular.update({ where: { id }, data: { estado: "vencida" } });
   });
 }
@@ -689,6 +693,8 @@ export async function cancelarGranularEntregada(id: string, canceladaPorId: stri
         },
       });
     }
+
+    await cancelarOrdenesDeReferencia(tx, id);
 
     return tx.fertilizacionGranular.update({
       where: { id },

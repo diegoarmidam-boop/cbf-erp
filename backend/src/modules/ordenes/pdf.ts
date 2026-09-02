@@ -21,6 +21,13 @@ function nf(valor: number, maxDecimales = 3): string {
   return valor.toLocaleString("es-MX", { maximumFractionDigits: maxDecimales });
 }
 
+/**
+ * 9.16 (2-sep-2026, corrección visual): la línea separadora rosa vivía en
+ * y=90, dentro del propio rango vertical del logo (y=30 a y=100, con
+ * width:70 y el logo cuadrado escalando proporcional) — atravesaba
+ * justo el wordmark "CHULA BRAND" de la imagen. Se baja la línea a y=108,
+ * después del borde inferior real del logo, con margen.
+ */
 function encabezadoMarca(doc: PDFKit.PDFDocument, titulo: string) {
   try {
     doc.image(LOGO_PATH, MARGEN, 30, { width: 70 });
@@ -28,9 +35,9 @@ function encabezadoMarca(doc: PDFKit.PDFDocument, titulo: string) {
     // Si el logo no está disponible no debe tumbar la generación del PDF.
   }
   doc.fontSize(16).fillColor(VINO).font("Helvetica-Bold").text(titulo, MARGEN + 85, 38, { width: 400 });
-  doc.moveTo(MARGEN, 90).lineTo(doc.page.width - MARGEN, 90).strokeColor(ROSA).lineWidth(2).stroke();
+  doc.moveTo(MARGEN, 108).lineTo(doc.page.width - MARGEN, 108).strokeColor(ROSA).lineWidth(2).stroke();
   doc.fillColor(NEGRO).font("Helvetica").lineWidth(1);
-  return 105;
+  return 122;
 }
 
 function filaEncabezado(doc: PDFKit.PDFDocument, x: number, y: number, ancho: number, etiqueta: string, valor: string) {
@@ -50,26 +57,48 @@ function grid(doc: PDFKit.PDFDocument, y: number, columnas: { etiqueta: string; 
   return cy + 34;
 }
 
+/**
+ * 9.16 (2-sep-2026, corrección visual): antes usaba alturas fijas (20 para
+ * encabezado, 18 por fila) — cuando un encabezado o una celda envolvía a 2
+ * líneas (PDFKit hace word-wrap automático, no trunca), el texto se salía
+ * de esa altura fija y descuadraba la fila siguiente. Ahora mide con
+ * `heightOfString` la altura real que va a ocupar cada celda (con la
+ * fuente/tamaño que de verdad se va a usar) y usa el máximo de la fila
+ * como su altura — todas las columnas de esa fila comparten esa altura,
+ * así que nunca se desalinean aunque una sola celda envuelva a 2+ líneas.
+ */
+const PAD_X = 4;
+
 function tabla(doc: PDFKit.PDFDocument, y: number, anchos: number[], encabezados: string[], filas: string[][]): number {
   const anchoTotal = anchos.reduce((s, a) => s + a, 0);
   let cy = y;
-  doc.rect(MARGEN, cy, anchoTotal, 20).fill(VINO);
+
+  doc.fontSize(8.5).font("Helvetica-Bold");
+  const alturaEncabezado = Math.max(
+    20,
+    ...encabezados.map((h, i) => doc.heightOfString(h, { width: anchos[i]! - PAD_X * 2 }) + 10)
+  );
+  doc.rect(MARGEN, cy, anchoTotal, alturaEncabezado).fill(VINO);
   let cx = MARGEN;
-  doc.fontSize(8.5).fillColor("#fff").font("Helvetica-Bold");
+  doc.fillColor("#fff");
   encabezados.forEach((h, i) => {
-    doc.text(h, cx + 4, cy + 6, { width: anchos[i]! - 8 });
+    doc.text(h, cx + PAD_X, cy + 6, { width: anchos[i]! - PAD_X * 2 });
     cx += anchos[i]!;
   });
-  cy += 20;
+  cy += alturaEncabezado;
   doc.font("Helvetica").fillColor(NEGRO);
 
   filas.forEach((fila, filaIdx) => {
-    const alturaFila = 18;
+    doc.fontSize(8.5).font("Helvetica");
+    const alturaFila = Math.max(
+      18,
+      ...fila.map((valor, i) => doc.heightOfString(valor, { width: anchos[i]! - PAD_X * 2 }) + 9)
+    );
     if (filaIdx % 2 === 1) doc.rect(MARGEN, cy, anchoTotal, alturaFila).fill(GRIS_CLARO);
     doc.fillColor(NEGRO);
     cx = MARGEN;
     fila.forEach((valor, i) => {
-      doc.fontSize(8.5).text(valor, cx + 4, cy + 5, { width: anchos[i]! - 8 });
+      doc.text(valor, cx + PAD_X, cy + 5, { width: anchos[i]! - PAD_X * 2 });
       cx += anchos[i]!;
     });
     cy += alturaFila;
@@ -154,7 +183,11 @@ export function generarPdfOrdenFertirriego(orden: OrdenFertirriego): PDFKit.PDFD
   const anchoHectareas = 70;
   const anchoProducto = (doc.page.width - MARGEN * 2 - anchoValvula - anchoHectareas) / Math.max(1, orden.productos.length);
   const anchos = [anchoValvula, anchoHectareas, ...orden.productos.map(() => anchoProducto)];
-  const encabezados = ["Válvula", "Hectáreas", ...orden.productos.map((p) => p.nombreComercial)];
+  // 9.16 (2-sep-2026): encabezado por Ingrediente Activo, no Nombre
+  // Comercial — una receta no debería tener 2 productos con el mismo
+  // Ingrediente Activo (si eso pasa, los encabezados salen duplicados a
+  // propósito, para que se note, en vez de fusionarlos sin avisar).
+  const encabezados = ["Válvula", "Hectáreas", ...orden.productos.map((p) => p.ingredienteActivo)];
 
   const filas = orden.valvulas.map((v) => [
     v.nombre,

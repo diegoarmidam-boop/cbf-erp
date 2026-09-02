@@ -1,139 +1,75 @@
-# Reporte — actualización del documento vivo (29-ago-2026, ampliado 31-ago-2026)
+# Reporte — actualización del documento vivo (1/2-sep-2026)
 
-Prompt maestro de 4 puntos (ajustes pendientes acumulados), ordenados por prioridad. Los 4 quedaron construidos, verificados en vivo con datos de prueba (creados y borrados por completo, cero rastro en producción), y con typecheck limpio en backend y web.
+Prompt maestro de 4 bloques (lo que quedaba pendiente del rediseño de Compras, más una corrección visual nueva). El reporte del 29/31-ago ya quedó integrado al documento vivo — este reporte empieza de cero, es solo lo de esta sesión.
 
-**31-ago-2026 — el prompt maestro se amplió** (misma sesión de trabajo, versión V3 del documento) con 4 sub-puntos nuevos dentro del punto 1 (1.6 a 1.9) y dos puntos nuevos (5 y 6). Los puntos 1-4 de abajo son el estado ya reportado el 29-ago — siguen vigentes tal cual. Las secciones "5", "6" y "1.6-1.9" más abajo son lo nuevo de esta ampliación, construido y verificado en la misma sesión, sin pausas, por instrucción explícita de Diego ("no te detengas, no estoy en la computadora").
+Los 4 bloques quedaron construidos y verificados: primero con un script de prueba directo contra la base de datos (para las partes de dinero/inventario, donde un error real sería grave), y después haciendo clic en la pantalla real de principio a fin. Todos los datos de prueba se crearon y se borraron por completo — cero rastro en producción. Typecheck y build limpios en `backend`, `web` y `shared`.
 
-## 1. CORRECCIÓN DE FONDO — Fertirriego ya no usa tanque/concentración
+## Antes de empezar — la pregunta pendiente sobre roles
 
-**Reversión:** hasta el 25-ago, Fertirriego (Camino 2 de Fertilizantes) copiaba el modelo de Aplicaciones (concentración + litros de mezcla/agua/ha + tanque completo/parcial) — esa decisión estaba mal. Ahora usa dosis directa por hectárea (kg/ha, L/ha o g/ha) × hectáreas de las Secciones de Riego elegidas, sin concentración, sin litros de agua, sin tanque.
+El prompt preguntaba si la mejora 6 del reporte anterior (recordatorio de Fertirriego a Regador/Supervisor de Huerta/Gerente Técnico, en vez de "Encargado de Riego/Rancho" que no existe) bloqueaba algo de este prompt. **No la bloqueó** — ninguno de los 4 bloques toca Notificaciones. Sigue pendiente de que Diego confirme esos roles cuando pueda, sin prisa.
 
-**Construido:**
-- Schema: `FertirriegoProgramacion` perdió `litrosAguaPorHa`/`capacidadTanque`. Nuevo modelo `RecetaFertirriego`/`RecetaFertirriegoProducto` — Recetario propio de Fertirriego, separado del `Receta` que sigue usando solo Aplicaciones (cero riesgo cruzado). Nueva fórmula `calcularCantidadTotalFertirriego` en `shared/src/fertilizantes/calculo.ts`.
-- Backend: `backend/src/modules/fertilizantes/fertirriego.ts`, nuevo módulo `recetario-fertirriego.ts` con rutas propias bajo `/fertilizantes/fertirriego/recetario`.
-- Frontend: `web/src/pages/fertilizantes/Fertirriego.tsx` — ya no pide litros de agua/ha ni capacidad de tanque; nuevo componente `RecetarioFertirriegoPanel.tsx`.
+## Bloque 1 — Comparador de Cotizaciones: terminar el rediseño
 
-**Hallazgo que sí requirió tocar (punto 1.5 del prompt):** la Orden de Fertirriego, contrario a lo que se pensaba, **sí** dependía de concentración/litros/tanque (hasta exigía capacidad de tanque para poder generarse) — corregida en `backend/src/modules/ordenes/ordenes.ts`, ahora es dosis × hectáreas por válvula, sin tanque.
+El Comparador dejó de ser una herramienta de análisis aparte — ahora **es** el paso de "Cotizar" de Compras, y de ahí sale la orden de compra real.
 
-**Decisión documentada, no preguntada por no ser ambigua:** `Receta`/`ModuloReceta` de Aplicaciones quedaron intactos — el valor `fertirriego` del enum queda sin uso real, documentado aquí para que no se vea como descuido.
+**1.1 — Captura asíncrona, línea por línea.** Ya se podía desde antes (`+ Agregar cotización` guarda cada línea al momento, sin perder las anteriores) — no hizo falta tocar nada ahí. Lo nuevo es que la Comparación ahora nace ligada a una Orden de Compra real (`Comparacion.ordenCompraId`, único) en vez de capturar producto/cantidad sueltos.
 
-**Probado:** en vivo — receta de Fertirriego creada, fertirriego programado sobre una Sección real de El Sonrisal (3 kg/ha × 4 ha = 12 kg, exacto), Orden generada en pantalla y PDF con cifras correctas.
+**1.2 — Historial permanente de precios.** Una Comparación con al menos una orden real generada ya no se puede borrar (ni una cotización individual que ya generó una orden) — Diego tendría que borrar la orden real primero, y esas también se protegen (ver 1.5). El historial de precios por Proveedor queda ahí para siempre, disponible para consultar y negociar.
 
-## 2. Historial de Nómina semanal — navegación y candado permanente
+**1.3 — Etiqueta "(mejor precio)".** El Proveedor con menor Total con flete ya se marcaba internamente como "Mejor Global" — se agregó la etiqueta "(mejor precio)" justo junto a su nombre en la lista, como pedía el punto.
 
-**Bug real corregido:** el Reporte de Nómina semanal no tenía forma de ver una semana ya pasada una vez que cambiaba el corte — Diego se quedaba sin poder ver/exportar la semana recién cerrada. El backend ya soportaba `?hoy=fecha` en los 4 endpoints; solo el frontend nunca lo mandaba.
+**1.4 — "Generar orden de compra" y compras parciales.** Esta fue la pieza más grande. Al elegir un Proveedor ya cotizado y decir cuánto comprarle, se genera una orden de compra real (folio consecutivo, Proveedor y precio fijos) — si no cubre todo lo necesario, la necesidad se queda abierta por el resto, mostrando una tarjeta "Necesario / Ya comprado / Pendiente" en tiempo real. Se puede seguir generando más órdenes desde otras cotizaciones hasta cubrir el total, momento en que la necesidad pasa a estado "Cubierta" sola.
 
-**Construido:**
-- `web/src/pages/nomina/ReporteSemanal.tsx`: flechas "< Semana anterior" / "Semana siguiente >", ventana de 12 semanas, exportar sobres de cualquier semana en la ventana.
-- **Candado de solo lectura PERMANENTE** (esto no existía — "Confirmar semana" antes solo aplicaba descuentos de préstamo, no bloqueaba nada): nuevo modelo `NominaSemanaConfirmada` y módulo `backend/src/modules/nomina/semana-confirmada.ts`. Se verifica de forma **incondicional** (sin excepción de rol, ni Director General) en `guardarCapturaDelDia`, `autorizarBono`/`rechazarBono`, y `aplicarDescuento` — no se apoya en `requirePermission`, porque Director General/Encargado de Sistemas ignoran esa matriz por diseño (`ROLES_ACCESO_UNIVERSAL`).
-- "Todas UPs vs. por Huerta" (punto 5 del prompt): el reporte no tenía ningún concepto de Huerta antes (agregaba destajo cruzando Huertas). **Decisión documentada, no preguntada:** agregué un filtro `?huertaId=` opcional que no cambia el default (sigue agregando todo si no se especifica) — decidí no rediseñar la semántica de pago existente, que es real y en uso.
+Probado con un caso real de compra partida en 2 Proveedores (100 kg necesarios → 50 kg de un Proveedor, 50 kg del otro): la necesidad se quedó abierta después de la primera compra, se cubrió con la segunda, y cada compra generó su propio folio y su propia Orden de Compra en PDF (tiene que ser así — cada Proveedor recibe su propio documento, no se puede repartir un PDF entre dos).
 
-**Probado:** en vivo contra datos reales — navegué a la semana 21–27 ago (la de la auditoría anterior) y cargó correctamente $57,762.19 / 77 personas. El candado se probó con un script contra datos de prueba (Huerta vacía, fecha inventada): confirmé que ni siquiera con `permitirDiaCerrado:true` se puede pasar una vez confirmada la semana.
+**1.5 — Cancelación ligada a la programación de origen.** Confirmado el bug real: hasta ahora, cancelar una Aplicación/Fertilización/Fertirriego dejaba la orden de compra automática huérfana, pidiendo cotizar algo que ya nadie necesitaba — nunca se tocaba. Ahora, al liberar/cancelar la programación, cualquier orden ligada que no haya llegado a Almacén (incluso si ya tiene Proveedor y precio fijos, "en camino") se cancela junto — una ya recibida nunca se toca. Se reutilizó el mismo patrón de "ocultar sin borrar" del 31-ago: las órdenes canceladas/rechazadas ya no aparecen por default en la lista de Compras, con un botón "Mostrar canceladas/rechazadas" para consultarlas.
 
-## 3. Notificaciones — pre-llenado de contexto
+**1.6 — Permisos.** Sin restricción adicional, como pedía — mismo criterio que ya tenía el Comparador.
 
-Audité los 11 tipos de notificación que existen (no solo los 4 de ejemplo del prompt) — todos compartían el mismo defecto: `enlace` era siempre una ruta fija sin `?query=`, aunque la función ya tenía el contexto (fecha/huertaId/id) disponible en ese momento.
+## Bloque 2 — Compras agrupadas por Ingrediente Activo + confirmar producto recibido
 
-**Corregido en `backend/src/core/notificaciones.ts`** (los 11 enlaces) y en cada pantalla destino:
-- `cierre_pendiente` → `CierreDelDia.tsx`: ahora lee `?fecha=&huertaId=` y salta directo al detalle de esa Huerta/día (antes había que buscarlos a mano) — este era el caso confirmado roto en el prompt.
-- `descuadre_almacen_local` → `AlmacenLocalPage.tsx`: `?huertaId=` preselecciona la Huerta, `?productoId=` resalta la fila.
-- `orden_pendiente_autorizar`, `cxp_proxima`, `aplicacion_vencida/pendiente`, `fertilizacion_vencida/pendiente`, `cancelacion/ajuste_dosis_pendiente_bodega` → `?id=` resalta y hace scroll automático a la fila/tarjeta correspondiente en `Ordenes.tsx`, `CxP.tsx`, `Aplicaciones.tsx`, `Granular.tsx`, `Inventario.tsx`.
+**2.1 — Vista agrupada.** Nueva pestaña "Por Ingrediente Activo" junto a "Por orden" en Compras — suma la cantidad pendiente de cada Ingrediente Activo entre todas las órdenes pendientes sin importar su origen, mostrando cuántas órdenes distintas la componen. Coexiste con la vista por orden, no la reemplaza.
 
-**Probado en vivo:** notificación real "Día de Nómina vencido sin cerrar — 2026-08-25" → clic → cayó directo en el detalle de El Sonrisal del 25/08/2026, sin ningún paso manual.
+**2.2 — Conexión al Comparador con cantidad precargada.** Desde cualquiera de las dos vistas, "Cotizar" te lleva directo al Comparador con la orden correspondiente ya elegida y su cantidad ya precargada, sin volver a capturar nada. **Decisión documentada:** una Comparación cotiza UNA orden a la vez (no varias juntas aunque estén agrupadas por el mismo Ingrediente Activo en la vista 2.1) — cotizar varias órdenes del mismo insumo a la vez habría sido un rediseño más grande del Comparador que no pedía este punto; desde la vista agrupada simplemente se elige con cuál de las órdenes empezar.
 
-## 4. Comparador de Cotizaciones — rediseño completo
+**2.3 — Confirmar producto recibido.** Al recibir una orden, ahora hay que confirmar explícitamente qué producto llegó de verdad — el pedido o alguno de sus sustitutos autorizados (Almacén → Producto preferido y sustitutos) — antes de poder confirmar la recepción.
 
-Ya existía una versión simple de esta herramienta (`backend/src/modules/compras/comparador.ts`, 0 datos reales guardados) — se reemplazó por completo, como pedía el prompt, no se creó una paralela.
+**Pregunta que sí les hice antes de construir esto:** si llega un sustituto en vez del producto pedido, y esa orden estaba ligada a una programación en espera, ¿el sustituto cumple la programación (con la misma cantidad ya calculada) o solo entra a inventario general? Confirmaron: **el sustituto sí cumple la programación.** Para que eso funcionara de verdad (que la Aplicación/Fertilización/Fertirriego deje de verse como "esperando stock"), la fila de esa programación se actualiza para apuntar al sustituto en el momento de confirmar la recepción — la entrada de inventario siempre queda bajo el producto que de verdad llegó, nunca bajo el producto original si no fue ese el que se recibió.
 
-**Construido:**
-- Nuevo catálogo abierto **Zonas y flete** (`ZonaFlete`) — exclusivo de este comparador, con "Zona del comprador" (Campeche) forzada a flete $0 en el backend sin importar qué mande el cliente.
-- Un Producto por comparación (elegido de "Órdenes pendientes de cotizar", `?estado=pendiente_cotizar` — ya existía ese endpoint, no hacía falta uno nuevo), con líneas de cotización por Proveedor: Zona, Nombre Comercial, Moneda MXN/USD + Tipo de Cambio, Presentación.
-- Cálculo (`shared/src/compras/calculo.ts`): precio unitario, unidades a pedir (redondeo hacia arriba), Excedente/% Excedente con alerta "REVISAR" configurable (umbral inicial 20%, editable por comparación), Flete total (regla exclusiva: 1 L = 1 kg **solo aquí**, en ningún otro lado del sistema), Total con flete.
-- Doble recomendación: Mejor opción Global (menor total con flete, cualquier Zona) vs. Mejor opción Local (menor total dentro de la Zona del comprador) — el foráneo solo se marca cuando de verdad compensa el flete, con ahorro en $ y % explícito.
-- Permisos: `requirePermission("compras", "ver")` en todo, igual que ya hacía la versión vieja — sin restricción adicional, tal como pedía el punto 4.5.
+**Bug real que encontré y corregí durante la prueba (no lo pidió el prompt, apareció al probar compra parcial + sustituto juntos):** si una necesidad se cubre con 2+ órdenes parciales y la primera confirma un sustituto, la fila de la programación queda apuntando a ese sustituto — la segunda orden parcial (que todavía trae el producto original en sus propios datos) dejaba de encontrar esa fila al recibirse, y el compromiso de stock para la programación nunca se completaba aunque ya hubiera llegado todo. Corregido: la búsqueda ahora reconoce la fila tanto por el producto originalmente pedido como por el que ya se confirmó antes. Verificado con el mismo caso exacto (50+50 kg, ambos como sustituto): con solo 50 no se comprometía nada (correcto, no alcanza), con los 100 completos sí se comprometió el total exacto.
 
-**Bug real encontrado y corregido durante mis propias pruebas (no lo pidió el prompt, lo encontré yo):** el botón "+ Nueva Zona" vivía dentro de cada línea de proveedor: con 2+ proveedores capturados a la vez, crear una Zona nueva la seleccionaba en la línea equivocada (el estado se compartía entre todas las líneas). Corregido — ahora es un solo control por formulario (`GestorZonas`), no uno por línea.
+## Bloque 3 — Orden de Compra en PDF + Configuración del sistema
 
-**Probado en vivo, caso completo:** NKS, 100 kg necesarios, dos proveedores — uno local (Campeche, $500/presentación de 25kg, sin flete) y uno foráneo (Yucatán, $2/kg de flete). Con el foráneo a $440: ganó el foráneo, ahorro $40 (2.0%) — correcto. Agregué una tercera cotización en USD ($20 USD × 18.5 = $370 MXN, presentación de 80kg): excedente 37.5% marcado "REVISAR" (>20% umbral) correctamente, y la recomendación Global se recalculó sola a $1,060, ahorro $940 (47%) vs. local — todas las cifras exactas contra el cálculo manual.
+**3.1 — Documento Orden de Compra.** Nuevo PDF con folio consecutivo (empieza en 1, un solo consecutivo para toda la empresa — verificado que no existía ningún folio atómico real en el sistema antes de esto; el de Equipos es solo una sugerencia editable, no evita duplicados por sí solo). No es comprobante fiscal — no calcula IVA/IEPS/retenciones, queda para una fase futura de Contabilidad. Trae: folio, fecha, datos de facturación de la empresa, datos del Proveedor, tabla de producto con importe, total, importe convertido a letra ("SON: ONCE MIL DOSCIENTOS PESOS 00/100 M.N.", con acentos correctos en veintiún/veintidós/etc.), y las dos firmas. Mismo estilo visual que las Órdenes de Aplicación/Fertirriego.
 
-## 1.6 — Total de campaña completa en Fertirriego (NUEVO, 31-ago-2026)
+**Bug real que encontré y corregí durante la prueba:** el botón "Descargar PDF" (tanto en Compras como en el Comparador) usaba `window.open()`, que no manda la sesión/token de autenticación — la descarga fallaba con "no autorizado". Corregido al mismo patrón que ya usan las demás Órdenes del sistema (Aplicación/Fertirriego): pedir el PDF con el token explícito y descargarlo como archivo, no abrir la URL directa.
 
-Al programar (o editar) un fertirriego, además del total por cada ocasión (lo que ya existía), ahora se muestra de inmediato el total agregado de TODAS las ocasiones del rango fechaInicio-fechaFin según la Frecuencia — para poder comprar todo el volumen de un jalón.
+**3.2 — Ampliar Configuración del sistema.** Nueva sección "Datos de facturación y firmas" (razón social, RFC, domicilio fiscal, teléfono, firma "Atentamente", firma "Autorizó") — mismos roles que ya podían ver esta pantalla (Dirección General/Encargado de Sistemas), reutilizable por cualquier documento futuro que los necesite, no solo la Orden de Compra.
 
-**Construido:**
-- `shared/src/ordenes/calculo.ts` ya tenía `riegosEnVentana(frecuencia, dias)` (generalización de `riegosEnSemana`, que solo se usaba con `dias=7`) — se reutilizó tal cual, sin escribir matemática de fechas nueva.
-- `backend/src/modules/fertilizantes/fertirriego.ts`: `enriquecerConAlertas` ahora calcula `riegosEnCampania` y, por producto, `cantidadCampania` (dosis × hectáreas × riegos-en-campaña). Viaja en la lista y en el detalle, igual que el resto de las alertas.
-- `web/src/pages/fertilizantes/Fertirriego.tsx`: cada producto muestra "X total de campaña" junto al total por riego; la tarjeta muestra "N riegos en la campaña".
-- La Orden de Fertirriego (pantalla y PDF) también gana una fila "Total de campaña (hasta [fecha])" además de "Total de la semana" — `backend/src/modules/ordenes/ordenes.ts`, `pdf.ts`, `web/src/components/OrdenFertirriegoView.tsx`.
+**Probado en vivo, caso completo:** generé una Orden de Compra real (100 kg, $20/kg) antes de llenar Configuración — el PDF salió correcto con "—" en los campos de empresa/firmas en vez de romperse. Llené Configuración, volví a descargar el mismo PDF (mismo folio) — ya salió completo con la razón social, RFC, domicilio, teléfono y ambas firmas.
 
-**Decisión documentada, no preguntada:** el total de campaña es **solo informativo** — no cambia cuánto se compromete en Almacén ni el tamaño de la Orden de Compra automática al programar (eso sigue siendo una sola ocasión, como ya funcionaba). Cambiar ese comportamiento (comprometer/pedir el volumen completo de la campaña de una vez) es una decisión de negocio más grande que no pedía este punto — si Diego la quiere, es un cambio acotado a partir de aquí.
+## Bloque 4 — Corrección visual de las Órdenes de Fertirriego/Aplicación
 
-**Punto 1.1 (frecuencia y rango de fechas ya disponibles):** confirmado — ya estaban en el formulario de Programar desde antes, no hizo falta construir nada ahí.
+Diego había descargado la Orden de Fertirriego real y encontró varios problemas de diseño. Los 4 se diagnosticaron con precisión antes de tocar nada:
 
-## 1.7 — Ajustar/quitar producto el día de la ejecución, en Riego 9.6 (NUEVO, 31-ago-2026)
+**4.1 — Logo cortado.** La causa exacta: la línea rosa separadora vivía en y=90, dentro del rango vertical del logo (y=30 a y=100 con ese tamaño) — cruzaba justo el wordmark "CHULA BRAND" de la imagen. Se bajó la línea, ya no cruza el logo.
 
-**Hallazgo:** el modelo de datos (`RiegoRegistroDiario`/`RiegoRegistroDiarioProducto`) ya soportaba esto de fondo — es un registro POR DÍA, separado de la programación, así que "no mandar un producto" ya no lo tocaba. El único hueco era la pantalla: siempre mostraba los productos programados sin forma de excluir uno.
+**4.2 — Columnas por Ingrediente Activo.** Los encabezados de la tabla de la Orden de Fertirriego (donde cada producto es una columna) ahora muestran el Ingrediente Activo ("Boro"), no el Nombre Comercial ("ULTRASOL MICRO REXENE BORO"). Revisé toda la base de datos real buscando algún caso de una programación con 2 productos del mismo Ingrediente Activo (habría dado encabezados duplicados) — no encontré ninguno, nada que reportar.
 
-**Construido:** en `web/src/pages/riego/Riego.tsx`, cada producto del fertirriego del día trae ahora un checkbox "No se tuvo hoy" junto a su cantidad. Al marcarlo, ese producto se excluye del envío — el descuento de Almacén de ese día se ajusta a lo realmente aplicado (ya lo hacía el backend por diferencia), y ni la programación ni los demás días se tocan. Sin cambios de schema ni de backend — el ajuste era 100% de UI.
+**4.3 — Encabezados recortados.** La causa: la tabla usaba una altura fija (20px encabezado, 18px filas) sin medir cuánto texto real iba a ocupar cada celda — cuando un encabezado envolvía a 2 líneas ("Nitrato de Magnesio", "Fosfato Monoamónico"), se salía de esa altura fija. Ahora la tabla mide el texto real de cada celda antes de dibujar y usa esa altura — nunca se vuelve a cortar, sin importar cuánto texto tenga.
 
-## 1.8 — Recordatorio diario de Fertirriego pendiente, en Notificaciones (NUEVO, 31-ago-2026)
+**4.4 — Contraste ilegible en la app.** La causa: el color blanco del encabezado estaba puesto en la fila (`<tr>`) completa, pero cada celda (`<th>`) tiene su propia regla de color en el sistema que le gana a lo heredado del padre — el texto salía gris sobre fondo vino. Corregido poniendo el blanco directo en cada celda.
 
-**Ambigüedad encontrada — resuelta sin detener el trabajo, documentada aquí para que Diego la revise:** el prompt pide avisar a "Encargado de Riego" y "Encargado del Rancho" — **ninguno de los dos existe como rol en el sistema** (se auditó el enum `Rol` completo). Se usó en su lugar el permiso real del módulo `riego`, que hoy tienen: Regador, Supervisor de Huerta y Gerente Técnico de Producción (más Dirección General/Encargado de Sistemas, que ven todo). **Si Diego quiere otro conjunto de roles, es cambiar una línea en `backend/src/core/notificaciones.ts` — no una migración ni un rediseño.**
+**4.5 — Alineación en filas de 2 líneas.** Mismo arreglo que 4.3 (altura medida, no fija) — ahora cuando la primera columna de una fila ocupa 2 líneas (ej. "Total de campaña (hasta 2026-11-30)"), el resto de las columnas de esa fila crecen junto y quedan alineadas, en vez de que la segunda línea se monte sobre la fila de abajo.
 
-**Construido:** nuevo bloque en `obtenerNotificaciones()` que reutiliza `estadoRiegoTodasUPs(hoy)` (ya existía, se usa en la pantalla de captura) — cualquier Sección con fertirriego activo hoy y sin registro todavía dispara "Fertirriego programado hoy sin registrar", con enlace directo a `/riego?fecha=...&huertaId=...` (aplicando el mismo principio del punto 3: pre-llenar el contexto). `web/src/pages/riego/Riego.tsx` ahora lee esos parámetros de la URL, pre-selecciona la fecha y resalta/hace scroll a la Huerta correspondiente.
+**4.6 — Aplica a ambos documentos.** El arreglo de la tabla (4.3/4.5) y el del logo (4.1) son código compartido entre Orden de Aplicación y Orden de Fertirriego — se corrigieron una sola vez, benefician a los dos. El cambio de encabezados por Ingrediente Activo (4.2) es específico de Fertirriego (Aplicación ya mostraba "Ing. Activo" como columna propia, con nombre comercial aparte — no tenía este problema). El de contraste (4.4) también es solo de Fertirriego — la vista de Aplicación no usa tabla ahí.
 
-## 5. Orden numérico para Cuadros y Secciones de Riego/Válvulas (NUEVO, 31-ago-2026)
-
-**Bug real confirmado:** en la Orden de Fertirriego, las Válvulas salían en orden alfabético de texto ("Válvula 1", "Válvula 10", "Válvula 2"...) tanto en pantalla como en PDF — el origen era un `orderBy: { nombre: "asc" }` de MySQL (ordena como texto) en el catálogo de Secciones de Riego, que además determinaba el orden en que se guardaban al programar.
-
-**Construido:** nuevo helper `ordenarPorNombreNumerico` en `shared/src/unidades-produccion/calculo.ts` (extrae el primer número del nombre y compara numéricamente; si no hay número, cae a alfabético — no rompe con nombres como "Cuadro 3A"). Aplicado en: el catálogo de Cuadros y de Secciones de Riego (`backend/src/modules/unidades-produccion/*.ts` — esto además corrige de raíz el orden en que se guardan al programar, ya no solo cómo se muestran), la vista "Todas UPs" y el historial semanal de Riego, la Orden de Fertirriego (pantalla + PDF, con un segundo ordenamiento ahí mismo por si una programación vieja ya quedó guardada en el orden alfabético incorrecto), y las listas de Cuadros que aparecen dentro de Aplicaciones/Granular/Actividades. Huertas, productos, proveedores y personas siguen alfabético, sin tocar — auditado explícitamente para no afectarlos.
-
-**Probado en vivo:** pantalla de Programar Fertirriego y pantalla de Riego mostrando "Válvula 1, Válvula 2, Válvula 3... Válvula 8" en orden correcto.
-
-## 6. Confirmación de doble paso, regla universal (NUEVO, 31-ago-2026)
-
-**Bug real confirmado:** el botón "Liberar" de Fertirriego (y sus dos gemelos idénticos en Granular y Aplicaciones) ejecutaba sin ninguna confirmación — ni siquiera un `window.confirm`.
-
-**Hallazgo de alcance:** en todo el sistema no existía ningún componente de confirmación reutilizable — cada pantalla lo resolvía a mano, unas con `window.confirm` (un solo clic, no son "dos pasos") y otras ya con un modal armar→confirmar (el patrón real de dos pasos, usado por ejemplo en "Confirmar semana" de Nómina). Se construyó `web/src/components/ConfirmModal.tsx` como componente compartido (no existía) y se aplicó a:
-- Los 3 "Liberar" sin ninguna confirmación (Fertirriego, Granular, Aplicaciones) — el bug reportado.
-- Los "Cancelar" que ya tenían `window.confirm` (Granular, Aplicaciones, Préstamos) — subidos a dos pasos de verdad.
-- Los "Borrar/Eliminar" que ya tenían `window.confirm` (Grupos de pago, Puestos, Do Not Hire, documentos de Personal, Secciones de Riego, conceptos de Mantenimiento, Comparador de Cotizaciones ×2) — mismo criterio.
-
-**Decisión de alcance, documentada:** el prompt dice literalmente "borrar, eliminar, cancelar o liberar" — se interpretó ese verbo-lista tal cual, sin extenderlo a acciones parecidas pero distintas como "Quitar" (quitar un sustituto de Preferencias, quitar a alguien de un grupo de pago — reversibles con un clic, no destruyen nada) o "Desactivar/Reactivar" (toggles reversibles de catálogos). Si Diego quiere que la regla cubra también esas, es aplicar el mismo `ConfirmModal` en unos cuantos sitios más — ya está listo para reusarse.
-
-**Probado en vivo:** "Liberar" en Fertirriego ahora abre el modal (no ejecuta directo), "Cancelar" cierra sin acción, "Sí, confirmar" sí libera — confirmado con datos de prueba.
-
-## 1.9 — Editar una programación ya guardada (NUEVO, 31-ago-2026)
-
-**Hallazgo importante:** Aplicaciones y Fertilización Granular **ya tenían exactamente esto** — construido en una sesión anterior (15-ago-2026), con el candado correcto ("editable mientras no haya ningún reporte de avance") y restringido a los mismos roles que Programar. No hizo falta tocar ninguno de los dos. **Solo Fertirriego no lo tenía.**
-
-**Construido (solo Fertirriego):**
-- `backend/src/modules/fertilizantes/fertirriego.ts`: nueva `editarFertirriegoProgramada`, mismo patrón que Granular/Aplicaciones (recalcula hectáreas, ajusta stock comprometido/entregado producto por producto vía `ajustarCantidadProducto`, reemplaza Secciones y actualiza cabecera). Nueva ruta `PATCH /fertilizantes/fertirriego/:id`, mismos roles/permiso que "Programar".
-- **Diferencia real con Granular/Aplicaciones, resuelta:** Fertirriego no tiene su propio modelo de "avance" — la ejecución vive por completo en Riego (`RiegoRegistroDiario`), sin relación directa al fertirriego. Se construyó `fertirriegoTieneAvanceRegistrado`: cruza por Sección + rango de fechas contra Riego. Cualquier día registrado cuenta como avance — incluso un día explícitamente "no se metió, con motivo" ya bloquea la edición, no solo los días con producto aplicado (lectura literal de "ejecutado/registrado" del prompt).
-- `web/src/pages/fertilizantes/Fertirriego.tsx`: botón "Editar" junto a "Ver Orden"/"Liberar", visible solo si `programada`/`entregada` y sin avance registrado; reutiliza el mismo formulario de Programar en modo edición (Huerta bloqueada, igual que Granular/Aplicaciones).
-
-**Probado en vivo, caso completo:** fertirriego de prueba programado (El Sonrisal, Válvula 1, NKS 0.001 kg/ha) → "Editar" cargó el formulario pre-llenado correctamente → cambié la dosis a 0.002 kg/ha → "Guardar cambios" → la tarjeta reflejó el cambio de inmediato (0.004 kg → 0.008 kg total de campaña) → "Liberar" con el nuevo modal de dos pasos → quedó "Vencida/liberada". Datos de prueba borrados por completo al terminar (fertirriego, sus productos/secciones, movimientos de Almacén, usuario de prueba).
-
-## 7. Bug: las programaciones "Liberadas" se quedaban visibles para siempre (NUEVO, reportado por Diego 31-ago-2026)
-
-Diego probó "Liberar" en Fertirriego (para revisar el candado del punto 6) y notó que el registro liberado se queda ahí, con la etiqueta "Vencida/liberada", sin ninguna forma de dejar de verlo — ni desaparece de la lista ni hay manera de ocultarlo.
-
-**Aclarado con Diego antes de tocar código** (dos preguntas, para no adivinar):
-1. **Alcance:** ¿solo Fertirriego, o también Granular y Aplicaciones (mismo botón "Liberar" idéntico en los 3)? → **Los 3 módulos.**
-2. **Qué significa "borrar":** ¿borrado real de la base de datos, o solo ocultarlo de la lista activa conservándolo para consulta? → **Ocultar de la lista, conservar en el sistema** — importante porque los movimientos de Almacén (qué se comprometió y qué se liberó) siguen apuntando a ese registro; borrarlo de verdad rompería esa trazabilidad.
-
-**Construido, en los 3 módulos (Fertirriego, Granular, Aplicaciones):**
-- `listarFertirriego`/`listarGranular`/`listarAplicaciones` ahora excluyen `estado: { notIn: ["vencida", "cancelada"] }` por default; nuevo parámetro opcional `incluirCerradas` (query `?incluirCerradas=true`) las vuelve a traer.
-- Cada pantalla (`Fertirriego.tsx`, `Granular.tsx`, `Aplicaciones.tsx`) tiene ahora un checkbox "Mostrar vencidas/canceladas" (apagado por default) junto al botón de programar.
-- Nada se borra de la base de datos — el registro y todos sus movimientos de Almacén siguen intactos, solo se ocultan de la vista normal.
-
-**Ampliado a "cancelada" el mismo día, a pedido explícito de Diego** ("aplica el mismo arreglo a canceladas") — mismo mecanismo, un solo checkbox cubre ambos estados en vez de dos toggles separados, ya que para el usuario es la misma pregunta ("¿ya terminé con esto?").
-
-**Probado en vivo, dos veces:** primero solo con "vencida" — el fertirriego real de El Sonrisal que Diego liberó dejó de aparecer en la lista al recargar, y volvió completo al marcar el checkbox. Después de ampliar a "cancelada", repetí la prueba con el checkbox renombrado — mismo comportamiento, sigue funcionando en los 3 módulos.
+**Probado en vivo:** generé el PDF real de la Orden de Fertirriego de El Sonrisal después del cambio — logo limpio, columnas "Boro / Zinc / Manganeso / Micro Mix / Nitrato de Magnesio / Fosfato Monoamónico / Fosfonitrato / Nitrato de Potasio", "Nitrato de Magnesio" y "Fosfato Monoamónico" envuelven a 2 líneas sin cortarse, y la fila de "Total de campaña" (que también envuelve) no descuadra el resto.
 
 ## Estado técnico
 
-- Backend, web y shared sin errores de TypeScript (`tsc --noEmit` limpio en los tres). Build de producción corrido limpio en backend y web.
-- 3 migraciones de Prisma (todas del 29-ago, verificadas contra 0 filas existentes antes de aplicarse): `20260829045108_fertirriego_dosis_ha`, `20260829051008_nomina_semana_confirmada`, `20260829052922_comparador_zonas_flete`. **La ampliación del 31-ago (1.6-1.9, 5, 6) no necesitó ninguna migración nueva** — todo se resolvió con lógica de lectura/UI sobre el schema ya existente.
-- Todo probado en vivo en el navegador con un usuario de prueba temporal (creado y borrado en la misma sesión), y todos los datos de prueba (Zonas, Proveedores, Comparaciones, Órdenes, la semana de prueba del candado, el fertirriego de prueba del 31-ago) borrados por completo al terminar — cero rastro en producción.
+- Backend, web y shared sin errores de TypeScript, build de producción limpio en los tres.
+- 1 migración de Prisma nueva (`20260902043325_compras_orden_real_y_config_empresa`): nuevos estados `cancelada`/`cubierta` en Orden de Compra, folio, liga a la cotización que generó la orden, producto realmente recibido, liga de Comparación a su orden de origen, y las tablas nuevas `EmpresaConfig`/`Contador`. Todo aditivo — verificado contra las 16 filas reales de Orden de Compra que ya existían (ningún dato se movió ni se perdió).
+- El paso de "Cotizar" simple de antes (un formulario con Proveedor+precio directo sobre la orden) se retiró por completo — quedó reemplazado por el Comparador. No quedó código muerto de esa ruta vieja.
+- Todo probado en vivo: primero con un script contra la base de datos real para la parte de dinero/inventario (compra parcial + sustituto + cancelación en cascada, con aserciones explícitas en cada paso — así se encontró el bug del punto 2.3), después haciendo clic en la pantalla completa (Cotizar → Comparador → Generar orden → Descargar PDF → Configuración → Recibir con confirmación de producto). Todos los datos de prueba (productos, proveedores, zonas, comparaciones, órdenes, usuario, configuración de empresa de prueba) se borraron por completo al terminar — cero rastro en producción, verificado contando filas antes y después.
 - Sin commitear todavía — pendiente de que Diego confirme antes de subir a GitHub.

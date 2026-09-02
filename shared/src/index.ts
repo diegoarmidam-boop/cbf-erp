@@ -8,3 +8,4 @@ export * from "./aplicaciones/calculo.js";
 export * from "./fertilizantes/calculo.js";
 export * from "./ordenes/calculo.js";
 export * from "./compras/calculo.js";
+export * from "./texto/numeroALetra.js";

@@ -1,9 +1,10 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { api, ApiError } from "../../lib/api";
+import { useSearchParams } from "react-router-dom";
+import { api, ApiError, getToken } from "../../lib/api";
 import { useZonas } from "../../lib/useZonas";
 import type { ComparacionCalculada, ComparacionResumen, CotizacionCalculada, MonedaCotizacion, OrdenCompra, Proveedor } from "../../lib/types";
 import { formatearInstante } from "../../lib/fecha";
-import { formatearDinero } from "../../lib/numero";
+import { formatearDinero, formatearNumero } from "../../lib/numero";
 import ConfirmModal from "../../components/ConfirmModal";
 
 interface CotizacionForm {
@@ -32,7 +33,21 @@ function cotizacionAPayload(c: CotizacionForm) {
   };
 }
 
+const ETIQUETAS_ESTADO_ORDEN: Record<string, string> = {
+  generada: "En camino",
+  recibida: "Recibida",
+  cancelada: "Cancelada",
+};
+
+/**
+ * Comparador de Cotizaciones (9.14) — paso real de "Cotizar" del ciclo de
+ * Compras desde el 2-sep-2026: ya no es una herramienta de análisis
+ * aparte, cada Comparación está ligada a la OrdenCompra "necesidad" que
+ * cotiza (ver Ordenes.tsx, botón "Cotizar"), y "Generar orden de compra"
+ * aquí mismo produce la compra real (con folio y PDF).
+ */
 export default function Comparador() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const { zonas, crear: crearZona } = useZonas();
   const [proveedores, setProveedores] = useState<Proveedor[]>([]);
   const [listaCompra, setListaCompra] = useState<OrdenCompra[]>([]);
@@ -50,10 +65,15 @@ export default function Comparador() {
   const [cotizacionNueva, setCotizacionNueva] = useState<CotizacionForm>(nuevaCotizacion());
   const [confirmando, setConfirmando] = useState<{ tipo: "eliminarComparacion" | "borrarCotizacion"; id: string } | null>(null);
 
+  // Generar orden de compra real (1.4) — cantidad editable para compra parcial.
+  const [generandoOrdenPara, setGenerandoOrdenPara] = useState<string | null>(null);
+  const [cantidadOrden, setCantidadOrden] = useState("");
+  const [generandoOrden, setGenerandoOrden] = useState(false);
+
   function cargar() {
     api.get<ComparacionResumen[]>("/compras/comparador").then(setComparaciones);
     api.get<Proveedor[]>("/compras/proveedores").then(setProveedores);
-    // "Lista de compra ya generada por el sistema" (4.1): órdenes ya
+    // "Lista de compra ya generada por el sistema" (1.1): órdenes ya
     // esperando cotización — de ahí se elige el Producto, sin volver a
     // capturar cantidad/unidad.
     api.get<OrdenCompra[]>("/compras/ordenes?estado=pendiente_cotizar").then(setListaCompra);
@@ -68,6 +88,25 @@ export default function Comparador() {
       .then(setDetalle)
       .catch((err) => setError(err instanceof ApiError ? err.message : "No se pudo cargar."));
   }
+
+  // Entrada desde "Cotizar" en Órdenes (Ordenes.tsx) con ?ordenCompraId= —
+  // si ya hay una Comparación para esa orden, se abre directo; si no,
+  // se precarga el formulario de nueva comparación con esa orden elegida.
+  useEffect(() => {
+    const ordenCompraId = searchParams.get("ordenCompraId");
+    if (!ordenCompraId) return;
+    api.get<ComparacionCalculada | null>(`/compras/comparador/por-orden/${ordenCompraId}`).then((existente) => {
+      if (existente) {
+        setDetalle(existente);
+      } else {
+        setOrdenId(ordenCompraId);
+        setMostrarForm(true);
+      }
+    });
+    // Se limpia el query param para no reabrir si el usuario navega "Volver".
+    setSearchParams({}, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function eliminar(id: string) {
     setError(null);
@@ -89,16 +128,13 @@ export default function Comparador() {
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
-    const orden = listaCompra.find((o) => o.id === ordenId);
-    if (!orden) {
+    if (!ordenId) {
       setError("Elige un producto de la lista de compra.");
       return;
     }
     try {
       const payload = {
-        productoId: orden.productoId,
-        cantidadNecesaria: Number(orden.cantidadSolicitada),
-        unidad: orden.producto.unidad,
+        ordenCompraId: ordenId,
         umbralExcedentePct: Number(umbralExcedentePct),
         cotizaciones: cotizaciones.map(cotizacionAPayload),
       };
@@ -141,6 +177,39 @@ export default function Comparador() {
     }
   }
 
+  async function confirmarGenerarOrden() {
+    if (!detalle || !generandoOrdenPara) return;
+    setError(null);
+    setGenerandoOrden(true);
+    try {
+      await api.post(`/compras/comparador/${detalle.id}/generar-orden`, {
+        cotizacionId: generandoOrdenPara,
+        cantidad: Number(cantidadOrden),
+      });
+      setGenerandoOrdenPara(null);
+      setCantidadOrden("");
+      verDetalle(detalle.id);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "No se pudo generar la orden.");
+    } finally {
+      setGenerandoOrden(false);
+    }
+  }
+
+  function descargarPdfOrden(ordenGeneradaId: string, numero: number | null) {
+    const token = getToken();
+    fetch(`${api.apiUrl}/compras/ordenes/${ordenGeneradaId}/orden-compra.pdf`, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+      .then((r) => r.blob())
+      .then((blob) => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `orden-compra-${numero ?? ordenGeneradaId}.pdf`;
+        a.click();
+        URL.revokeObjectURL(url);
+      });
+  }
+
   function filaCotizacion(c: CotizacionCalculada) {
     return (
       <tr
@@ -153,7 +222,10 @@ export default function Comparador() {
             : undefined
         }
       >
-        <td>{c.proveedor.nombre}</td>
+        <td>
+          {c.proveedor.nombre}
+          {c.esMejorGlobal && <div style={{ fontSize: 10.5, color: "var(--pink)", fontWeight: 600 }}>(mejor precio)</div>}
+        </td>
         <td>
           {c.zona.nombre} {c.zona.esZonaComprador && <span className="tag tag-neutral">Local</span>}
         </td>
@@ -176,7 +248,18 @@ export default function Comparador() {
           {c.esMejorGlobal && <span className="tag tag-success">Mejor Global</span>}{" "}
           {c.esMejorLocal && !c.esMejorGlobal && <span className="tag tag-success">Mejor Local</span>}
         </td>
-        <td>
+        <td style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {detalle && detalle.cantidadPendiente > 0 && (
+            <button
+              className="btn-primary"
+              onClick={() => {
+                setGenerandoOrdenPara(c.id);
+                setCantidadOrden(String(detalle.cantidadPendiente));
+              }}
+            >
+              Generar orden
+            </button>
+          )}
           <button className="btn-secondary" onClick={() => setConfirmando({ tipo: "borrarCotizacion", id: c.id })}>
             Borrar
           </button>
@@ -200,6 +283,58 @@ export default function Comparador() {
         </div>
 
         {error && <div className="tag tag-danger" style={{ display: "block", padding: "8px 12px", marginBottom: 12 }}>{error}</div>}
+
+        {/* Compra parcial (1.4): tarjeta de cuánto ya se compró y cuánto falta. */}
+        <div className="card" style={{ marginBottom: 16, display: "flex", flexWrap: "wrap", gap: 16, alignItems: "center" }}>
+          <div>
+            <div style={{ fontSize: 11, color: "var(--ink-soft)" }}>Necesario</div>
+            <div style={{ fontWeight: 700 }}>
+              {formatearNumero(detalle.cantidadNecesaria)} {detalle.unidad}
+            </div>
+          </div>
+          <div>
+            <div style={{ fontSize: 11, color: "var(--ink-soft)" }}>Ya comprado</div>
+            <div style={{ fontWeight: 700, color: "var(--success)" }}>
+              {formatearNumero(detalle.cantidadComprada)} {detalle.unidad}
+            </div>
+          </div>
+          <div>
+            <div style={{ fontSize: 11, color: "var(--ink-soft)" }}>Pendiente</div>
+            <div style={{ fontWeight: 700, color: detalle.cantidadPendiente > 0 ? "var(--pink)" : "var(--ink-soft)" }}>
+              {formatearNumero(detalle.cantidadPendiente)} {detalle.unidad}
+            </div>
+          </div>
+          {detalle.cantidadPendiente <= 0 && <span className="tag tag-success">Necesidad cubierta</span>}
+        </div>
+
+        {detalle.ordenesGeneradas.length > 0 && (
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 6 }}>Órdenes de compra generadas</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {detalle.ordenesGeneradas.map((o) => (
+                <div
+                  key={o.id}
+                  className="card"
+                  style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, padding: "8px 12px" }}
+                >
+                  <div style={{ fontSize: 12.5 }}>
+                    <strong>{o.proveedorNombre}</strong> — {formatearNumero(o.cantidadSolicitada)} {detalle.unidad} ·{" "}
+                    {o.precioUnitario != null ? formatearDinero(o.precioUnitario) : "—"}/{detalle.unidad}
+                    {o.numero != null && <span className="tag tag-neutral" style={{ marginLeft: 8 }}>Folio {o.numero}</span>}
+                    <span className={`tag ${o.estado === "cancelada" ? "tag-danger" : "tag-neutral"}`} style={{ marginLeft: 6 }}>
+                      {ETIQUETAS_ESTADO_ORDEN[o.estado] ?? o.estado}
+                    </span>
+                  </div>
+                  {o.numero != null && (
+                    <button className="btn-secondary" onClick={() => descargarPdfOrden(o.id, o.numero)}>
+                      Descargar PDF
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {detalle.cotizaciones.length === 0 ? (
           <p style={{ color: "var(--ink-soft)" }}>Sin cotizaciones todavía.</p>
@@ -296,6 +431,37 @@ export default function Comparador() {
             }}
           />
         )}
+
+        {generandoOrdenPara && (
+          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200 }}>
+            <div className="card" style={{ width: 360 }}>
+              <h3 style={{ marginBottom: 10 }}>Generar orden de compra</h3>
+              <p style={{ fontSize: 12.5, color: "var(--ink-soft)", marginBottom: 10 }}>
+                ¿Cuánto vas a comprarle a este Proveedor? Si no cubre todo lo pendiente, la necesidad se queda abierta por el resto —
+                se puede seguir generando órdenes desde otras cotizaciones después.
+              </p>
+              <label className="field">
+                Cantidad ({detalle.unidad}) — pendiente: {formatearNumero(detalle.cantidadPendiente)}
+                <input
+                  type="number"
+                  min={0.001}
+                  step="0.001"
+                  max={detalle.cantidadPendiente}
+                  value={cantidadOrden}
+                  onChange={(e) => setCantidadOrden(e.target.value)}
+                />
+              </label>
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+                <button className="btn-secondary" onClick={() => setGenerandoOrdenPara(null)} disabled={generandoOrden}>
+                  Cancelar
+                </button>
+                <button className="btn-primary" onClick={confirmarGenerarOrden} disabled={generandoOrden || !cantidadOrden}>
+                  {generandoOrden ? "Generando…" : "Generar orden"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -303,8 +469,8 @@ export default function Comparador() {
   return (
     <div>
       <p style={{ fontSize: 12.5, color: "var(--ink-soft)", marginBottom: 14 }}>
-        Compara precio + flete entre proveedores de distintas Zonas para un producto de la lista de compra — no genera órdenes, solo ayuda a
-        decidir si conviene comprar foráneo o local.
+        Paso de "Cotizar" de Compras: compara precio + flete entre proveedores de distintas Zonas para un producto de la lista de
+        compra, y genera la orden de compra real con el Proveedor que elijas — se puede comprar parcial, en más de un Proveedor.
       </p>
 
       <div style={{ marginBottom: 14 }}>

@@ -92,4 +92,34 @@ export async function reordenarSustitutos(ingredienteActivoId: string, ordenDeId
   return obtenerPreferencia(ingredienteActivoId);
 }
 
+/**
+ * Opciones de "qué llegó de verdad" para confirmar al recibir una Orden de
+ * Compra (2.3, 2-sep-2026) — el producto pedido, más el preferido y los
+ * sustitutos autorizados de su mismo Ingrediente Activo (si tiene alguno
+ * configurado). Caso inverso a `obtenerPreferencia` (que parte de un
+ * ingredienteActivoId): aquí se parte de un productoId, se resuelve su
+ * Ingrediente Activo por nombre (Producto.ingredienteActivo es texto
+ * libre, no FK) y desde ahí se arma la lista. Si el producto no tiene
+ * Ingrediente Activo, o no hay ningún IngredienteActivo dado de alta con
+ * ese nombre, regresa solo el producto pedido — no es un error, solo
+ * significa que no hay alternativas configuradas.
+ */
+export async function opcionesRecepcionDeProducto(productoId: string) {
+  const producto = await prisma.producto.findUniqueOrThrow({ where: { id: productoId } });
+  if (!producto.ingredienteActivo) return [producto];
+
+  const ingrediente = await prisma.ingredienteActivo.findUnique({ where: { nombre: producto.ingredienteActivo } });
+  if (!ingrediente) return [producto];
+
+  const preferencia = await obtenerPreferencia(ingrediente.id);
+  const opciones = [producto];
+  if (preferencia.productoPreferido && preferencia.productoPreferido.id !== producto.id) {
+    opciones.push(preferencia.productoPreferido);
+  }
+  for (const s of preferencia.sustitutos) {
+    if (!opciones.some((o) => o.id === s.producto.id)) opciones.push(s.producto);
+  }
+  return opciones;
+}
+
 export { ProductoIngredienteActivoInvalidoError, SustitutoDuplicadoError, SustitutoEsElPreferidoError };

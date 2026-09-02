@@ -49,6 +49,9 @@ const MODELOS_AUDITADOS = new Set([
   "FertirriegoProgramacion",
   "AnalisisLaboratorio",
   "RiegoRegistroDiario",
+  "EmpresaConfig",
+  "Comparacion",
+  "ComparacionCotizacion",
 ]);
 // ModuloConfig NO entra aquí: su llave primaria es `modulo` (string), no
 // `id` — este extension solo sabe leer `resultado.id`/`valorAnterior.id`

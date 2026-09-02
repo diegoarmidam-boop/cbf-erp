@@ -1,4 +1,5 @@
 import { prisma } from "../../core/db.js";
+import type { TransactionClient } from "../../core/db.js";
 import { intentarComprometer, registrarEntradaTx } from "../almacen/movimientos.js";
 
 export class SolicitudYaResueltaOrdenError extends Error {
@@ -19,12 +20,74 @@ export class TransicionInvalidaError extends Error {
   }
 }
 
-export function listarOrdenes(estado?: string) {
+// Las "cancelada"/"rechazada" no se muestran por default — mismo criterio
+// aplicado a Fertirriego/Granular/Aplicaciones (31-ago-2026): se ocultan
+// de la lista activa pero no se borran (la trazabilidad de Almacén las
+// sigue referenciando). Si se pide un `estado` específico (ej. el
+// Comparador pidiendo `pendiente_cotizar`), ese filtro manda y
+// `incluirCerradas` no aplica.
+export function listarOrdenes(estado?: string, incluirCerradas?: boolean) {
   return prisma.ordenCompra.findMany({
-    where: { estado: estado as never },
+    where: estado ? { estado: estado as never } : incluirCerradas ? {} : { estado: { notIn: ["cancelada", "rechazada"] } },
     include: { producto: true, proveedor: true, recepciones: true },
     orderBy: { fechaCreacion: "desc" },
   });
+}
+
+/**
+ * Compras agrupadas por Ingrediente Activo (2.1, 2-sep-2026): suma la
+ * cantidad pendiente de cada Ingrediente Activo a través de TODAS las
+ * órdenes "necesidad" pendientes (pendiente_autorizar/pendiente_cotizar,
+ * más lo que le falte a una "generada"/"cubierta" parcialmente cotizada),
+ * sin importar su origen — para comprar en volumen. No reemplaza la vista
+ * por orden individual, coexisten (una es para urgencia puntual, la otra
+ * para anticipar en volumen).
+ */
+export async function listarPendientesPorIngredienteActivo() {
+  const ordenes = await prisma.ordenCompra.findMany({
+    where: { estado: { in: ["pendiente_autorizar", "pendiente_cotizar", "generada", "cubierta"] } },
+    include: {
+      producto: true,
+      comparacionOrigen: { include: { cotizaciones: true } },
+    },
+  });
+
+  const grupos = new Map<
+    string,
+    { ingredienteActivo: string; unidad: string; cantidadPendiente: number; ordenes: { id: string; estado: string; cantidadPendiente: number }[] }
+  >();
+
+  for (const orden of ordenes) {
+    // "Necesidad" ya cotizada parcialmente (tiene Comparación ligada):
+    // pendiente = cantidadNecesaria - ya comprado. Sin Comparación: toda
+    // cantidadSolicitada sigue pendiente.
+    let cantidadPendiente = Number(orden.cantidadSolicitada);
+    if (orden.comparacionOrigen) {
+      const ordenesReales = await prisma.ordenCompra.findMany({
+        where: { comparacionCotizacion: { comparacionId: orden.comparacionOrigen.id }, estado: { in: ["generada", "recibida"] } },
+      });
+      const comprado = ordenesReales.reduce((s, o) => s + Number(o.cantidadSolicitada), 0);
+      cantidadPendiente = Math.max(0, Number(orden.cantidadSolicitada) - comprado);
+    }
+    if (cantidadPendiente <= 0) continue;
+
+    const clave = orden.producto.ingredienteActivo ?? `producto:${orden.producto.id}`;
+    const etiqueta = orden.producto.ingredienteActivo ?? orden.producto.nombreComercial;
+    const existente = grupos.get(clave);
+    if (existente) {
+      existente.cantidadPendiente += cantidadPendiente;
+      existente.ordenes.push({ id: orden.id, estado: orden.estado, cantidadPendiente });
+    } else {
+      grupos.set(clave, {
+        ingredienteActivo: etiqueta,
+        unidad: orden.producto.unidad,
+        cantidadPendiente,
+        ordenes: [{ id: orden.id, estado: orden.estado, cantidadPendiente }],
+      });
+    }
+  }
+
+  return [...grupos.values()].sort((a, b) => a.ingredienteActivo.localeCompare(b.ingredienteActivo, "es"));
 }
 
 /**
@@ -67,20 +130,19 @@ export async function rechazarOrden(id: string, autorizadoPorId: string, motivoR
   return prisma.ordenCompra.findUniqueOrThrow({ where: { id } });
 }
 
-/** Se cotiza por fuera del sistema; aquí solo se formaliza (proveedor, precio, fecha esperada) — la orden queda "en camino". */
-export async function cotizarOrden(id: string, proveedorId: string, precioUnitario: number, fechaEsperada?: string) {
-  const orden = await prisma.ordenCompra.findUniqueOrThrow({ where: { id } });
-  if (orden.estado !== "pendiente_cotizar") throw new TransicionInvalidaError("pendiente_cotizar");
-
-  return prisma.ordenCompra.update({
-    where: { id },
-    data: {
-      estado: "generada",
-      proveedorId,
-      precioUnitario,
-      fechaEsperada: fechaEsperada ? new Date(fechaEsperada) : undefined,
-      fechaFormalizacion: new Date(),
-    },
+/**
+ * Cancela toda orden de compra ligada a una programación que se acaba de
+ * cancelar/liberar (1.5, 2-sep-2026) — sin importar si ya se cotizó o ya
+ * se formalizó/generó con un Proveedor (`generada`), mientras el producto
+ * todavía no haya llegado a Almacén (`recibida` nunca se toca). Cubre
+ * tanto la orden "necesidad" original como cualquier orden real generada
+ * parcialmente desde el Comparador (ambas comparten `referenciaAplicacionId`).
+ * Debe llamarse DENTRO de la misma transacción que cancela la programación.
+ */
+export async function cancelarOrdenesDeReferencia(tx: TransactionClient, referenciaAplicacionId: string) {
+  await tx.ordenCompra.updateMany({
+    where: { referenciaAplicacionId, estado: { in: ["pendiente_autorizar", "pendiente_cotizar", "generada", "cubierta"] } },
+    data: { estado: "cancelada" },
   });
 }
 
@@ -94,15 +156,32 @@ export function marcarOrdenPagada(id: string) {
  * pedido — se registra la cantidad real. Esto es lo que de verdad mueve el
  * inventario: llama al mismo mecanismo de entrada que usa Almacén
  * directamente, para que no haya dos formas distintas de "entrar" stock.
+ *
+ * Confirmar producto recibido (2.3, 2-sep-2026): `productoRecibidoId` es
+ * el producto que de verdad llegó — el pedido, el preferido, o un
+ * sustituto autorizado (ver almacen/preferencias.ts). La entrada de
+ * inventario SIEMPRE se registra bajo el producto que de verdad llegó
+ * (físicamente correcto). Si es distinto del producto pedido y esta orden
+ * viene de una programación en espera (Aplicación/Granular/Fertirriego):
+ * por decisión de Diego (2-sep-2026) un sustituto autorizado SÍ cumple la
+ * programación de origen con la misma cantidad ya calculada — para que
+ * eso funcione de verdad en todo el sistema (alertas de "comprometido",
+ * Riego, notificaciones, etc., todas siguen el productoId de la fila de
+ * la programación), se actualiza esa fila para que apunte al sustituto
+ * ANTES de comprometer stock — no se compromete el producto viejo con
+ * stock del sustituto (eso sí dejaría el historial de Almacén
+ * inconsistente: un movimiento de salida de un producto que en realidad
+ * nunca se movió).
  */
 export async function recibirOrden(
   id: string,
   cantidadRecibida: number,
   recibidoPorId: string,
-  opciones: { lote?: string; fechaCaducidad?: string } = {}
+  opciones: { lote?: string; fechaCaducidad?: string; productoRecibidoId?: string } = {}
 ) {
   const orden = await prisma.ordenCompra.findUniqueOrThrow({ where: { id } });
   if (orden.estado !== "generada") throw new TransicionInvalidaError("generada");
+  const productoRecibidoId = opciones.productoRecibidoId ?? orden.productoId;
 
   return prisma.$transaction(async (tx) => {
     await tx.ordenCompra.update({ where: { id }, data: { estado: "recibida" } });
@@ -113,11 +192,13 @@ export async function recibirOrden(
         lote: opciones.lote,
         fechaCaducidad: opciones.fechaCaducidad ? new Date(opciones.fechaCaducidad) : undefined,
         recibidoPorId,
+        productoRecibidoId,
       },
     });
     // Misma transacción que el resto de la recepción — si algo falla
-    // después, la entrada de inventario también se revierte.
-    await registrarEntradaTx(tx, orden.productoId, cantidadRecibida, recibidoPorId, {
+    // después, la entrada de inventario también se revierte. Siempre bajo
+    // el producto que de verdad llegó, sea el pedido o un sustituto.
+    await registrarEntradaTx(tx, productoRecibidoId, cantidadRecibida, recibidoPorId, {
       lote: opciones.lote,
       fechaCaducidad: opciones.fechaCaducidad,
       referenciaId: id,
@@ -133,17 +214,34 @@ export async function recibirOrden(
       // Varios productos por programación (10-ago-2026): la cantidad a
       // comprometer es la de ESTE producto específico dentro de la
       // Aplicación/Fertilización/Fertirriego, no la de toda la programación.
-      const aplicacionProducto = await tx.aplicacionProducto.findFirst({ where: { aplicacionId: refId, productoId: orden.productoId } });
+      //
+      // Busca por `orden.productoId` O `productoRecibidoId` (2-sep-2026):
+      // una necesidad se puede cubrir con VARIAS órdenes parciales — si la
+      // primera ya confirmó un sustituto, la fila de la programación
+      // queda apuntando a ese sustituto, y una segunda orden parcial
+      // (cuyo `orden.productoId` todavía dice el producto pedido
+      // original) ya no la encontraría buscando solo por ese id.
+      const productoIds = productoRecibidoId === orden.productoId ? [orden.productoId] : [orden.productoId, productoRecibidoId];
+      const aplicacionProducto = await tx.aplicacionProducto.findFirst({ where: { aplicacionId: refId, productoId: { in: productoIds } } });
       if (aplicacionProducto) {
-        await intentarComprometer(tx, orden.productoId, Number(aplicacionProducto.cantidadTotalCalculada), refId, recibidoPorId);
+        if (aplicacionProducto.productoId !== productoRecibidoId) {
+          await tx.aplicacionProducto.update({ where: { id: aplicacionProducto.id }, data: { productoId: productoRecibidoId } });
+        }
+        await intentarComprometer(tx, productoRecibidoId, Number(aplicacionProducto.cantidadTotalCalculada), refId, recibidoPorId);
       } else {
-        const granularProducto = await tx.fertilizacionGranularProducto.findFirst({ where: { fertilizacionId: refId, productoId: orden.productoId } });
+        const granularProducto = await tx.fertilizacionGranularProducto.findFirst({ where: { fertilizacionId: refId, productoId: { in: productoIds } } });
         if (granularProducto) {
-          await intentarComprometer(tx, orden.productoId, Number(granularProducto.cantidadTotalCalculada), refId, recibidoPorId);
+          if (granularProducto.productoId !== productoRecibidoId) {
+            await tx.fertilizacionGranularProducto.update({ where: { id: granularProducto.id }, data: { productoId: productoRecibidoId } });
+          }
+          await intentarComprometer(tx, productoRecibidoId, Number(granularProducto.cantidadTotalCalculada), refId, recibidoPorId);
         } else {
-          const fertirriegoProducto = await tx.fertirriegoProgramacionProducto.findFirst({ where: { fertirriegoId: refId, productoId: orden.productoId } });
+          const fertirriegoProducto = await tx.fertirriegoProgramacionProducto.findFirst({ where: { fertirriegoId: refId, productoId: { in: productoIds } } });
           if (fertirriegoProducto) {
-            await intentarComprometer(tx, orden.productoId, Number(fertirriegoProducto.cantidadTotalCalculada), refId, recibidoPorId);
+            if (fertirriegoProducto.productoId !== productoRecibidoId) {
+              await tx.fertirriegoProgramacionProducto.update({ where: { id: fertirriegoProducto.id }, data: { productoId: productoRecibidoId } });
+            }
+            await intentarComprometer(tx, productoRecibidoId, Number(fertirriegoProducto.cantidadTotalCalculada), refId, recibidoPorId);
           }
         }
       }

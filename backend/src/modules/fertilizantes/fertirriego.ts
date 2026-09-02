@@ -17,6 +17,7 @@ import {
 import { obtenerVersionVigente } from "../unidades-produccion/cuadros.js";
 import { ProductoNoAutorizadoFertilizanteError, StockNoComprometidoError, TransicionFertilizacionInvalidaError } from "./granular.js";
 import { actualizarDosisProductoEnRecetaFertirriego, obtenerRecetaFertirriego, ROLES_RECETAS_FERTIRRIEGO } from "./recetario-fertirriego.js";
+import { cancelarOrdenesDeReferencia } from "../compras/ordenes.js";
 
 const DIAS_VENCIMIENTO = 15;
 
@@ -408,6 +409,9 @@ export async function liberarFertirriegoVencido(id: string, capturadoPorId: stri
         );
       }
     }
+    // 1.5 (2-sep-2026): cualquier orden de compra ligada a este fertirriego
+    // que todavía no haya llegado a Almacén se cancela junto.
+    await cancelarOrdenesDeReferencia(tx, id);
     return tx.fertirriegoProgramacion.update({ where: { id }, data: { estado: "vencida" } });
   });
 }

@@ -449,6 +449,30 @@ model ModuloConfig {
   comunicacionActiva Boolean @default(true)
 }
 
+// Configuración del sistema (2-sep-2026): datos de facturación de la
+// empresa y firmas de Orden de Compra — fila única, reutilizable por
+// cualquier documento futuro que los necesite. id fijo = "singleton"
+// (mismo criterio de fila única que ModuloConfig por módulo, pero aquí
+// solo hay UNA empresa).
+model EmpresaConfig {
+  id                  String  @id
+  razonSocial         String?
+  rfc                 String?
+  domicilioFiscal     String?
+  telefono            String?
+  firmaAtiendeNombre  String?
+  firmaAutorizaNombre String?
+}
+
+// Contador atómico genérico (2-sep-2026, primer uso: folio de Orden de
+// Compra) — se actualiza con {increment} dentro de una transacción, mismo
+// patrón ya usado 25+ veces en el proyecto para cantidades de Almacén, en
+// vez del escaneo "máximo + 1" no atómico que usa el folio de Equipos.
+model Contador {
+  nombre String @id
+  valor  Int    @default(0)
+}
+
 // Cuadrillas — con nombre persistente (reutilizadas semana a semana) o
 // armadas el mismo día sin nombre fijo (persistente=false).
 // Catálogo global (9.11) — un grupo de pago NO está asociado a ninguna
@@ -906,6 +930,7 @@ model Producto {
   sustitutoDe                    IngredienteActivoSustituto[]      @relation("ProductoSustitutoDe")
   recetaProductos                RecetaProducto[]
   recetaFertirriegoProductos     RecetaFertirriegoProducto[]
+  recepcionesComoRecibido        OrdenCompraRecepcion[]           @relation("ProductoRecibidoEnRecepcion")
 
   @@index([categoria])
 }
@@ -1028,6 +1053,8 @@ enum EstadoOrdenCompra {
   generada // "en camino"
   recibida
   rechazada
+  cancelada // 2-sep-2026: la programación de origen se canceló/liberó antes de que el producto llegara a Almacén
+  cubierta // 2-sep-2026: necesidad ya cubierta por completo mediante 1+ órdenes reales generadas desde el Comparador (compra parcial en varios Proveedores)
 }
 
 model OrdenCompra {
@@ -1050,6 +1077,24 @@ model OrdenCompra {
   pagada                 Boolean           @default(false)
   fechaPago              DateTime?
 
+  // Folio consecutivo de la Orden de Compra en PDF (2-sep-2026) — solo se
+  // asigna al "Generar orden de compra" desde el Comparador (estado
+  // generada), no a necesidades pendiente_cotizar/pendiente_autorizar.
+  numero Int? @unique
+
+  // Liga esta orden REAL a la línea de cotización del Comparador que la
+  // generó (2-sep-2026) — null en la orden "necesidad" original y en
+  // órdenes manuales cotizadas antes de este cambio. Una misma cotización
+  // puede generar varias órdenes reales a través del tiempo (compra
+  // parcial en más de una entrega al mismo Proveedor).
+  comparacionCotizacionId String?
+  comparacionCotizacion   ComparacionCotizacion? @relation(fields: [comparacionCotizacionId], references: [id])
+
+  // Si esta orden ES la "necesidad" original que un Comparador cotizó —
+  // relación inversa de Comparacion.ordenCompraId (ver ahí el comentario
+  // completo del diseño de compra parcial).
+  comparacionOrigen Comparacion? @relation("ComparacionOrigenOrden")
+
   recepciones OrdenCompraRecepcion[]
 
   @@index([estado])
@@ -1064,14 +1109,26 @@ model OrdenCompraRecepcion {
   fechaCaducidad   DateTime?   @db.Date
   fechaRecepcion   DateTime    @default(now())
   recibidoPorId    String
+
+  // Qué producto llegó de verdad a la bodega — el preferido, o alguno de
+  // sus sustitutos autorizados (2-sep-2026, 9.14) — confirmado
+  // explícitamente al recibir, no asumido igual al productoId de la orden.
+  // Null en recepciones anteriores a este cambio (se asume el producto de
+  // la orden).
+  productoRecibidoId String?
+  productoRecibido   Producto? @relation("ProductoRecibidoEnRecepcion", fields: [productoRecibidoId], references: [id])
 }
 
 // Submódulo Comparador de Cotizaciones (9.14, rediseño completo 29-ago-2026
-// a partir del Excel real "Cotizador CBF"): herramienta aparte de apoyo, no
-// genera órdenes — compara precio + flete por Zona para un solo Producto a
-// la vez (elegido de la lista de compra ya generada, ver OrdenCompra
-// pendiente_cotizar), con líneas de cotización por Proveedor debajo. Se
-// guarda para poder retomarla/consultarla después.
+// a partir del Excel real "Cotizador CBF"; 2-sep-2026: se convierte en el
+// paso real de "Cotizar" del ciclo de Compras — ver ordenCompraId más
+// abajo) — compara precio + flete por Zona para un solo Producto a la vez
+// (elegido de la lista de compra ya generada, ver OrdenCompra
+// pendiente_cotizar), con líneas de cotización por Proveedor debajo,
+// capturadas de forma asíncrona (una llega hoy, otra mañana). Se guarda
+// para poder retomarla/consultarla después — el historial de cotizaciones
+// NUNCA se borra al comprar, sirve de referencia de precios por Proveedor
+// a través del tiempo (1.2, 2-sep-2026).
 model Comparacion {
   id                 String   @id @default(uuid())
   productoId         String
@@ -1084,6 +1141,18 @@ model Comparacion {
   umbralExcedentePct Decimal  @default(20) @db.Decimal(5, 2)
   creadoPorId        String
   fechaCreacion      DateTime @default(now())
+
+  // La OrdenCompra "necesidad" que esta Comparación está cotizando
+  // (2-sep-2026) — única por Comparación (@unique), null en comparaciones
+  // viejas creadas antes de este cambio (analíticas sueltas, sin ligar a
+  // una orden real). "Cuánto falta" de esa necesidad se calcula restando
+  // a `cantidadNecesaria` (fija, nunca se edita) la suma de
+  // `cantidadSolicitada` de las órdenes reales ya generadas (generada o
+  // recibida) desde las cotizaciones de esta Comparación — no se muta
+  // `cantidadNecesaria` ni la OrdenCompra original en cada compra parcial,
+  // se recalcula siempre a partir del historial completo.
+  ordenCompraId String?      @unique
+  ordenCompra   OrdenCompra? @relation("ComparacionOrigenOrden", fields: [ordenCompraId], references: [id])
 
   cotizaciones ComparacionCotizacion[]
 }
@@ -1117,6 +1186,11 @@ model ComparacionCotizacion {
   // unidad aquí, ya viene fija del producto elegido.
   presentacionCantidad Decimal   @db.Decimal(10, 3)
   fechaCreacion DateTime         @default(now())
+
+  // Órdenes reales generadas a partir de esta cotización (2-sep-2026,
+  // 1.4) — normalmente una, pero nada impide generar más de una a través
+  // del tiempo si el mismo Proveedor sigue entregando en varias remesas.
+  ordenesGeneradas OrdenCompra[]
 
   @@index([comparacionId])
 }

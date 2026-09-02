@@ -455,7 +455,7 @@ export interface MejorProveedor {
   fecha: string;
 }
 
-export type EstadoOrdenCompra = "pendiente_autorizar" | "pendiente_cotizar" | "generada" | "recibida" | "rechazada";
+export type EstadoOrdenCompra = "pendiente_autorizar" | "pendiente_cotizar" | "generada" | "recibida" | "rechazada" | "cancelada" | "cubierta";
 
 export interface OrdenCompraRecepcion {
   id: string;
@@ -463,6 +463,7 @@ export interface OrdenCompraRecepcion {
   lote: string | null;
   fechaCaducidad: string | null;
   fechaRecepcion: string;
+  productoRecibidoId: string | null;
 }
 
 export interface OrdenCompra {
@@ -482,6 +483,19 @@ export interface OrdenCompra {
   pagada: boolean;
   fechaPago: string | null;
   recepciones: OrdenCompraRecepcion[];
+  // Folio + liga a la cotización que la generó (2-sep-2026, 1.4/3.1) —
+  // null en la orden "necesidad" original (pendiente_autorizar/pendiente_cotizar/cubierta).
+  numero: number | null;
+  comparacionCotizacionId: string | null;
+}
+
+// Compras agrupadas por Ingrediente Activo (2.1, 2-sep-2026) — coexiste
+// con la vista por orden individual, no la reemplaza.
+export interface PendienteIngredienteActivo {
+  ingredienteActivo: string;
+  unidad: string;
+  cantidadPendiente: number;
+  ordenes: { id: string; estado: EstadoOrdenCompra; cantidadPendiente: number }[];
 }
 
 export interface OrdenCxP {
@@ -515,6 +529,7 @@ export interface ComparacionResumen {
   producto: { id: string; nombreComercial: string };
   cantidadNecesaria: string;
   unidad: string;
+  ordenCompraId: string | null;
 }
 
 export interface CotizacionCalculada {
@@ -540,8 +555,19 @@ export interface CotizacionCalculada {
   esMejorLocal: boolean;
 }
 
+export interface OrdenGeneradaSalida {
+  id: string;
+  numero: number | null;
+  estado: EstadoOrdenCompra;
+  proveedorNombre: string;
+  cantidadSolicitada: number;
+  precioUnitario: number | null;
+  fechaFormalizacion: string | null;
+}
+
 export interface ComparacionCalculada {
   id: string;
+  ordenCompraId: string | null;
   producto: { id: string; nombreComercial: string; unidad: string };
   cantidadNecesaria: number;
   unidad: string;
@@ -551,6 +577,10 @@ export interface ComparacionCalculada {
   mejorGlobalId: string | null;
   mejorLocalId: string | null;
   ahorroForaneo: { monto: number; porcentaje: number } | null;
+  // Compra parcial (1.4, 2-sep-2026).
+  ordenesGeneradas: OrdenGeneradaSalida[];
+  cantidadComprada: number;
+  cantidadPendiente: number;
 }
 
 export type TipoEquipo = "tractor" | "camioneta" | "remolque" | "implemento";
