@@ -494,6 +494,16 @@ export interface OrdenCompra {
   centroCosto: CatalogoAbiertoItem | null;
   huertaDestinoId: string | null;
   huertaDestino: { id: string; nombre: string } | null;
+  // Campos mínimos comunes (Bloque 2, 2-sep-2026) — resueltos por el backend
+  // en `listarOrdenes` para que "Por Orden"/En Camino/Recibidas/Rechazadas y
+  // Canceladas puedan mostrar y filtrar igual que las demás vistas.
+  solicitanteNombre: string;
+  // Huerta de la programación de origen — solo en órdenes automáticas
+  // (huertaDestino es exclusivo de solicitudes manuales, ver arriba).
+  huertaOrigen: { id: string; nombre: string } | null;
+  tipoAplicacionId: string | null;
+  tipoAplicacionNombre: string | null;
+  fechaEfectiva: string;
 }
 
 // Compras agrupadas por Ingrediente Activo (2.1, 2-sep-2026) — coexiste
@@ -502,14 +512,20 @@ export interface OrdenCompra {
 // viene de cada combinación Huerta+Receta. Solicitudes manuales no tienen
 // ninguno de los dos (esManual: true).
 export interface OrigenPendienteIngredienteActivo {
+  huertaId: string | null;
   huertaNombre: string | null;
   recetaNombre: string | null;
   esManual: boolean;
   cantidad: number;
 }
 
+// Renombrada/generalizada a "Por Producto" (Bloque 4, 2-sep-2026, Reestructura
+// de Compras): agrupa por Ingrediente Activo cuando el producto lo tiene, o
+// por Producto Comercial cuando no (empaque, refacciones, etc.) — `categoria`
+// viene del catálogo de Almacén (9.15), sirve para el filtro "Tipo de producto".
 export interface PendienteIngredienteActivo {
   ingredienteActivo: string;
+  categoria: string;
   unidad: string;
   cantidadPendiente: number;
   ordenes: { id: string; estado: EstadoOrdenCompra; cantidadPendiente: number }[];
@@ -526,6 +542,7 @@ export interface LineaPendienteProgramacion {
   productoId: string;
   nombreComercial: string;
   ingredienteActivo: string | null;
+  categoria: string;
   unidad: string;
   cantidadSolicitada: number;
   cantidadPendiente: number;
@@ -533,13 +550,27 @@ export interface LineaPendienteProgramacion {
   estadoOrden: EstadoOrdenCompra;
 }
 
+export interface DestinoPendienteProgramacion {
+  tipo: "centro_costo" | "huerta";
+  nombre: string;
+}
+
+// Campos mínimos comunes (Bloque 2, 2-sep-2026, Reestructura de Compras) —
+// Solicitante/Fecha/Destino ya resueltos por el backend para toda tarjeta,
+// sea automática (Aplicación/Fertirriego/Granular) o solicitud manual.
 export interface GrupoPendienteProgramacion {
   clave: string;
   tipo: "aplicacion" | "granular" | "fertirriego" | "manual" | "desconocido";
   referenciaId: string | null;
+  huertaId: string | null;
   huertaNombre: string | null;
   fechaInicio: string | null;
   fechaFin: string | null;
+  tipoAplicacionId: string | null;
+  tipoAplicacionNombre: string | null;
+  solicitanteNombre: string;
+  fecha: string;
+  destino: DestinoPendienteProgramacion | null;
   lineas: LineaPendienteProgramacion[];
 }
 
