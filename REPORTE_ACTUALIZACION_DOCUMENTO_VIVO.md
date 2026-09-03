@@ -1,40 +1,60 @@
-# Reporte — actualización del documento vivo (2-sep-2026, sesión noche)
+# Reporte — actualización del documento vivo (3-sep-2026)
 
-Prompt `CBF_ERP_Reestructura_Completa_02-09-2026_V7.docx`: reorganiza la navegación de Compras → Órdenes en capas sobre lo construido en la sesión de la tarde (no lo reemplaza) — 1 vista nueva y 1 renombrada/generalizada, para que alguien que no conoce el sistema pueda entender qué comprar sin forzar las solicitudes manuales de Oficina/Empaque/Vivero a la misma estructura que fertilizantes/agroquímicos.
+Sesión larga con 2 partes: (A) 2 ajustes puntuales pedidos directo en el chat (botón "Toda la Huerta" faltante en Fertirriego, y Cierre del día sin fechador), y (B) el prompt `CBF_ERP_Reestructura_Completa_03092026_V11.docx` con 3 prioridades de diseño. Commit `e5b1c5c` sobre `2409495`, rama `main`, ya subido.
 
-Regla de trabajo: preguntar antes de asumir en cualquier hueco de diseño no definido, sin importar autorizaciones previas de "seguir derecho". Las Prioridades 1, 2 y 3 se trabajaron como un solo bloque (son la misma pantalla, no se pueden separar limpiamente) y la 4 se incluyó en el mismo reporte; Diego validó el conjunto completo de una vez ("se ve bien, sigue con lo que falte") en vez de prioridad por prioridad.
+## Parte A — Ajustes puntuales
 
-## Pregunta hecha antes de construir
+**Botón "Toda la Huerta" en Fertirriego.** Diego reportó que no aparecía al seleccionar Secciones de Riego, y preguntó si se había quitado sin su autorización. Se investigó primero: se buscó la cadena "Toda la Huerta" en **todo el historial de git** de `Fertirriego.tsx` — no aparece en ningún commit desde que el archivo existe. Conclusión: nunca se construyó ahí (sí existe en Aplicaciones/Actividades/Granular desde el 16-ago-2026) — no fue una regresión ni algo removido. Se agregó siguiendo el mismo patrón que las otras 3 pantallas, adaptado a Secciones de Riego.
 
-El documento no definía qué pasa con las órdenes rechazadas/canceladas dentro de la nueva estructura de 4 pestañas (antes vivían escondidas detrás de un checkbox "Mostrar canceladas/rechazadas" en la vista "Por orden"). Se le preguntó a Diego directamente; eligió **4ta pestaña propia "Rechazadas/Canceladas"**, simple, sin sub-pestañas — así quedó implementado.
+**Cierre del día sin fechador.** Diego pidió que la pantalla ya no obligue a elegir una fecha una por una — ahora lista automáticamente una tarjeta por cada Huerta+fecha que tenga algo capturado y sin cerrar, sin importar la fecha (útil sobre todo tras cargar nómina atrasada). Reutiliza `diasPendientesDeCierre` (ya existía para notificaciones, nunca se había conectado a esta pantalla) — no hizo falta endpoint nuevo. Probado contra datos reales: Viernes 28-ago no aparece (Diego ya lo había cerrado), sí aparecen las 4 tarjetas pendientes (Sábado/Domingo/Lunes/Martes) con el tag de plazo correcto en cada una.
 
-## Prioridad 1 — Navegación a 4 pestañas por estado
+## Parte B — Prompt del 3-sep: 3 prioridades
 
-Compras → Órdenes ahora tiene **Pendientes** (default, con las 3 sub-vistas de las Prioridades 2-4 adentro), **En Camino**, **Recibidas** y **Rechazadas/Canceladas** — las últimas 3 simples, sin sub-pestañas. Filtros de **Huerta** (catálogo 9.1), **Fecha** (rango), **Tipo de producto** (catálogo de Categoría de Almacén, 9.15) y **Tipo de aplicación** (catálogo de Aplicaciones, 9.7) disponibles en las 4 pestañas — cada filtro solo actúa sobre las tarjetas donde el campo aplica, tal como pedía el documento.
+Regla de trabajo pedida por Diego para este prompt: preguntar antes de asumir cualquier cosa no definida — "seguir derecho" nunca autoriza inventar una decisión de producto. Se siguió así: 2 preguntas reales se le hicieron directo a Diego antes de construir la Prioridad 1 (ver abajo), y no se avanzó a la siguiente prioridad hasta que la anterior quedó reportada y validada.
 
-## Prioridad 2 — Campos mínimos comunes
+### Prioridad 1 — Pestaña "Órdenes de Compra" (la más grande)
 
-Toda tarjeta (automática o manual, en cualquier pestaña/sub-vista) ahora resuelve y muestra: **Destino**, **Solicitante** (nunca capturado a mano — para automáticas es quien programó la Aplicación/Fertirriego/Granular, para manuales quien llenó el formulario; se pudo resolver sin ambigüedad porque el campo `creadoPorId` que ya existía en ambos lados guarda exactamente esa persona), **Fecha** y **Producto(s) + cantidad**. El Estado dentro de Pendientes sigue usando el mismo criterio Pendiente/Cotizado/Comprado parcial que ya existía en "Por Programación" desde la tarde.
+Nueva 5ª pestaña de primer nivel en Compras → Órdenes — el único lugar donde de verdad se arma y genera una orden de compra real. "Cotizar"/"Generar orden de compra" desde Pendientes ya no genera nada directo, redirige aquí.
 
-## Prioridad 3 — Nueva sub-vista "Por Orden" (dentro de Pendientes)
+**3 formas de entrada:** Por Proveedor (todo lo ya cotizado con él en toda la empresa), Por Orden (una programación completa con todos sus productos — decisión de Diego: "una orden son varios productos", distinto del "Por orden" que ya existe en Pendientes, que es individual), Por Producto (todas las necesidades pendientes de ese producto en toda la empresa).
 
-Una tarjeta = una orden individual, sin agrupar por programación — colapsada muestra los campos mínimos de la Prioridad 2, un clic la desglosa mostrando el detalle completo con el Solicitante explícito. Mismo botón "Cotizar" que ya existía.
+**Pregunta 1 hecha a Diego antes de construir:** ¿"Por Orden" significa una sola necesidad (1 producto) o la programación completa (varios productos)? Confirmó: la programación completa — así quedó.
 
-## Prioridad 4 — "Por Ingrediente Activo" → "Por Producto"
+**Mecanismo de generación:** después de asignar Proveedor por producto/línea, el sistema agrupa automáticamente por el Proveedor resultante y muestra vista previa antes de generar. Decisión de arquitectura (no de producto): las filas reales de `OrdenCompra` generadas en la misma sesión hacia el mismo Proveedor **comparten un folio** a propósito (el campo `numero` dejó de ser único por fila) — un PDF = un folio = potencialmente varias filas (una por línea de origen), que el PDF combina sumando las que sean del mismo producto. Esto evita una migración de esquema mucho más invasiva (una tabla nueva de "orden generada" con líneas) sin perder nada del comportamiento pedido.
 
-Renombrada. La regla de agrupación generalizada (por Ingrediente Activo cuando aplica, por Producto Comercial cuando no — empaque, papelería, herramientas, refacciones) **ya existía en el backend desde la tarde** como comportamiento de respaldo sin que se hubiera notado — esta sesión solo le puso el nombre correcto a la pestaña y agregó el campo `categoria` para que el filtro de Tipo de producto funcione ahí también. Sigue sumando solo lo pendiente, sin tocar el desglose por origen que ya existía.
+**Pregunta 2 hecha a Diego, encontrada probando el caso real que motivó esta prioridad:** cuando el mismo Proveedor+Producto se cotizó por separado en 2 necesidades distintas (cada captura con su propia "cantidad disponible"), ¿el tope al generar se agrupa por Proveedor+Producto en conjunto, o cada cotización capturada tiene su propio tope aislado? Confirmó: agrupado por Proveedor+Producto (el disponible real del Proveedor es uno solo). Se toma como vigente la cotización más reciente de ese par — esa parte específica (cuál captura manda cuando hay varias) la decidió Claude Code, tal como Diego indicó.
 
-## Decisión de alcance tomada sin detener el trabajo — pendiente de confirmar
+**Campo nuevo en el Comparador (1.4):** "Cantidad disponible" — checkbox "Cantidad total disponible" o cantidad exacta, obligatorio uno de los dos, validado en pantalla y backend.
 
-En la sub-vista "Por Producto" se ocultan los controles de filtro **Fecha** y **Tipo de aplicación**: es una vista que suma a través de TODO el tiempo y todas las programaciones, no hay una fecha ni un tipo de aplicación único al cual filtrar ahí. Huerta y Tipo de producto sí funcionan. Se le señaló a Diego explícitamente al reportar, pero su "se ve bien" fue sobre el conjunto — no confirmó este punto puntual. **Pendiente de que lo valide** (si prefiere que los controles igual aparezcan aunque no filtren nada en esa vista, es un cambio menor).
+**Probado** con un script de 6 escenarios contra el backend real (datos de prueba creados y borrados, verificado antes/después):
+- Por Orden con split automático a 2 Proveedores (Boro→Proveedor A, Fosfato→Proveedor B): folios distintos, correcto.
+- Por Producto con consolidación (2 programaciones piden el mismo Nitrato al mismo Proveedor, 5L+10L): vista previa consolida en 1 sola línea de 15L, se generan 2 filas en BD que comparten folio, PDF las suma en 15L.
+- Por Proveedor: solo muestra lo genuinamente pendiente (lo cubierto desaparece, sin ruido de otros proveedores).
+- Tope excedido: 8+8=16L pedidos contra 10L reales disponibles → rechazado; ajustado a 6+4=10L → genera correcto, deja 2L y 4L pendientes.
 
-## Limpieza de datos de prueba
+**Nota dejada para Diego, no bloqueante:** en "En Camino", las líneas consolidadas se ven como tarjetas separadas (una por línea de origen), cada una con "Descargar PDF" dando el mismo documento combinado correcto — si prefiere que se vean agrupadas visualmente ahí también, es un ajuste aparte.
 
-Diego pidió borrar todos los registros de Compras y Fertirriego usados en pruebas. Antes de borrar se inspeccionó la base real: **22 órdenes de compra y 3 fertirriegos de prueba** (Huerta "El Sonrisal"), todos ligados entre sí, **cero movimientos de Almacén/stock de por medio** (ninguno llegó a recibirse ni a comprometer inventario real) — no había nada que revertir en Inventario, solo borrar las filas. Se hizo un respaldo local fuera del repositorio antes de borrar, y se verificó el conteo en 0 después de borrar. Cero riesgo de inventario.
+### Prioridad 2 — Nota estimada de tanque pendiente (Aplicaciones + Almacén)
+
+Exclusiva de Aplicaciones (no Fertirriego, no Granular). Nueva función `calcularTanquePendiente` en `shared` (junto a `calcularMezclaPorTanque` ya existente): a diferencia de esa función (que usa hectáreas totales programadas), esta usa hectáreas **ya reportadas** y redondea tanques hacia **arriba** (no se prepara "1.5 tanques" en la realidad). Puramente informativa — no toca el descuento real de Almacén.
+
+Se muestra en ambos lados con el mismo cálculo espejo: tarjeta de Aplicaciones (junto al % de avance) y Almacén Local (columna nueva "En tanque pendiente").
+
+**Probado:** reproducido el ejemplo exacto de Diego (tanque de 10 ha, 15 de 27 ha reportadas) contra el cálculo puro → 1.5 tanques necesarios, 2 preparados, **1000L pendientes** — coincide con su ejemplo. Probado también de punta a punta con una Aplicación real en El Sonrisal (creada, verificada, borrada): Aplicaciones y Almacén Local mostraron el mismo 1000L. Casos borde probados: número exacto de tanques → no muestra nada; cero avance → tampoco.
+
+### Prioridad 3 — Nota de monto acumulado en vivo (Nómina)
+
+**3.1, Captura del día:** notita gris en la esquina inferior derecha de cada tarjeta ("Estimado del día: $X"), se recalcula al vuelo con cada cambio, no editable, no afecta el guardado real.
+
+**3.2, Cierre del día Paso 2:** cada tarjeta de persona ahora trae su monto bruto, usando `tarifaAplicada` ya congelada al capturar (no hay que recalcular tarifa).
+
+Ambos usan el mismo criterio simple que ya usaba el "Total a Pagar" de Paso 1 (cantidad × tarifa, sin el caso especial de "Depende de Empacadores" — esquema que Paso 1 tampoco desglosa, y que ningún catálogo real usa todavía).
+
+**Probado contra datos reales:** el sábado 29-ago (21 registros reales ya capturados) — la suma por persona con el criterio nuevo de Paso 2 coincidió **exacto** con el Total a Pagar de Paso 1 ya existente: $4,649.78 en ambos lados. Confirmado que la tarifa general por hora sí está configurada en el sistema (37.5), así que la nota de Captura del día muestra montos reales desde ya.
 
 ## Estado técnico
 
-- Backend y web sin errores de TypeScript, build de producción limpio en ambos; `web/dist` reconstruido y backend reiniciado (sirve la versión nueva).
-- Sin migración de Prisma nueva esta sesión — todos los campos agregados (Solicitante, Huerta de origen, Tipo de aplicación, fecha efectiva, categoría, Destino resuelto) se calculan al vuelo sobre datos que ya existían, no se guardó nada nuevo en base de datos.
-- Verificado con un script de solo lectura contra la base real (sin credenciales de una cuenta de Diego, no fue posible probar clic a clic en pantalla desde este lado) que las tres funciones que alimentan la pantalla (`listarOrdenes`, `listarPendientesPorProgramacion`, `listarPendientesPorIngredienteActivo`) resuelven correctamente los campos nuevos sobre los datos reales existentes en ese momento — Diego confirmó después, viéndolo él mismo en pantalla, que se ve bien.
-- Ya subido a GitHub — commit `b4e7b62` sobre `f8dcfef`, rama `main`.
+- Backend, web y `shared` sin errores de TypeScript, build de producción limpio en los 3. `web/dist` reconstruido, `@cbf/shared` reconstruido, backend reiniciado dos veces (antes y después de un fix de agregación de tope encontrado durante las pruebas).
+- 1 migración de Prisma (`20260903141342_ordenes_compra_folio_compartido_y_disponible`): quita el `@unique` de `OrdenCompra.numero` (a propósito, ver Prioridad 1), agrega `cantidadDisponibleTotal`/`cantidadDisponible` a `ComparacionCotizacion` — ambos cambios aditivos, sin pérdida de datos.
+- Todo probado con scripts contra el backend real (sin credenciales de sesión de Diego — no fue posible probar clic a clic en pantalla), datos de prueba creados y borrados en cada caso, verificado con conteos antes/después.
+- Ya subido a GitHub — commit `e5b1c5c` sobre `2409495`, rama `main`.
