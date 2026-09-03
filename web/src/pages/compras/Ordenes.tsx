@@ -2,7 +2,9 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api, ApiError, getToken } from "../../lib/api";
 import { useProductos } from "../../lib/useProductos";
-import type { OrdenCompra, PendienteIngredienteActivo, Producto } from "../../lib/types";
+import { useCatalogoAbierto } from "../../lib/useCatalogoAbierto";
+import { useHuertas } from "../../lib/useHuertas";
+import type { EstadoLineaPendiente, GrupoPendienteProgramacion, OrdenCompra, PendienteIngredienteActivo, Producto } from "../../lib/types";
 import FechaInput from "../../components/FechaInput";
 import { formatearFecha, formatearInstante } from "../../lib/fecha";
 import { formatearDinero, formatearNumero } from "../../lib/numero";
@@ -25,6 +27,26 @@ function tagEstado(estado: string) {
   return "tag-warning";
 }
 
+const TIPO_PROGRAMACION_LABEL: Record<GrupoPendienteProgramacion["tipo"], string> = {
+  aplicacion: "Aplicación",
+  granular: "Fertilización Granular",
+  fertirriego: "Fertirriego",
+  manual: "Solicitud manual",
+  desconocido: "Programación",
+};
+
+const ETIQUETAS_LINEA_PENDIENTE: Record<EstadoLineaPendiente, string> = {
+  pendiente: "Pendiente",
+  cotizado: "Cotizado",
+  comprado_parcial: "Comprado parcial",
+};
+
+function tagLineaPendiente(estado: EstadoLineaPendiente) {
+  if (estado === "comprado_parcial") return "tag-success";
+  if (estado === "cotizado") return "tag-neutral";
+  return "tag-warning";
+}
+
 /**
  * Compras (9.14) — "Cotizar" ahora vive en el Comparador de Cotizaciones
  * (2-sep-2026): esta pantalla ya no captura proveedor/precio directo, solo
@@ -37,8 +59,10 @@ export default function Ordenes() {
   const { productos } = useProductos(true);
   const [ordenes, setOrdenes] = useState<OrdenCompra[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [vista, setVista] = useState<"orden" | "ingrediente">("orden");
+  const [vista, setVista] = useState<"orden" | "ingrediente" | "programacion">("programacion");
   const [pendientesPorIngrediente, setPendientesPorIngrediente] = useState<PendienteIngredienteActivo[]>([]);
+  const [pendientesPorProgramacion, setPendientesPorProgramacion] = useState<GrupoPendienteProgramacion[]>([]);
+  const [tarjetasAbiertas, setTarjetasAbiertas] = useState<Set<string>>(new Set());
   const [mostrarCerradas, setMostrarCerradas] = useState(false);
 
   // Pre-llenado de contexto desde una notificación (29-ago-2026): ?id=
@@ -50,6 +74,16 @@ export default function Ordenes() {
   const [mostrarForm, setMostrarForm] = useState(false);
   const [productoId, setProductoId] = useState("");
   const [cantidadSolicitada, setCantidadSolicitada] = useState("");
+
+  // Destino (4.1, 2-sep-2026) — obligatorio en solicitudes manuales: un
+  // Centro de Costo del catálogo abierto, o una Huerta específica.
+  const centrosCosto = useCatalogoAbierto("/compras/centros-costo");
+  const { huertas } = useHuertas();
+  const [destinoTipo, setDestinoTipo] = useState<"" | "centro_costo" | "huerta">("");
+  const [centroCostoId, setCentroCostoId] = useState("");
+  const [huertaDestinoId, setHuertaDestinoId] = useState("");
+  const [mostrarNuevoCentroCosto, setMostrarNuevoCentroCosto] = useState(false);
+  const [nuevoCentroCostoNombre, setNuevoCentroCostoNombre] = useState("");
 
   const [recibiendo, setRecibiendo] = useState<string | null>(null);
   const [cantidadRecibida, setCantidadRecibida] = useState("");
@@ -71,7 +105,19 @@ export default function Ordenes() {
     if (vista === "ingrediente") {
       api.get<PendienteIngredienteActivo[]>("/compras/ordenes/pendientes-por-ingrediente-activo").then(setPendientesPorIngrediente);
     }
+    if (vista === "programacion") {
+      api.get<GrupoPendienteProgramacion[]>("/compras/ordenes/pendientes-por-programacion").then(setPendientesPorProgramacion);
+    }
   }, [vista]);
+
+  function alternarTarjeta(clave: string) {
+    setTarjetasAbiertas((prev) => {
+      const siguiente = new Set(prev);
+      if (siguiente.has(clave)) siguiente.delete(clave);
+      else siguiente.add(clave);
+      return siguiente;
+    });
+  }
 
   useEffect(() => {
     if (idResaltado) refResaltada.current?.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -80,14 +126,38 @@ export default function Ordenes() {
   async function crearOrden(e: FormEvent) {
     e.preventDefault();
     setError(null);
+    if (!destinoTipo || (destinoTipo === "centro_costo" && !centroCostoId) || (destinoTipo === "huerta" && !huertaDestinoId)) {
+      setError("Elige un Destino para la solicitud.");
+      return;
+    }
     try {
-      await api.post("/compras/ordenes", { productoId, cantidadSolicitada: Number(cantidadSolicitada) });
+      await api.post("/compras/ordenes", {
+        productoId,
+        cantidadSolicitada: Number(cantidadSolicitada),
+        centroCostoId: destinoTipo === "centro_costo" ? centroCostoId : undefined,
+        huertaDestinoId: destinoTipo === "huerta" ? huertaDestinoId : undefined,
+      });
       setProductoId("");
       setCantidadSolicitada("");
+      setDestinoTipo("");
+      setCentroCostoId("");
+      setHuertaDestinoId("");
       setMostrarForm(false);
       cargar();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "No se pudo crear la solicitud.");
+    }
+  }
+
+  async function guardarNuevoCentroCosto() {
+    if (!nuevoCentroCostoNombre.trim()) return;
+    try {
+      const nuevo = await centrosCosto.agregar(nuevoCentroCostoNombre.trim());
+      setCentroCostoId((nuevo as { id: string }).id);
+      setNuevoCentroCostoNombre("");
+      setMostrarNuevoCentroCosto(false);
+    } catch {
+      setError("No se pudo agregar el Centro de Costo.");
     }
   }
 
@@ -165,11 +235,14 @@ export default function Ordenes() {
           {mostrarForm ? "Cancelar" : "+ Solicitar compra"}
         </button>
         <div style={{ display: "flex", gap: 4 }}>
-          <button className={vista === "orden" ? "btn-primary" : "btn-secondary"} onClick={() => setVista("orden")}>
-            Por orden
+          <button className={vista === "programacion" ? "btn-primary" : "btn-secondary"} onClick={() => setVista("programacion")}>
+            Por Programación
           </button>
           <button className={vista === "ingrediente" ? "btn-primary" : "btn-secondary"} onClick={() => setVista("ingrediente")}>
             Por Ingrediente Activo
+          </button>
+          <button className={vista === "orden" ? "btn-primary" : "btn-secondary"} onClick={() => setVista("orden")}>
+            Por orden
           </button>
         </div>
         {vista === "orden" && (
@@ -181,7 +254,7 @@ export default function Ordenes() {
       </div>
 
       {mostrarForm && (
-        <form onSubmit={crearOrden} className="card" style={{ display: "flex", gap: 10, alignItems: "flex-end", marginBottom: 18 }}>
+        <form onSubmit={crearOrden} className="card" style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap", marginBottom: 18 }}>
           <label className="field">
             Producto (autorizado)
             <select value={productoId} onChange={(e) => setProductoId(e.target.value)} required>
@@ -197,6 +270,71 @@ export default function Ordenes() {
             Cantidad
             <input type="number" step="0.001" value={cantidadSolicitada} onChange={(e) => setCantidadSolicitada(e.target.value)} required />
           </label>
+          <label className="field">
+            Destino
+            <select
+              value={destinoTipo}
+              onChange={(e) => {
+                setDestinoTipo(e.target.value as "" | "centro_costo" | "huerta");
+                setCentroCostoId("");
+                setHuertaDestinoId("");
+              }}
+              required
+            >
+              <option value="">Selecciona…</option>
+              <option value="centro_costo">Centro de Costo</option>
+              <option value="huerta">Huerta</option>
+            </select>
+          </label>
+          {destinoTipo === "centro_costo" && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <label className="field">
+                Centro de Costo
+                <select value={centroCostoId} onChange={(e) => setCentroCostoId(e.target.value)} required>
+                  <option value="">Selecciona…</option>
+                  {centrosCosto.items.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.nombre}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {!mostrarNuevoCentroCosto ? (
+                <button type="button" className="btn-secondary" style={{ fontSize: 11, padding: "4px 8px" }} onClick={() => setMostrarNuevoCentroCosto(true)}>
+                  + Nuevo Centro de Costo
+                </button>
+              ) : (
+                <div style={{ display: "flex", gap: 6 }}>
+                  <input
+                    style={{ width: 140 }}
+                    value={nuevoCentroCostoNombre}
+                    onChange={(e) => setNuevoCentroCostoNombre(e.target.value)}
+                    placeholder="Nombre…"
+                    autoFocus
+                  />
+                  <button type="button" className="btn-secondary" style={{ fontSize: 11, padding: "4px 8px" }} onClick={guardarNuevoCentroCosto}>
+                    Guardar
+                  </button>
+                  <button type="button" className="btn-secondary" style={{ fontSize: 11, padding: "4px 8px" }} onClick={() => setMostrarNuevoCentroCosto(false)}>
+                    Cancelar
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+          {destinoTipo === "huerta" && (
+            <label className="field">
+              Huerta
+              <select value={huertaDestinoId} onChange={(e) => setHuertaDestinoId(e.target.value)} required>
+                <option value="">Selecciona…</option>
+                {huertas.map((h) => (
+                  <option key={h.id} value={h.id}>
+                    {h.nombre}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <button className="btn-primary" type="submit">
             Enviar solicitud
           </button>
@@ -205,7 +343,58 @@ export default function Ordenes() {
 
       {error && <div className="tag tag-danger" style={{ display: "block", padding: "8px 12px", marginBottom: 12 }}>{error}</div>}
 
-      {vista === "ingrediente" ? (
+      {vista === "programacion" ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <p style={{ fontSize: 12.5, color: "var(--ink-soft)" }}>
+            Una tarjeta = una Aplicación/Fertirriego/Fertilización Granular completa con todos sus productos, o una solicitud manual —
+            para cotizar/comprar todo lo que necesita un mismo evento de una sola vez. Coexiste con las otras dos vistas.
+          </p>
+          {pendientesPorProgramacion.map((g) => {
+            const abierta = tarjetasAbiertas.has(g.clave);
+            return (
+              <div key={g.clave} className="card">
+                <div
+                  style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8, cursor: "pointer" }}
+                  onClick={() => alternarTarjeta(g.clave)}
+                >
+                  <div style={{ fontSize: 14, fontWeight: 700 }}>
+                    {TIPO_PROGRAMACION_LABEL[g.tipo]}
+                    {g.huertaNombre && ` — ${g.huertaNombre}`}
+                    {g.fechaInicio && g.fechaFin && (
+                      <span style={{ fontWeight: 400, color: "var(--ink-soft)" }}>
+                        {" "}
+                        ({formatearFecha(g.fechaInicio)} – {formatearFecha(g.fechaFin)})
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: 13, fontWeight: 700 }}>
+                    {g.lineas.length} producto{g.lineas.length !== 1 ? "s" : ""} pendiente{g.lineas.length !== 1 ? "s" : ""} {abierta ? "▲" : "▼"}
+                  </div>
+                </div>
+                {abierta && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 8, borderTop: "1px solid var(--border)", paddingTop: 8 }}>
+                    {g.lineas.map((l) => (
+                      <div key={l.ordenId} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12.5, gap: 8 }}>
+                        <span>
+                          {l.nombreComercial}
+                          {l.ingredienteActivo && ` (${l.ingredienteActivo})`} — {formatearNumero(l.cantidadPendiente)} {l.unidad}{" "}
+                          <span className={`tag ${tagLineaPendiente(l.estado)}`}>{ETIQUETAS_LINEA_PENDIENTE[l.estado]}</span>
+                        </span>
+                        {l.estadoOrden === "pendiente_cotizar" && (
+                          <button className="btn-secondary" onClick={() => irACotizar(l.ordenId)}>
+                            Cotizar
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          {pendientesPorProgramacion.length === 0 && <p style={{ color: "var(--ink-soft)" }}>Sin nada pendiente por Programación.</p>}
+        </div>
+      ) : vista === "ingrediente" ? (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           <p style={{ fontSize: 12.5, color: "var(--ink-soft)" }}>
             Suma la cantidad pendiente de cada Ingrediente Activo entre todas las órdenes pendientes, sin importar de dónde vinieron —
@@ -219,6 +408,18 @@ export default function Ordenes() {
                   {formatearNumero(g.cantidadPendiente)} {g.unidad} pendientes entre {g.ordenes.length} orden{g.ordenes.length !== 1 ? "es" : ""}
                 </div>
               </div>
+              {g.origenes.length > 0 && (
+                <div style={{ fontSize: 12, color: "var(--ink-soft)", marginTop: 4 }}>
+                  {g.origenes
+                    .map((o) => {
+                      const cantidadTexto = `${formatearNumero(o.cantidad)} ${g.unidad}`;
+                      if (o.esManual) return `${cantidadTexto} (Solicitud manual)`;
+                      const partes = [o.huertaNombre, o.recetaNombre ? `Receta ${o.recetaNombre}` : null].filter(Boolean);
+                      return `${cantidadTexto} (${partes.join(" — ")})`;
+                    })
+                    .join(", ")}
+                </div>
+              )}
               <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 8 }}>
                 {g.ordenes.map((o) => (
                   <div key={o.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12.5 }}>
@@ -254,6 +455,9 @@ export default function Ordenes() {
                   <div style={{ fontSize: 13, fontWeight: 600, marginTop: 6 }}>
                     {o.producto.nombreComercial} — {o.cantidadSolicitada} {o.producto.unidad}
                   </div>
+                  {(o.centroCosto || o.huertaDestino) && (
+                    <div style={{ fontSize: 12, color: "var(--ink-soft)" }}>Destino: {o.centroCosto?.nombre ?? o.huertaDestino?.nombre}</div>
+                  )}
                   {o.proveedor && (
                     <div style={{ fontSize: 12, color: "var(--ink-soft)" }}>
                       {o.proveedor.nombre} · {formatearDinero(o.precioUnitario ?? 0)}/{o.producto.unidad}

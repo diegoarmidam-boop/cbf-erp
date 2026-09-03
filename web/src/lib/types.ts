@@ -487,15 +487,60 @@ export interface OrdenCompra {
   // null en la orden "necesidad" original (pendiente_autorizar/pendiente_cotizar/cubierta).
   numero: number | null;
   comparacionCotizacionId: string | null;
+  // Destino (4.1, 2-sep-2026) — obligatorio solo en solicitudes manuales,
+  // exactamente uno de los dos. Null en órdenes automáticas y en manuales
+  // creadas antes de este cambio.
+  centroCostoId: string | null;
+  centroCosto: CatalogoAbiertoItem | null;
+  huertaDestinoId: string | null;
+  huertaDestino: { id: string; nombre: string } | null;
 }
 
 // Compras agrupadas por Ingrediente Activo (2.1, 2-sep-2026) — coexiste
 // con la vista por orden individual, no la reemplaza.
+// Desglose por origen (2.4, 2-sep-2026) — cuánto de cada Ingrediente Activo
+// viene de cada combinación Huerta+Receta. Solicitudes manuales no tienen
+// ninguno de los dos (esManual: true).
+export interface OrigenPendienteIngredienteActivo {
+  huertaNombre: string | null;
+  recetaNombre: string | null;
+  esManual: boolean;
+  cantidad: number;
+}
+
 export interface PendienteIngredienteActivo {
   ingredienteActivo: string;
   unidad: string;
   cantidadPendiente: number;
   ordenes: { id: string; estado: EstadoOrdenCompra; cantidadPendiente: number }[];
+  origenes: OrigenPendienteIngredienteActivo[];
+}
+
+// Pendientes de cotizar agrupadas por PROGRAMACIÓN de origen (2.1, 2-sep-2026,
+// Bloque 2) — una tarjeta = una Aplicación/Fertirriego/Granular completa con
+// todos sus productos, o una solicitud manual. Coexiste con las otras dos vistas.
+export type EstadoLineaPendiente = "pendiente" | "cotizado" | "comprado_parcial";
+
+export interface LineaPendienteProgramacion {
+  ordenId: string;
+  productoId: string;
+  nombreComercial: string;
+  ingredienteActivo: string | null;
+  unidad: string;
+  cantidadSolicitada: number;
+  cantidadPendiente: number;
+  estado: EstadoLineaPendiente;
+  estadoOrden: EstadoOrdenCompra;
+}
+
+export interface GrupoPendienteProgramacion {
+  clave: string;
+  tipo: "aplicacion" | "granular" | "fertirriego" | "manual" | "desconocido";
+  referenciaId: string | null;
+  huertaNombre: string | null;
+  fechaInicio: string | null;
+  fechaFin: string | null;
+  lineas: LineaPendienteProgramacion[];
 }
 
 export interface OrdenCxP {

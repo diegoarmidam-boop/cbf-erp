@@ -114,10 +114,22 @@ export async function programarFertirriego(input: ProgramarFertirriegoInput, cre
   }
 
   const fechaRef = new Date(input.fechaInicio);
+  const fechaFinRef = new Date(input.fechaFin);
   const hectareasTotales = await hectareasDeSecciones(input.seccionIds, fechaRef);
   if (hectareasTotales === 0) {
     throw new Error("Las Secciones de Riego elegidas no tienen Cuadros con una configuración vigente para la fecha de inicio.");
   }
+  // Corrección de fondo (2-sep-2026): "Confirmar entrega" es un evento
+  // ÚNICO por fertirriego (no hay "registrar entrega" por cada riego) — la
+  // entrega a la Huerta tiene que cubrir TODA la campaña de una vez, o los
+  // riegos posteriores al primero se quedan sin nada que descontar de
+  // Almacén Local. Por eso lo que se compromete/pide a Almacén al programar
+  // (y lo que se entrega después) es el total de TODA la campaña
+  // (dosis × hectáreas × número de ocasiones), no una sola ocasión — el
+  // "por ocasión" (`cantidadTotalCalculada`) se sigue guardando tal cual,
+  // solo cambia para qué se usa: guía de cuánto va en el tanque cada
+  // riego (Riego 9.6, Orden de Fertirriego), ya no para comprometer stock.
+  const riegosCampania = calcularRiegosEnCampania({ frecuencia: input.frecuencia, fechaInicio: fechaRef, fechaFin: fechaFinRef });
 
   return prisma.$transaction(async (tx) => {
     const fertirriego = await tx.fertirriegoProgramacion.create({
@@ -126,7 +138,7 @@ export async function programarFertirriego(input: ProgramarFertirriegoInput, cre
         recetaId: input.recetaId,
         frecuencia: input.frecuencia,
         fechaInicio: fechaRef,
-        fechaFin: new Date(input.fechaFin),
+        fechaFin: fechaFinRef,
         creadoPorId,
       },
     });
@@ -136,6 +148,7 @@ export async function programarFertirriego(input: ProgramarFertirriegoInput, cre
 
     for (const p of input.productos) {
       const cantidadTotalCalculada = calcularCantidadTotalFertirriego(p.dosisValor, p.dosisUnidad, hectareasTotales);
+      const cantidadCampania = cantidadTotalCalculada * riegosCampania;
       await tx.fertirriegoProgramacionProducto.create({
         data: {
           fertirriegoId: fertirriego.id,
@@ -146,10 +159,10 @@ export async function programarFertirriego(input: ProgramarFertirriegoInput, cre
         },
       });
 
-      const comprometido = await intentarComprometer(tx, p.productoId, cantidadTotalCalculada, fertirriego.id, creadoPorId);
+      const comprometido = await intentarComprometer(tx, p.productoId, cantidadCampania, fertirriego.id, creadoPorId);
       if (!comprometido) {
         const disponible = await stockTotalProductoTx(tx, p.productoId);
-        const faltante = cantidadTotalCalculada - disponible;
+        const faltante = cantidadCampania - disponible;
         await tx.ordenCompra.create({
           data: {
             origen: "automatica",
@@ -209,12 +222,19 @@ export async function editarFertirriegoProgramada(id: string, input: Omit<Progra
   }
 
   const fechaRef = new Date(input.fechaInicio);
+  const fechaFinRef = new Date(input.fechaFin);
   const hectareasTotales = await hectareasDeSecciones(input.seccionIds, fechaRef);
   if (hectareasTotales === 0) {
     throw new Error("Las Secciones de Riego elegidas no tienen Cuadros con una configuración vigente para la fecha de inicio.");
   }
 
   const entregada = fertirriego.estado === "entregada";
+  // Igual que en programarFertirriego (2-sep-2026): lo que se ajusta en
+  // Almacén es el total de CAMPAÑA, no una ocasión — necesita el número de
+  // riegos ANTES del cambio (por si frecuencia/fechas también cambiaron) y
+  // el de DESPUÉS, para comparar campaña completa contra campaña completa.
+  const riegosCampaniaAnterior = calcularRiegosEnCampania(fertirriego);
+  const riegosCampaniaNueva = calcularRiegosEnCampania({ frecuencia: input.frecuencia, fechaInicio: fechaRef, fechaFin: fechaFinRef });
 
   return prisma.$transaction(async (tx) => {
     const productosAnteriores = new Map(fertirriego.productos.map((p) => [p.productoId, p]));
@@ -222,16 +242,18 @@ export async function editarFertirriegoProgramada(id: string, input: Omit<Progra
 
     for (const anterior of fertirriego.productos) {
       if (productoIdsNuevos.has(anterior.productoId)) continue;
-      await ajustarCantidadProducto(tx, fertirriego.huertaId, id, anterior.productoId, Number(anterior.cantidadTotalCalculada), 0, entregada, editadoPorId);
+      const cantidadCampaniaAnterior = Number(anterior.cantidadTotalCalculada) * riegosCampaniaAnterior;
+      await ajustarCantidadProducto(tx, fertirriego.huertaId, id, anterior.productoId, cantidadCampaniaAnterior, 0, entregada, editadoPorId);
       await tx.fertirriegoProgramacionProducto.delete({ where: { id: anterior.id } });
     }
 
     for (const p of input.productos) {
       const cantidadNueva = calcularCantidadTotalFertirriego(p.dosisValor, p.dosisUnidad, hectareasTotales);
+      const cantidadCampaniaNueva = cantidadNueva * riegosCampaniaNueva;
       const anterior = productosAnteriores.get(p.productoId);
-      const cantidadAnterior = anterior ? Number(anterior.cantidadTotalCalculada) : 0;
+      const cantidadCampaniaAnterior = anterior ? Number(anterior.cantidadTotalCalculada) * riegosCampaniaAnterior : 0;
 
-      await ajustarCantidadProducto(tx, fertirriego.huertaId, id, p.productoId, cantidadAnterior, cantidadNueva, entregada, editadoPorId);
+      await ajustarCantidadProducto(tx, fertirriego.huertaId, id, p.productoId, cantidadCampaniaAnterior, cantidadCampaniaNueva, entregada, editadoPorId);
 
       if (anterior) {
         await tx.fertirriegoProgramacionProducto.update({
@@ -254,7 +276,7 @@ export async function editarFertirriegoProgramada(id: string, input: Omit<Progra
         recetaId: input.recetaId ?? null,
         frecuencia: input.frecuencia,
         fechaInicio: fechaRef,
-        fechaFin: new Date(input.fechaFin),
+        fechaFin: fechaFinRef,
       },
     });
   });
@@ -293,15 +315,12 @@ async function fertirriegoTieneAvanceRegistrado(seccionIds: string[], fechaInici
 }
 
 /**
- * Total de campaña completa (1.6, 31-ago-2026): además del total por cada
- * ocasión (`cantidadTotalCalculada`), cuánto se necesita en total sumando
- * TODAS las ocasiones del rango fechaInicio-fechaFin según la Frecuencia —
- * para poder comprar todo el volumen de golpe. Solo informativo: no cambia
- * cuánto se compromete/pide a Almacén al programar (eso sigue siendo una
- * ocasión, igual que antes) — cambiar ese comportamiento es una decisión
- * aparte que no pedía este punto.
+ * Cuántos riegos caen en toda la campaña (1.6, 31-ago-2026; 2-sep-2026:
+ * dejó de ser solo informativo — ver comentario en `programarFertirriego`,
+ * es la base real de cuánto se compromete/pide a Almacén y cuánto se
+ * entrega, no solo lo que se muestra en pantalla).
  */
-function calcularRiegosEnCampania(fertirriego: Pick<FertirriegoBase, "frecuencia" | "fechaInicio" | "fechaFin">): number {
+export function calcularRiegosEnCampania(fertirriego: Pick<FertirriegoBase, "frecuencia" | "fechaInicio" | "fechaFin">): number {
   const diasCampania = Math.round((fertirriego.fechaFin.getTime() - fertirriego.fechaInicio.getTime()) / 86_400_000) + 1;
   return riegosEnVentana(fertirriego.frecuencia, diasCampania);
 }
@@ -371,10 +390,18 @@ export async function obtenerFertirriego(id: string) {
   return enriquecerConAlertas(fertirriego);
 }
 
-/** Confirma la entrega física a la Huerta de TODOS los productos — acción de Almacén (Bodega). A partir de aquí, la ejecución diaria vive en Riego (9.6). */
+/**
+ * Confirma la entrega física a la Huerta de TODOS los productos — acción de
+ * Almacén (Bodega). A partir de aquí, la ejecución diaria vive en Riego
+ * (9.6). Entrega el total de CAMPAÑA completa (2-sep-2026) — es un evento
+ * único (no hay "entregar" por cada riego), así que tiene que cubrir toda
+ * la campaña de una vez o los riegos después del primero se quedan sin
+ * nada que descontar en Almacén Local.
+ */
 export async function confirmarEntregaFertirriego(id: string, capturadoPorId: string) {
   const fertirriego = await prisma.fertirriegoProgramacion.findUniqueOrThrow({ where: { id }, include: { productos: true } });
   if (fertirriego.estado !== "programada") throw new TransicionFertilizacionInvalidaError("programada");
+  const riegosCampania = calcularRiegosEnCampania(fertirriego);
 
   return prisma.$transaction(async (tx) => {
     const comprometidos = await tx.almacenCentralMovimiento.findMany({ where: { referenciaId: id, tipo: "salida_comprometida" } });
@@ -382,16 +409,23 @@ export async function confirmarEntregaFertirriego(id: string, capturadoPorId: st
     if (faltaAlguno) throw new StockNoComprometidoError();
 
     for (const p of fertirriego.productos) {
-      await confirmarEntregaComprometida(tx, p.productoId, fertirriego.huertaId, Number(p.cantidadTotalCalculada), id, capturadoPorId);
+      const cantidadCampania = Number(p.cantidadTotalCalculada) * riegosCampania;
+      await confirmarEntregaComprometida(tx, p.productoId, fertirriego.huertaId, cantidadCampania, id, capturadoPorId);
     }
     return tx.fertirriegoProgramacion.update({ where: { id }, data: { estado: "entregada" } });
   });
 }
 
-/** Cierra una programación que nunca se entregó (vencida a 15 días, o cancelación manual). Libera el stock comprometido de cada producto que sí llegó a apartarse. */
+/**
+ * Cierra una programación que nunca se entregó (vencida a 15 días, o
+ * cancelación manual). Libera el stock comprometido de cada producto que sí
+ * llegó a apartarse — el total de CAMPAÑA completa (2-sep-2026), porque eso
+ * es lo que de verdad se comprometió al programar (ver programarFertirriego).
+ */
 export async function liberarFertirriegoVencido(id: string, capturadoPorId: string) {
   const fertirriego = await prisma.fertirriegoProgramacion.findUniqueOrThrow({ where: { id }, include: { productos: true } });
   if (fertirriego.estado !== "programada") throw new TransicionFertilizacionInvalidaError("programada");
+  const riegosCampania = calcularRiegosEnCampania(fertirriego);
 
   return prisma.$transaction(async (tx) => {
     for (const p of fertirriego.productos) {
@@ -402,7 +436,7 @@ export async function liberarFertirriegoVencido(id: string, capturadoPorId: stri
         await liberarComprometido(
           tx,
           p.productoId,
-          Number(p.cantidadTotalCalculada),
+          Number(p.cantidadTotalCalculada) * riegosCampania,
           id,
           capturadoPorId,
           "Liberación de fertirriego vencido (15 días sin entregar) o cancelado manualmente."

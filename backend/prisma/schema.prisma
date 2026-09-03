@@ -158,6 +158,7 @@ model Huerta {
   equipoUsoDiario         EquipoUsoDiario[]
   analisisLaboratorio     AnalisisLaboratorio[]
   ciclos                  Ciclo[]
+  ordenesCompraDestino    OrdenCompra[]             @relation("OrdenCompraHuertaDestino")
 }
 
 enum EstatusCuadro {
@@ -1097,7 +1098,32 @@ model OrdenCompra {
 
   recepciones OrdenCompraRecepcion[]
 
+  // Destino (4.1, 2-sep-2026): obligatorio solo en solicitudes manuales
+  // (`origen: manual`) — automáticas ya tienen destino implícito, la Huerta
+  // de la programación que las generó. Exactamente uno de los dos: un
+  // Centro de Costo del catálogo abierto, o una Huerta específica (para
+  // prorrateo por costo directo). Null en órdenes automáticas y en
+  // manuales creadas antes de este cambio.
+  centroCostoId   String?
+  centroCosto     CentroCosto? @relation(fields: [centroCostoId], references: [id])
+  huertaDestinoId String?
+  huertaDestino   Huerta?      @relation("OrdenCompraHuertaDestino", fields: [huertaDestinoId], references: [id])
+
   @@index([estado])
+}
+
+// Catálogo abierto de Centros de Costo (4.1, 2-sep-2026, Bloque 3 del
+// documento) — mismo patrón "+" que Categoría/Ingrediente Activo/Contenedor
+// de Producto (ver almacen/catalogos.ts), aquí propio de Compras. Semilla
+// inicial: Desarrollo, Cosecha, Empaque, Oficina/Administración, Bodega de
+// Agroquímicos, Equipos y Maquinaria, Embarques, Indirectos/Prorrateables,
+// Laboratorio (agregado 2-sep-2026, no estaba en la lista original de Diego).
+model CentroCosto {
+  id     String  @id @default(uuid())
+  nombre String  @unique
+  activo Boolean @default(true)
+
+  ordenesDestino OrdenCompra[]
 }
 
 model OrdenCompraRecepcion {

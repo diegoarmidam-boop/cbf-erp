@@ -7,8 +7,10 @@ import { opcionesRecepcionDeProducto } from "../almacen/preferencias.js";
 import {
   autorizarOrden,
   crearOrdenManual,
+  DestinoManualInvalidoError,
   listarOrdenes,
   listarPendientesPorIngredienteActivo,
+  listarPendientesPorProgramacion,
   marcarOrdenPagada,
   ProductoNoAutorizadoError,
   recibirOrden,
@@ -25,12 +27,21 @@ ordenesRouter.get("/pendientes-por-ingrediente-activo", requirePermission("compr
   res.json(await listarPendientesPorIngredienteActivo());
 });
 
+ordenesRouter.get("/pendientes-por-programacion", requirePermission("compras", "ver"), async (_req, res) => {
+  res.json(await listarPendientesPorProgramacion());
+});
+
 ordenesRouter.get("/", requirePermission("compras", "ver"), async (req, res) => {
   const estado = typeof req.query.estado === "string" ? req.query.estado : undefined;
   res.json(await listarOrdenes(estado, req.query.incluirCerradas === "true"));
 });
 
-const crearSchema = z.object({ productoId: z.string().min(1), cantidadSolicitada: z.number().positive() });
+const crearSchema = z.object({
+  productoId: z.string().min(1),
+  cantidadSolicitada: z.number().positive(),
+  centroCostoId: z.string().min(1).optional(),
+  huertaDestinoId: z.string().min(1).optional(),
+});
 
 ordenesRouter.post("/", requirePermission("compras", "capturar"), async (req, res) => {
   const parsed = crearSchema.safeParse(req.body);
@@ -39,10 +50,13 @@ ordenesRouter.post("/", requirePermission("compras", "capturar"), async (req, re
     return;
   }
   try {
-    const orden = await crearOrdenManual(parsed.data.productoId, parsed.data.cantidadSolicitada, req.usuario!.usuarioId);
+    const orden = await crearOrdenManual(parsed.data.productoId, parsed.data.cantidadSolicitada, req.usuario!.usuarioId, {
+      centroCostoId: parsed.data.centroCostoId,
+      huertaDestinoId: parsed.data.huertaDestinoId,
+    });
     res.status(201).json(orden);
   } catch (err) {
-    if (err instanceof ProductoNoAutorizadoError) {
+    if (err instanceof ProductoNoAutorizadoError || err instanceof DestinoManualInvalidoError) {
       res.status(409).json({ error: err.message });
       return;
     }
