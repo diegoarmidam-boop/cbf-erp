@@ -185,6 +185,7 @@ export interface RegistroNomina extends FilaCaptura {
   personal?: Personal | null;
   cuadro?: Cuadro | null;
   origen: OrigenRegistroNomina;
+  tarifaAplicada: string;
 }
 
 export interface CapturaDelDiaResponse {
@@ -397,6 +398,10 @@ export interface AlmacenLocalEntrada {
   producto: Producto;
   cantidadRecibidaAcumulada: string;
   cantidadReportadaAcumulada: string;
+  // Nota de tanque pendiente (Prioridad 2, 3-sep-2026) — suma entre todas
+  // las Aplicaciones activas de esta Huerta que usan este producto; null si
+  // no aplica (sin Aplicación activa con tanque capturado para este producto).
+  notaTanquePendiente: number | null;
 }
 
 export interface CandadoAlmacenLocal {
@@ -618,6 +623,8 @@ export interface CotizacionCalculada {
   tipoCambio: number | null;
   precioValorMXN: number;
   presentacionCantidad: number;
+  cantidadDisponibleTotal: boolean;
+  cantidadDisponible: number | null;
   precioUnitarioMXN: number;
   unidadesAPedir: number;
   cantidadComprada: number;
@@ -657,6 +664,59 @@ export interface ComparacionCalculada {
   ordenesGeneradas: OrdenGeneradaSalida[];
   cantidadComprada: number;
   cantidadPendiente: number;
+}
+
+// Pestaña "Órdenes de Compra" (3-sep-2026, Prioridad 1) — único lugar donde
+// de verdad se arma y genera una orden real, a partir de necesidades YA
+// cotizadas en el Comparador. "Por Orden" aquí = una programación completa
+// (o una solicitud manual), no una OrdenCompra individual — ver decisión de
+// Diego (3-sep-2026): "una orden son varios productos".
+export interface LineaOrigenCotizacion {
+  cotizacionId: string;
+  proveedorId: string;
+  proveedorNombre: string;
+  nombreComercial: string;
+  precioUnitarioMXN: number;
+  cantidadDisponibleTotal: boolean;
+  cantidadDisponible: number | null;
+  cantidadYaUsada: number;
+  esPreferido: boolean;
+  esSustituto: boolean;
+}
+
+export interface LineaOrigenNecesidad {
+  ordenCompraId: string;
+  comparacionId: string;
+  productoId: string;
+  nombreComercial: string;
+  ingredienteActivo: string | null;
+  unidad: string;
+  cantidadPendiente: number;
+  origenLabel: string;
+  fecha: string | null;
+  cotizaciones: LineaOrigenCotizacion[];
+}
+
+export interface VistaPreviaProveedorLinea {
+  productoId: string;
+  nombreComercial: string;
+  unidad: string;
+  cantidad: number;
+  precioUnitarioMXN: number;
+  importe: number;
+}
+
+export interface VistaPreviaProveedor {
+  proveedorId: string;
+  proveedorNombre: string;
+  lineas: VistaPreviaProveedorLinea[];
+  total: number;
+}
+
+export interface AsignacionInput {
+  cotizacionId: string;
+  ordenCompraId: string;
+  cantidad: number;
 }
 
 export type TipoEquipo = "tractor" | "camioneta" | "remolque" | "implemento";
@@ -883,6 +943,16 @@ export interface MezclaTanqueProducto {
   tanqueParcial: TanqueParcial | null;
 }
 
+// Nota estimada de tanque pendiente (Prioridad 2, 3-sep-2026) — solo
+// informativa, exclusiva de Aplicaciones. Ver shared/aplicaciones/calculo.ts.
+export interface TanquePendienteProducto {
+  productoId: string;
+  tanquesNecesarios: number;
+  tanquesPreparados: number;
+  fraccionPendiente: number;
+  cantidadProductoPendiente: number;
+}
+
 export interface Aplicacion {
   id: string;
   huertaId: string;
@@ -915,6 +985,7 @@ export interface Aplicacion {
   porcentajeAvance?: number;
   restantesPorCuadro?: Record<string, number>;
   mezclaPorTanque?: MezclaTanqueProducto[] | null;
+  notaTanquePendiente?: TanquePendienteProducto[] | null;
 }
 
 export type ModoDosisGranular = "kg_ha" | "g_planta";

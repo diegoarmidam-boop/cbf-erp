@@ -102,6 +102,51 @@ function validarLineasForm(lineas: LineaForm[]): string | null {
   return null;
 }
 
+// Formato práctico, mismo criterio que MezclaPorTanque.tsx (mL/g redondean
+// a entero, L/kg admiten 2 decimales) — se duplica aquí en vez de importar
+// @cbf/shared completo al bundle del navegador (mismo criterio ya usado).
+function formatearCantidadTanque(unidadConcentracion: ConcentracionUnidad, cantidadBase: number): string {
+  const esVolumen = unidadConcentracion === "ml_l";
+  const unidadGrande = esVolumen ? "L" : "kg";
+  const unidadChica = esVolumen ? "mL" : "g";
+  if (cantidadBase < 1 && cantidadBase > 0) {
+    return `${formatearNumero(Math.round(cantidadBase * 1000))} ${unidadChica}`;
+  }
+  return `${formatearNumero(cantidadBase, 2)} ${unidadGrande}`;
+}
+
+/**
+ * Nota estimada de tanque pendiente (Prioridad 2, 3-sep-2026) — SOLO
+ * informativa, no toca el descuento real de Almacén (por hectárea
+ * reportada, "límite honesto" ya documentado). Mismo cálculo espejo en
+ * Almacén Local, ver AlmacenLocalPage.tsx.
+ */
+function NotaTanquePendiente({
+  nota,
+  productos,
+}: {
+  nota: NonNullable<Aplicacion["notaTanquePendiente"]>;
+  productos: { productoId: string; nombreComercial: string; concentracionUnidad: ConcentracionUnidad }[];
+}) {
+  const { tanquesNecesarios, tanquesPreparados } = nota[0]!;
+  const tanquesCompletosUsados = Math.floor(tanquesNecesarios + 1e-9);
+  const pctUsadoUltimoTanque = tanquesPreparados > tanquesCompletosUsados ? Math.round((tanquesNecesarios - tanquesCompletosUsados) * 100) : 0;
+
+  return (
+    <div style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: 4 }}>
+      Estimado: {tanquesCompletosUsados} tanque{tanquesCompletosUsados === 1 ? "" : "s"} completo{tanquesCompletosUsados === 1 ? "" : "s"} ya usado
+      {tanquesCompletosUsados === 1 ? "" : "s"}
+      {tanquesPreparados > tanquesCompletosUsados && `, más el siguiente al ${pctUsadoUltimoTanque}%`} — sin aplicar todavía:{" "}
+      {nota
+        .map((n) => {
+          const p = productos.find((x) => x.productoId === n.productoId);
+          return `${formatearCantidadTanque(p?.concentracionUnidad ?? "ml_l", n.cantidadProductoPendiente)} de ${p?.nombreComercial ?? n.productoId}`;
+        })
+        .join(" + ")}
+    </div>
+  );
+}
+
 export default function Aplicaciones() {
   const { usuario } = useAuth();
   const { huertas } = useHuertas();
@@ -779,6 +824,12 @@ export default function Aplicaciones() {
                       {(a.porcentajeAvance ?? 0).toFixed(1)}% avance · {formatearNumero(a.horasHombreTotales ?? 0)} horas-hombre totales · {a.realizadas.length}{" "}
                       reporte{a.realizadas.length === 1 ? "" : "s"}
                     </div>
+                  )}
+                  {a.notaTanquePendiente && a.notaTanquePendiente.length > 0 && (
+                    <NotaTanquePendiente
+                      nota={a.notaTanquePendiente}
+                      productos={a.productos.map((p) => ({ productoId: p.productoId, nombreComercial: p.producto.nombreComercial, concentracionUnidad: p.concentracionUnidad }))}
+                    />
                   )}
                   {a.estado === "cancelada" && (
                     <div style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: 4 }}>

@@ -1,4 +1,4 @@
-import { calcularCantidadTotal, calcularMezclaPorTanque, ordenarPorNombreNumerico, tarifaEfectiva, type ConcentracionUnidad } from "@cbf/shared";
+import { calcularCantidadTotal, calcularMezclaPorTanque, calcularTanquePendiente, ordenarPorNombreNumerico, tarifaEfectiva, type ConcentracionUnidad } from "@cbf/shared";
 import type { Prisma, Rol } from "@prisma/client";
 import { prisma } from "../../core/db.js";
 import type { TransactionClient } from "../../core/db.js";
@@ -418,6 +418,59 @@ function calcularMezclaPorTanqueDeAplicacion(aplicacion: AplicacionConRealizadas
   }));
 }
 
+/**
+ * Nota estimada de tanque pendiente (Prioridad 2, 3-sep-2026) — mismo
+ * cálculo que se muestra espejo en Almacén Local (ver almacen-local.ts,
+ * `notaTanquePendienteDeAplicaciones`). Null si no hay capacidad de tanque
+ * capturada, o si no hay nada pendiente (ver `calcularTanquePendiente`).
+ */
+type AplicacionParaNotaTanque = {
+  capacidadTanque: Prisma.Decimal | null;
+  litrosMezclaPorHa: Prisma.Decimal;
+  productos: { productoId: string; concentracionValor: Prisma.Decimal; concentracionUnidad: ConcentracionUnidad }[];
+};
+
+function calcularNotaTanquePendienteDeAplicacion(aplicacion: AplicacionParaNotaTanque, hectareasAvanzadas: number) {
+  if (aplicacion.capacidadTanque == null) return null;
+  const litrosMezclaPorHa = Number(aplicacion.litrosMezclaPorHa);
+  const capacidadTanque = Number(aplicacion.capacidadTanque);
+  const porProducto = aplicacion.productos
+    .map((p) => ({
+      productoId: p.productoId,
+      ...calcularTanquePendiente(Number(p.concentracionValor), p.concentracionUnidad, litrosMezclaPorHa, capacidadTanque, hectareasAvanzadas),
+    }))
+    .filter((p): p is { productoId: string } & NonNullable<ReturnType<typeof calcularTanquePendiente>> => p.tanquesNecesarios != null);
+  return porProducto.length > 0 ? porProducto : null;
+}
+
+/**
+ * Nota de tanque pendiente por Huerta+Producto (Prioridad 2, 3-sep-2026) —
+ * mismo cálculo que se muestra en la tarjeta de Aplicaciones
+ * (`calcularNotaTanquePendienteDeAplicacion`), aquí sumado entre TODAS las
+ * Aplicaciones activas de una Huerta que usan ese producto, para mostrarlo
+ * junto al total simple de Almacén Local (ver almacen-local.ts). "Activa"
+ * = mismo criterio que la lista por default de Aplicaciones (ni vencida ni
+ * cancelada) — una Aplicación ya 100% reportada no tiene nada pendiente en
+ * tanque de todas formas (fracciónPendiente sale 0, se filtra sola).
+ */
+export async function notaTanquePendientePorHuertaProducto(huertaId: string): Promise<Record<string, number>> {
+  const aplicaciones = await prisma.aplicacion.findMany({
+    where: { huertaId, estado: { notIn: ["vencida", "cancelada"] }, capacidadTanque: { not: null } },
+    include: { productos: true, realizadas: { include: { cuadros: true } } },
+  });
+
+  const totales: Record<string, number> = {};
+  for (const aplicacion of aplicaciones) {
+    const hectareasAvanzadas = aplicacion.realizadas.reduce((s, r) => s + r.cuadros.reduce((s2, c) => s2 + Number(c.hectareas), 0), 0);
+    const nota = calcularNotaTanquePendienteDeAplicacion(aplicacion, hectareasAvanzadas);
+    if (!nota) continue;
+    for (const p of nota) {
+      totales[p.productoId] = (totales[p.productoId] ?? 0) + p.cantidadProductoPendiente;
+    }
+  }
+  return totales;
+}
+
 /** Hectáreas restantes por Cuadro (9.7, 8-ago-2026): lo que falta de reportar de cada Cuadro programado, para mostrarlo visible en el siguiente reporte y no obligar al Supervisor a calcularlo de memoria. `excluirRealizadaId` se usa al editar un reporte existente. */
 async function hectareasRestantesPorCuadro(aplicacion: AplicacionConRealizadas, excluirRealizadaId?: string): Promise<Record<string, number>> {
   const restantes: Record<string, number> = {};
@@ -468,6 +521,7 @@ async function enriquecerConAlertas<T extends AplicacionConRealizadas>(aplicacio
     porcentajeAvance,
     restantesPorCuadro,
     mezclaPorTanque: calcularMezclaPorTanqueDeAplicacion(aplicacion),
+    notaTanquePendiente: calcularNotaTanquePendienteDeAplicacion(aplicacion, hectareasAvanzadas),
   };
 }
 

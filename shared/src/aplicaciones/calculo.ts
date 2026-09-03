@@ -91,6 +91,50 @@ export function calcularMezclaPorTanque(
   return { hectareasPorTanque, numeroTanques, tanquesCompletos, cantidadProductoPorTanqueCompleto, tanqueParcial };
 }
 
+export interface TanquePendiente {
+  tanquesNecesarios: number; // con decimales, ej. 1.5
+  tanquesPreparados: number; // redondeado hacia arriba, ej. 2 (no se prepara "1.5 tanques" en la realidad)
+  fraccionPendiente: number; // tanquesPreparados - tanquesNecesarios, ej. 0.5
+  cantidadProductoPendiente: number; // en la unidad base (L o kg), para ESTE producto
+}
+
+/**
+ * Nota estimada de tanque pendiente (Prioridad 2, 3-sep-2026, exclusiva de
+ * Aplicaciones 9.7 — Fertirriego no usa tanque para limitar hectáreas,
+ * Granular no usa tanque) — SOLO informativa, NO toca el descuento real de
+ * Almacén Local (que sigue siendo por hectárea reportada, "límite honesto"
+ * ya documentado en 9.15: no se puede saber si el producto llegó
+ * exactamente al tanque). Estima cuánto producto ya salió del Almacén
+ * Local hacia un tanque preparado pero todavía sin aplicarse.
+ *
+ * Distinto de `calcularMezclaPorTanque` (que usa hectáreas TOTALES
+ * programadas, y el "tanque parcial" ahí es lo que FALTA por preparar):
+ * aquí se parte de hectáreas ya REPORTADAS (`hectareasAvanzadas`) y el
+ * redondeo es hacia ARRIBA — en campo no se prepara "1.5 tanques", se
+ * preparan 2 completos aunque el segundo se use solo a la mitad. Null si
+ * no hay nada pendiente (número exacto de tanques ya usados, o cero
+ * avance reportado todavía).
+ */
+export function calcularTanquePendiente(
+  concentracionValor: number,
+  concentracionUnidad: ConcentracionUnidad,
+  litrosMezclaPorHa: number,
+  capacidadTanque: number,
+  hectareasAvanzadas: number
+): TanquePendiente | null {
+  const hectareasPorTanque = capacidadTanque / litrosMezclaPorHa;
+  if (hectareasAvanzadas <= 0 || hectareasPorTanque <= 0) return null;
+
+  const tanquesNecesarios = hectareasAvanzadas / hectareasPorTanque;
+  const EPSILON = 1e-9;
+  const tanquesPreparados = Math.ceil(tanquesNecesarios - EPSILON);
+  const fraccionPendiente = tanquesPreparados - tanquesNecesarios;
+  if (fraccionPendiente <= EPSILON) return null;
+
+  const cantidadProductoPendiente = cantidadProductoParaVolumen(concentracionValor, concentracionUnidad, capacidadTanque * fraccionPendiente);
+  return { tanquesNecesarios, tanquesPreparados, fraccionPendiente, cantidadProductoPendiente };
+}
+
 export interface CantidadFormateada {
   valor: number;
   unidad: "mL" | "L" | "g" | "kg";

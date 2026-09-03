@@ -4,12 +4,10 @@ import { requireAuth, requirePermission } from "../../middleware/auth.js";
 import { mensajeErrorCaptura, mensajeErrorValidacion, unoSolo } from "../../core/http.js";
 import {
   agregarCotizaciones,
-  CantidadExcedePendienteError,
   ComparacionConComprasError,
   crearComparacion,
   eliminarComparacion,
   eliminarCotizacion,
-  generarOrdenDesdeComparacion,
   listarComparaciones,
   obtenerComparacionCalculada,
   obtenerComparacionDeOrden,
@@ -48,8 +46,14 @@ const cotizacionSchema = z
     precioValor: z.number().positive(),
     tipoCambio: z.number().positive().optional(),
     presentacionCantidad: z.number().positive(),
+    cantidadDisponibleTotal: z.boolean(),
+    cantidadDisponible: z.number().positive().optional(),
   })
-  .refine((c) => c.moneda !== "USD" || c.tipoCambio != null, { message: "Falta el tipo de cambio para una cotización en USD.", path: ["tipoCambio"] });
+  .refine((c) => c.moneda !== "USD" || c.tipoCambio != null, { message: "Falta el tipo de cambio para una cotización en USD.", path: ["tipoCambio"] })
+  .refine((c) => c.cantidadDisponibleTotal || c.cantidadDisponible != null, {
+    message: 'Marca "Cantidad total disponible" o captura la cantidad exacta.',
+    path: ["cantidadDisponible"],
+  });
 
 const crearSchema = z.object({
   ordenCompraId: z.string().min(1),
@@ -85,34 +89,6 @@ comparadorRouter.post("/:id/cotizaciones", requirePermission("compras", "ver"), 
   }
   await agregarCotizaciones(unoSolo(req.params.id), parsed.data.cotizaciones);
   res.status(201).json(await obtenerComparacionCalculada(unoSolo(req.params.id)));
-});
-
-const generarOrdenSchema = z.object({
-  cotizacionId: z.string().min(1),
-  cantidad: z.number().positive(),
-});
-
-comparadorRouter.post("/:id/generar-orden", requirePermission("compras", "ver"), async (req, res) => {
-  const parsed = generarOrdenSchema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
-    return;
-  }
-  try {
-    const orden = await generarOrdenDesdeComparacion(
-      unoSolo(req.params.id),
-      parsed.data.cotizacionId,
-      parsed.data.cantidad,
-      req.usuario!.usuarioId
-    );
-    res.status(201).json(orden);
-  } catch (err) {
-    if (err instanceof CantidadExcedePendienteError) {
-      res.status(409).json({ error: err.message });
-      return;
-    }
-    res.status(400).json({ error: mensajeErrorCaptura(err) });
-  }
 });
 
 comparadorRouter.delete("/:id/cotizaciones/:cotizacionId", requirePermission("compras", "ver"), async (req, res) => {

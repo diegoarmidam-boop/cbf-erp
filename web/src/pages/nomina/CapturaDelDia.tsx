@@ -4,8 +4,9 @@ import { api, ApiError } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
 import { useActividades } from "../../lib/useActividades";
 import { usePersonal } from "../../lib/usePersonal";
-import type { CapturaHuertaTodasUPs, ChecklistDiaGrupo, GrupoPago, RegistroNomina, TipoAsistenciaGrupoDia } from "../../lib/types";
+import type { Actividad, CapturaHuertaTodasUPs, ChecklistDiaGrupo, ConfigNomina, GrupoPago, RegistroNomina, TipoAsistenciaGrupoDia } from "../../lib/types";
 import FechaInput from "../../components/FechaInput";
+import { formatearDinero } from "../../lib/numero";
 
 const ROLES_EDITAR_NOMINA = ["director_general", "recursos_humanos", "encargado_nominas", "gerente_administrativo"];
 
@@ -20,6 +21,34 @@ const ETIQUETAS_ORIGEN: Record<string, string> = {
 function hoyISO(): string {
   const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+// Nota de monto acumulado en vivo (Prioridad 3.1, 3-sep-2026) — SOLO
+// informativa, no editable, no afecta nada. Mismo criterio simple que ya
+// usa el "Total a Pagar" del Paso 1 de Cierre del día (cantidad ×
+// tarifaEfectiva, sin el cruce especial de "Depende de Empacadores" —
+// ese esquema tampoco lo desglosa el Total a Pagar de Paso 1, se
+// mantiene la misma simplificación aquí por consistencia). Se duplica el
+// criterio de shared/nomina/registros.ts (tarifaEfectiva) en vez de
+// importar @cbf/shared al bundle del navegador (mismo criterio ya usado en
+// MezclaPorTanque.tsx/Aplicaciones.tsx).
+function montoLinea(actividad: Actividad | undefined, cantidad: number | null, tarifaGeneralHora: number | null): number | null {
+  if (!actividad || !cantidad || cantidad <= 0) return 0;
+  const tarifa = actividad.usarTarifaGeneral ? tarifaGeneralHora : Number(actividad.tarifa);
+  if (tarifa == null) return null;
+  return cantidad * tarifa;
+}
+
+function totalEstimadoTarjeta(t: Tarjeta, actividades: Actividad[], tarifaGeneralHora: number | null): { total: number; incompleto: boolean } {
+  let total = 0;
+  let incompleto = false;
+  for (const l of t.lineas) {
+    const actividad = actividades.find((a) => a.id === l.actividadId);
+    const monto = montoLinea(actividad, l.cantidad, tarifaGeneralHora);
+    if (monto === null) incompleto = true;
+    else total += monto;
+  }
+  return { total, incompleto };
 }
 
 let contadorKey = 0;
@@ -107,6 +136,12 @@ export default function CapturaDelDia() {
   const [nuevoNombrePersona, setNuevoNombrePersona] = useState("");
   const [creandoPersona, setCreandoPersona] = useState(false);
   const errorRef = useRef<HTMLDivElement>(null);
+
+  // Nota de monto acumulado en vivo (Prioridad 3.1) — necesita tarifaGeneralHora.
+  const [tarifaGeneralHora, setTarifaGeneralHora] = useState<number | null>(null);
+  useEffect(() => {
+    api.get<ConfigNomina>("/nomina/config").then((c) => setTarifaGeneralHora(c.tarifaGeneralHora));
+  }, []);
 
   function cargar() {
     if (!fecha) return;
@@ -442,11 +477,23 @@ export default function CapturaDelDia() {
                     </tbody>
                   </table>
 
-                  {(!huertaCerrada(t.lineas[0]?.huertaId ?? "") || puedeEditarCerrado) && (
-                    <button className="btn-secondary" style={{ marginTop: 8 }} onClick={() => agregarLinea(t.key)}>
-                      + Otra actividad
-                    </button>
-                  )}
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
+                    {(!huertaCerrada(t.lineas[0]?.huertaId ?? "") || puedeEditarCerrado) && (
+                      <button className="btn-secondary" onClick={() => agregarLinea(t.key)}>
+                        + Otra actividad
+                      </button>
+                    )}
+                    {(() => {
+                      const { total, incompleto } = totalEstimadoTarjeta(t, actividades, tarifaGeneralHora);
+                      if (total <= 0 && !incompleto) return null;
+                      return (
+                        <div style={{ fontSize: 11, color: "var(--ink-soft)", marginLeft: "auto", textAlign: "right" }}>
+                          Estimado del día: {formatearDinero(total)}
+                          {incompleto && " (parcial — falta configurar la tarifa general por hora)"}
+                        </div>
+                      );
+                    })()}
+                  </div>
 
                   {t.tipo === "grupal" && grupoInfo?.persistente && <AsistenciaGrupoDia grupoId={grupoInfo.id} fecha={fecha} />}
                 </div>

@@ -263,7 +263,7 @@ export interface ContextoProgramacion {
  * exclusivo del proceso físico de Aplicaciones, ver FertirriegoProgramacion
  * en el schema).
  */
-async function resolverProgramacion(referenciaAplicacionId: string | null): Promise<ContextoProgramacion> {
+export async function resolverProgramacion(referenciaAplicacionId: string | null): Promise<ContextoProgramacion> {
   if (!referenciaAplicacionId) {
     return {
       clave: "",

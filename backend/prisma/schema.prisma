@@ -1079,9 +1079,15 @@ model OrdenCompra {
   fechaPago              DateTime?
 
   // Folio consecutivo de la Orden de Compra en PDF (2-sep-2026) — solo se
-  // asigna al "Generar orden de compra" desde el Comparador (estado
-  // generada), no a necesidades pendiente_cotizar/pendiente_autorizar.
-  numero Int? @unique
+  // asigna al "Generar orden de compra" (estado generada), no a
+  // necesidades pendiente_cotizar/pendiente_autorizar. Dejó de ser único
+  // por fila (3-sep-2026, pestaña "Órdenes de Compra"): cuando una misma
+  // sesión de armado agrupa varias líneas de origen distinto hacia el
+  // mismo Proveedor, esas filas reales COMPARTEN un solo folio a propósito
+  // — un PDF = un folio = potencialmente varias filas de OrdenCompra (una
+  // por línea de origen), que la generación del PDF combina sumando las
+  // que sean del mismo producto (ver ordenCompraPdf.ts).
+  numero Int?
 
   // Liga esta orden REAL a la línea de cotización del Comparador que la
   // generó (2-sep-2026) — null en la orden "necesidad" original y en
@@ -1110,6 +1116,7 @@ model OrdenCompra {
   huertaDestino   Huerta?      @relation("OrdenCompraHuertaDestino", fields: [huertaDestinoId], references: [id])
 
   @@index([estado])
+  @@index([numero])
 }
 
 // Catálogo abierto de Centros de Costo (4.1, 2-sep-2026, Bloque 3 del
@@ -1212,6 +1219,19 @@ model ComparacionCotizacion {
   // unidad aquí, ya viene fija del producto elegido.
   presentacionCantidad Decimal   @db.Decimal(10, 3)
   fechaCreacion DateTime         @default(now())
+
+  // Cantidad disponible (3-sep-2026, 1.4) — tope real de lo que este
+  // Proveedor puede surtir con esta cotización. `true` = "puede surtir
+  // todo lo que se le pida" (default, preserva el comportamiento de
+  // cotizaciones capturadas antes de este campo); `false` exige
+  // `cantidadDisponible` capturado (no se puede guardar ni el check solo
+  // ni la cantidad vacía — validado en ordenesCompra.ts). El tope se
+  // aplica al generar desde la pestaña "Órdenes de Compra": la suma de
+  // cuánto se le asigna a ESTA cotización específica (entre potencialmente
+  // varias necesidades de origen distinto que comparten Proveedor+
+  // Producto) nunca puede superar `cantidadDisponible`.
+  cantidadDisponibleTotal Boolean  @default(true)
+  cantidadDisponible      Decimal? @db.Decimal(12, 3)
 
   // Órdenes reales generadas a partir de esta cotización (2-sep-2026,
   // 1.4) — normalmente una, pero nada impide generar más de una a través

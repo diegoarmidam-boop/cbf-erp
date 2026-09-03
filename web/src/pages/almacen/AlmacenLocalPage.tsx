@@ -79,6 +79,7 @@ export default function AlmacenLocalPage() {
             <th>Producto</th>
             <th>Recibido</th>
             <th>Reportado</th>
+            <th>En tanque pendiente</th>
             <th>Saldo sin justificar</th>
             <th>Días desde última entrega</th>
             <th>Reportar consumo</th>
@@ -93,6 +94,11 @@ export default function AlmacenLocalPage() {
                 <td>{e.producto.nombreComercial}</td>
                 <td>{formatearNumero(e.cantidadRecibidaAcumulada)}</td>
                 <td>{formatearNumero(e.cantidadReportadaAcumulada)}</td>
+                <td style={{ color: "var(--ink-soft)", fontSize: 12 }}>
+                  {e.notaTanquePendiente != null
+                    ? `≈ ${formatearNumero(e.notaTanquePendiente, 2)} ${e.producto.unidad} sin aplicar todavía`
+                    : "—"}
+                </td>
                 <td>
                   {candado ? formatearNumero(candado.saldoSinJustificar, 2) : ""}{" "}
                   {candado?.alertaActiva && <span className="tag tag-danger">Descuadre &gt;15 días</span>}

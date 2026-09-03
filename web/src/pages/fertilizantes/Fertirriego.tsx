@@ -126,6 +126,14 @@ export default function Fertirriego() {
     setSeccionIds((prev) => (prev.includes(id) ? prev.filter((s) => s !== id) : [...prev, id]));
   }
 
+  // Atajo "toda la Huerta" (3-sep-2026) — mismo patrón ya usado en
+  // Aplicaciones/Actividades/Fertilización Granular (16-ago-2026), nunca
+  // se había agregado aquí: mismo seccionIds que marcar cada Sección de
+  // Riego a mano, no cambia ninguna lógica de negocio.
+  function alternarTodaLaHuerta() {
+    setSeccionIds((prev) => (prev.length === seccionesHuerta.length ? [] : seccionesHuerta.map((s) => s.id)));
+  }
+
   function actualizarProductoForm(index: number, cambios: Partial<ProductoFertirriegoForm>) {
     setProductosForm((prev) => prev.map((p, i) => (i !== index ? p : { ...p, ...cambios })));
   }
@@ -295,7 +303,13 @@ export default function Fertirriego() {
           {huertaId && (
             <div className="field">
               Secciones de Riego
-              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+                {seccionesHuerta.length > 0 && (
+                  <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12.5, fontWeight: 600, color: "var(--ink)" }}>
+                    <input type="checkbox" checked={seccionIds.length === seccionesHuerta.length} onChange={alternarTodaLaHuerta} />
+                    Toda la Huerta
+                  </label>
+                )}
                 {seccionesHuerta.map((s) => (
                   <label key={s.id} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12.5, color: "var(--ink)" }}>
                     <input type="checkbox" checked={seccionIds.includes(s.id)} onChange={() => alternarSeccion(s.id)} />

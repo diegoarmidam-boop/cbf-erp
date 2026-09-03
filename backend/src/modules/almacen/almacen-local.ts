@@ -1,7 +1,19 @@
 import { prisma } from "../../core/db.js";
+import { notaTanquePendientePorHuertaProducto } from "../aplicaciones/aplicaciones.js";
 
-export function almacenLocalDeHuerta(huertaId: string) {
-  return prisma.almacenLocal.findMany({ where: { huertaId }, include: { producto: true } });
+/**
+ * Nota de tanque pendiente (Prioridad 2, 3-sep-2026) — junto al total
+ * simple por producto/Huerta, mismo cálculo espejo que se muestra en la
+ * tarjeta de Aplicaciones (ver aplicaciones.ts). Puramente informativo, no
+ * toca `cantidadRecibidaAcumulada`/`cantidadReportadaAcumulada` ni ningún
+ * otro dato real de este módulo.
+ */
+export async function almacenLocalDeHuerta(huertaId: string) {
+  const [locales, notaPorProducto] = await Promise.all([
+    prisma.almacenLocal.findMany({ where: { huertaId }, include: { producto: true } }),
+    notaTanquePendientePorHuertaProducto(huertaId),
+  ]);
+  return locales.map((l) => ({ ...l, notaTanquePendiente: notaPorProducto[l.productoId] ?? null }));
 }
 
 /**

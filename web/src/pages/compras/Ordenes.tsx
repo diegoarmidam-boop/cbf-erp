@@ -9,6 +9,7 @@ import FechaInput from "../../components/FechaInput";
 import { formatearFecha, formatearInstante } from "../../lib/fecha";
 import { formatearDinero, formatearNumero } from "../../lib/numero";
 import { presentacionTexto } from "../../lib/producto";
+import OrdenesDeCompra from "./OrdenesDeCompra";
 
 const ETIQUETAS_ESTADO: Record<string, string> = {
   pendiente_autorizar: "Pendiente de autorizar",
@@ -47,11 +48,12 @@ function tagLineaPendiente(estado: EstadoLineaPendiente) {
   return "tag-warning";
 }
 
-type TabPrincipal = "pendientes" | "en_camino" | "recibidas" | "rechazadas_canceladas";
+type TabPrincipal = "pendientes" | "ordenes_de_compra" | "en_camino" | "recibidas" | "rechazadas_canceladas";
 type SubvistaPendientes = "programacion" | "producto" | "orden";
 
 const TABS_PRINCIPALES: { id: TabPrincipal; label: string }[] = [
   { id: "pendientes", label: "Pendientes" },
+  { id: "ordenes_de_compra", label: "Órdenes de Compra" },
   { id: "en_camino", label: "En Camino" },
   { id: "recibidas", label: "Recibidas" },
   { id: "rechazadas_canceladas", label: "Rechazadas/Canceladas" },
@@ -184,6 +186,13 @@ export default function Ordenes() {
   useEffect(() => {
     if (idResaltado) refResaltada.current?.scrollIntoView({ behavior: "smooth", block: "center" });
   }, [idResaltado, ordenes, tab, subvista]);
+
+  // Ruta rápida desde el Comparador (3-sep-2026, Prioridad 1): "Ir a
+  // Órdenes de Compra" manda aquí con ?tab=ordenes_de_compra&ordenCompraId=.
+  const ordenCompraIdParaGeneracion = searchParams.get("ordenCompraId");
+  useEffect(() => {
+    if (searchParams.get("tab") === "ordenes_de_compra") setTab("ordenes_de_compra");
+  }, [searchParams]);
 
   async function crearOrden(e: FormEvent) {
     e.preventDefault();
@@ -736,6 +745,8 @@ export default function Ordenes() {
           )}
         </>
       )}
+
+      {tab === "ordenes_de_compra" && <OrdenesDeCompra ordenCompraIdInicial={ordenCompraIdParaGeneracion} />}
 
       {tab === "en_camino" && (
         <>

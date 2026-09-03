@@ -3,17 +3,11 @@ import { Link, useSearchParams } from "react-router-dom";
 import { api, ApiError } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
 import { useHuertas } from "../../lib/useHuertas";
-import type { CapturaHuertaTodasUPs, DiaCerradoInfo, ResumenCierreHuerta } from "../../lib/types";
+import type { CapturaHuertaTodasUPs, DiaCerradoInfo, DiaPendiente, ResumenCierreHuerta } from "../../lib/types";
 import { formatearDinero, formatearNumero } from "../../lib/numero";
-import FechaInput from "../../components/FechaInput";
 import { formatearFecha } from "../../lib/fecha";
 
 const ROLES_EDITAR_NOMINA = ["director_general", "recursos_humanos", "encargado_nominas", "gerente_administrativo"];
-
-function hoyISO(): string {
-  const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
 
 function tagEstadoPlazo(estado: ResumenCierreHuerta["estadoPlazo"]) {
   if (estado === "al_corriente") return <span className="tag tag-success">Al corriente</span>;
@@ -21,56 +15,88 @@ function tagEstadoPlazo(estado: ResumenCierreHuerta["estadoPlazo"]) {
   return <span className="tag tag-danger">Vencido</span>;
 }
 
+interface TarjetaPendiente extends ResumenCierreHuerta {
+  fecha: string;
+}
+
+/**
+ * Cierre de día (Bloque, 3-sep-2026): sin fechador — antes había que
+ * cambiar de fecha a mano una por una para encontrar qué días faltaban por
+ * cerrar. Ahora se listan automáticamente TODAS las tarjetas (Huerta+fecha)
+ * con algo capturado y sin cerrar, sin importar la fecha — útil sobre todo
+ * cuando se captura nómina atrasada (ej. una carga de base de datos) y hay
+ * varios días pendientes de cerrar a la vez. Reutiliza `diasPendientesDeCierre`
+ * (ya existía para las notificaciones) + `resumenCierreTodasUPs` por cada
+ * fecha pendiente encontrada — sin endpoint nuevo.
+ */
 export default function CierreDelDia() {
   const { usuario } = useAuth();
   const { huertas } = useHuertas();
   const puedeVerCerrados = usuario ? ROLES_EDITAR_NOMINA.includes(usuario.rol) : false;
 
-  // Pre-llenado de contexto desde una notificación (29-ago-2026, "cierre
-  // de día pendiente"): ?fecha= precarga el día; ?huertaId= (si matchea una
-  // fila del resumen de ese día) salta directo al detalle de esa Huerta,
-  // en vez de dejar al usuario buscarla a mano entre las tarjetas.
-  const [searchParams] = useSearchParams();
-  const [fecha, setFecha] = useState(searchParams.get("fecha") || hoyISO());
-  const [resumen, setResumen] = useState<ResumenCierreHuerta[]>([]);
+  const [tarjetas, setTarjetas] = useState<TarjetaPendiente[]>([]);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Pre-llenado de contexto desde una notificación (29-ago-2026, "cierre
+  // de día pendiente"): ?fecha=&huertaId= saltan directo al detalle de esa
+  // Huerta/fecha, sin importar si sigue apareciendo en la lista de tarjetas.
+  const [searchParams] = useSearchParams();
   const [huertaDetalle, setHuertaDetalle] = useState<{ id: string; nombre: string } | null>(null);
+  const [fechaDetalle, setFechaDetalle] = useState<string | null>(null);
   const autoAbrioDetalle = useRef(false);
 
   const [mostrarCerrados, setMostrarCerrados] = useState(false);
 
-  function cargarResumen() {
-    if (!fecha) return;
+  async function cargarPendientes() {
+    if (huertas.length === 0) return;
     setCargando(true);
     setError(null);
-    api
-      .get<ResumenCierreHuerta[]>(`/nomina/cierre/resumen/${fecha}`)
-      .then(setResumen)
-      .catch((err) => setError(err instanceof ApiError ? err.message : "No se pudo cargar."))
-      .finally(() => setCargando(false));
+    try {
+      const listas = await Promise.allSettled(huertas.map((h) => api.get<DiaPendiente[]>(`/nomina/cierre/pendientes?huertaId=${h.id}`)));
+      const fechas = new Set<string>();
+      listas.forEach((r) => {
+        if (r.status === "fulfilled") r.value.forEach((d) => fechas.add(d.fecha));
+      });
+      const fechasOrdenadas = [...fechas].sort();
+      const resumenesPorFecha = await Promise.all(
+        fechasOrdenadas.map((f) => api.get<ResumenCierreHuerta[]>(`/nomina/cierre/resumen/${f}`).then((filas) => filas.map((fila) => ({ ...fila, fecha: f }))))
+      );
+      setTarjetas(resumenesPorFecha.flat().filter((t) => !t.cerrado));
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "No se pudo cargar.");
+    } finally {
+      setCargando(false);
+    }
   }
 
-  useEffect(cargarResumen, [fecha]);
+  useEffect(() => {
+    cargarPendientes();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [huertas.length]);
 
   useEffect(() => {
-    if (autoAbrioDetalle.current || resumen.length === 0) return;
-    const huertaIdBuscada = searchParams.get("huertaId");
-    if (!huertaIdBuscada) return;
-    const fila = resumen.find((r) => r.huerta.id === huertaIdBuscada);
-    if (fila) setHuertaDetalle(fila.huerta);
+    if (autoAbrioDetalle.current || huertas.length === 0) return;
+    const fechaParam = searchParams.get("fecha");
+    const huertaIdParam = searchParams.get("huertaId");
+    if (!fechaParam || !huertaIdParam) return;
+    const huerta = huertas.find((h) => h.id === huertaIdParam);
+    if (huerta) {
+      setHuertaDetalle({ id: huerta.id, nombre: huerta.nombre });
+      setFechaDetalle(fechaParam);
+    }
     autoAbrioDetalle.current = true;
-  }, [resumen, searchParams]);
+  }, [huertas, searchParams]);
 
-  if (huertaDetalle) {
+  if (huertaDetalle && fechaDetalle) {
     return (
       <DetalleCierre
         huerta={huertaDetalle}
-        fecha={fecha}
+        fecha={fechaDetalle}
         onVolver={() => {
           setHuertaDetalle(null);
-          cargarResumen();
+          setFechaDetalle(null);
+          cargarPendientes();
         }}
       />
     );
@@ -78,17 +104,13 @@ export default function CierreDelDia() {
 
   return (
     <div>
-      <div style={{ display: "flex", gap: 12, marginBottom: 16, alignItems: "flex-end", flexWrap: "wrap" }}>
-        <label className="field" style={{ maxWidth: 180 }}>
-          Fecha
-          <FechaInput value={fecha} onChange={setFecha} />
-        </label>
-        {puedeVerCerrados && (
+      {puedeVerCerrados && (
+        <div style={{ marginBottom: 16 }}>
           <button className="btn-secondary" onClick={() => setMostrarCerrados((v) => !v)}>
             {mostrarCerrados ? "Ocultar días cerrados" : "Ver días cerrados"}
           </button>
-        )}
-      </div>
+        </div>
+      )}
 
       {error && <div className="tag tag-danger" style={{ display: "block", padding: "8px 12px", marginBottom: 12 }}>{error}</div>}
 
@@ -96,21 +118,27 @@ export default function CierreDelDia() {
 
       {cargando ? (
         <p>Cargando…</p>
-      ) : resumen.length === 0 ? (
-        <p style={{ color: "var(--ink-soft)" }}>No hay nada capturado en ninguna Huerta para este día.</p>
+      ) : tarjetas.length === 0 ? (
+        <p style={{ color: "var(--ink-soft)" }}>No hay días pendientes de cerrar.</p>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {resumen.map((r) => (
-            <div key={r.huerta.id} className="card" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
+          {tarjetas.map((t) => (
+            <div key={`${t.huerta.id}-${t.fecha}`} className="card" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
               <div>
                 <div style={{ fontWeight: 600, fontSize: 13.5, marginBottom: 6 }}>
-                  {r.huerta.nombre} {r.cerrado ? <span className="tag tag-neutral">Cerrado</span> : tagEstadoPlazo(r.estadoPlazo)}
+                  {formatearFecha(t.fecha)} — {t.huerta.nombre} {tagEstadoPlazo(t.estadoPlazo)}
                 </div>
                 <div style={{ fontSize: 12, color: "var(--ink-soft)" }}>
-                  {formatearNumero(r.cantidadPersonas)} personas · {formatearNumero(r.totalActividades)} actividades · Total bruto {formatearDinero(r.totalBruto)}
+                  {formatearNumero(t.cantidadPersonas)} personas · {formatearNumero(t.totalActividades)} actividades · Total bruto {formatearDinero(t.totalBruto)}
                 </div>
               </div>
-              <button className="btn-primary" onClick={() => setHuertaDetalle(r.huerta)}>
+              <button
+                className="btn-primary"
+                onClick={() => {
+                  setHuertaDetalle(t.huerta);
+                  setFechaDetalle(t.fecha);
+                }}
+              >
                 Ver detalle
               </button>
             </div>
@@ -178,9 +206,18 @@ function DetalleCierre({ huerta, fecha, onVolver }: { huerta: { id: string; nomb
         <p>Cargando…</p>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 14 }}>
-          {[...porPersona.entries()].map(([key, p]) => (
+          {[...porPersona.entries()].map(([key, p]) => {
+            // Monto bruto acumulado (Prioridad 3.2, 3-sep-2026) — mismo
+            // criterio simple que el "Total a Pagar" del Paso 1 (cantidad ×
+            // tarifaAplicada, ya congelada al capturar), sin descuento de
+            // préstamo (esa regla de visibilidad ya documentada no cambia).
+            const montoBruto = p.lineas.reduce((s, l) => s + Number(l.cantidad) * Number(l.tarifaAplicada), 0);
+            return (
             <div key={key} className="card">
-              <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>{p.nombre}</div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
+                <div style={{ fontWeight: 600, fontSize: 13 }}>{p.nombre}</div>
+                <div style={{ fontWeight: 700, fontSize: 13 }}>{formatearDinero(montoBruto)}</div>
+              </div>
               <table>
                 <thead>
                   <tr>
@@ -203,7 +240,8 @@ function DetalleCierre({ huerta, fecha, onVolver }: { huerta: { id: string; nomb
                 </tbody>
               </table>
             </div>
-          ))}
+            );
+          })}
           {porPersona.size === 0 && <p style={{ color: "var(--ink-soft)" }}>Sin capturas ese día.</p>}
         </div>
       )}

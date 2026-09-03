@@ -1,6 +1,5 @@
 import { calcularAhorroForaneo, calcularCotizacion, type MonedaCotizacion } from "@cbf/shared";
 import { prisma } from "../../core/db.js";
-import { siguienteFolio } from "../../core/contador.js";
 
 export interface CotizacionInput {
   proveedorId: string;
@@ -10,6 +9,24 @@ export interface CotizacionInput {
   precioValor: number;
   tipoCambio?: number;
   presentacionCantidad: number;
+  // Cantidad disponible (3-sep-2026, 1.4) — obligatorio uno de los dos:
+  // `cantidadDisponibleTotal: true` (el Proveedor surte todo lo que se le
+  // pida) o `cantidadDisponibleTotal: false` + `cantidadDisponible` con la
+  // cantidad exacta. Nunca los dos vacíos ni el check solo.
+  cantidadDisponibleTotal: boolean;
+  cantidadDisponible?: number;
+}
+
+export class CantidadDisponibleInvalidaError extends Error {
+  constructor() {
+    super('Cantidad disponible: marca "Cantidad total disponible" o captura la cantidad exacta que sí tiene el Proveedor — uno de los dos es obligatorio.');
+  }
+}
+
+function validarCantidadDisponible(c: CotizacionInput) {
+  if (!c.cantidadDisponibleTotal && (c.cantidadDisponible == null || c.cantidadDisponible <= 0)) {
+    throw new CantidadDisponibleInvalidaError();
+  }
 }
 
 /**
@@ -53,6 +70,7 @@ export function obtenerComparacionDeOrden(ordenCompraId: string) {
 }
 
 export async function crearComparacion(input: CrearComparacionInput, creadoPorId: string) {
+  input.cotizaciones.forEach(validarCantidadDisponible);
   const orden = await prisma.ordenCompra.findUniqueOrThrow({ where: { id: input.ordenCompraId }, include: { producto: true } });
   if (orden.estado !== "pendiente_cotizar") throw new OrdenNoPendienteDeCotizarError();
 
@@ -76,6 +94,8 @@ export async function crearComparacion(input: CrearComparacionInput, creadoPorId
           precioValor: c.precioValor,
           tipoCambio: c.moneda === "USD" ? c.tipoCambio : undefined,
           presentacionCantidad: c.presentacionCantidad,
+          cantidadDisponibleTotal: c.cantidadDisponibleTotal,
+          cantidadDisponible: c.cantidadDisponibleTotal ? undefined : c.cantidadDisponible,
         })),
       },
     },
@@ -89,6 +109,7 @@ export async function crearComparacion(input: CrearComparacionInput, creadoPorId
  * historial de las que ya estaban se conserva intacto.
  */
 export function agregarCotizaciones(comparacionId: string, cotizaciones: CotizacionInput[]) {
+  cotizaciones.forEach(validarCantidadDisponible);
   return prisma.comparacionCotizacion.createMany({
     data: cotizaciones.map((c) => ({
       comparacionId,
@@ -99,6 +120,8 @@ export function agregarCotizaciones(comparacionId: string, cotizaciones: Cotizac
       precioValor: c.precioValor,
       tipoCambio: c.moneda === "USD" ? c.tipoCambio : undefined,
       presentacionCantidad: c.presentacionCantidad,
+      cantidadDisponibleTotal: c.cantidadDisponibleTotal,
+      cantidadDisponible: c.cantidadDisponibleTotal ? undefined : c.cantidadDisponible,
     })),
   });
 }
@@ -140,6 +163,8 @@ export interface CotizacionCalculadaSalida {
   tipoCambio: number | null;
   precioValorMXN: number;
   presentacionCantidad: number;
+  cantidadDisponibleTotal: boolean;
+  cantidadDisponible: number | null;
   precioUnitarioMXN: number;
   unidadesAPedir: number;
   cantidadComprada: number;
@@ -213,6 +238,8 @@ export async function obtenerComparacionCalculada(id: string): Promise<Comparaci
       precioValor: Number(c.precioValor),
       tipoCambio: c.tipoCambio != null ? Number(c.tipoCambio) : null,
       presentacionCantidad: Number(c.presentacionCantidad),
+      cantidadDisponibleTotal: c.cantidadDisponibleTotal,
+      cantidadDisponible: c.cantidadDisponible != null ? Number(c.cantidadDisponible) : null,
       ...calc,
       alertaExcedente: calc.porcentajeExcedente > umbralExcedentePct,
       esMejorGlobal: false,
@@ -277,80 +304,3 @@ export async function obtenerComparacionCalculada(id: string): Promise<Comparaci
   };
 }
 
-export class CantidadExcedePendienteError extends Error {
-  constructor(pendiente: number) {
-    super(`Esa cantidad excede lo que todavía falta comprar (${pendiente.toFixed(3)} pendiente) — ajusta la cantidad o cotiza el resto por separado.`);
-  }
-}
-
-/**
- * "Generar orden de compra" (1.4, 2-sep-2026): convierte una línea de
- * cotización en una compra real — folio consecutivo, Proveedor y precio
- * fijos, lista para su Orden de Compra en PDF. Compra parcial: si
- * `cantidadDeseada` no cubre todo lo pendiente, la necesidad sigue abierta
- * (pendiente_cotizar) por el resto; cuando la suma de órdenes reales
- * generada/recibida alcanza cantidadNecesaria, la necesidad pasa a
- * "cubierta" — nunca se muta cantidadNecesaria ni la orden original, todo
- * se recalcula del historial completo (ver obtenerComparacionCalculada).
- */
-export async function generarOrdenDesdeComparacion(
-  comparacionId: string,
-  cotizacionId: string,
-  cantidadDeseada: number,
-  generadoPorId: string
-) {
-  const comparacion = await prisma.comparacion.findUniqueOrThrow({
-    where: { id: comparacionId },
-    include: { ordenCompra: true },
-  });
-  if (!comparacion.ordenCompra) throw new Error("Esta comparación no está ligada a ninguna orden de compra.");
-
-  const cotizacion = await prisma.comparacionCotizacion.findUniqueOrThrow({
-    where: { id: cotizacionId },
-    include: { zona: true },
-  });
-  if (cotizacion.comparacionId !== comparacionId) throw new Error("Esa cotización no pertenece a esta comparación.");
-
-  const calculada = await obtenerComparacionCalculada(comparacionId);
-  if (!calculada) throw new Error("Comparación no encontrada.");
-  if (cantidadDeseada <= 0) throw new Error("La cantidad a comprar debe ser mayor a cero.");
-  if (cantidadDeseada > calculada.cantidadPendiente + 0.0001) {
-    throw new CantidadExcedePendienteError(calculada.cantidadPendiente);
-  }
-
-  const calc = calcularCotizacion(cantidadDeseada, {
-    moneda: cotizacion.moneda,
-    precioValor: Number(cotizacion.precioValor),
-    tipoCambio: cotizacion.tipoCambio != null ? Number(cotizacion.tipoCambio) : null,
-    presentacionCantidad: Number(cotizacion.presentacionCantidad),
-    costoFleteKg: Number(cotizacion.zona.costoFleteKg),
-  });
-
-  const necesidad = comparacion.ordenCompra;
-
-  return prisma.$transaction(async (tx) => {
-    const numero = await siguienteFolio(tx, "orden_compra");
-    const ordenReal = await tx.ordenCompra.create({
-      data: {
-        origen: necesidad.origen,
-        productoId: necesidad.productoId,
-        cantidadSolicitada: calc.cantidadComprada,
-        estado: "generada",
-        proveedorId: cotizacion.proveedorId,
-        precioUnitario: calc.precioUnitarioMXN,
-        referenciaAplicacionId: necesidad.referenciaAplicacionId,
-        comparacionCotizacionId: cotizacion.id,
-        creadoPorId: generadoPorId,
-        fechaFormalizacion: new Date(),
-        numero,
-      },
-    });
-
-    const compradoTotal = calculada.cantidadComprada + calc.cantidadComprada;
-    if (compradoTotal + 0.0001 >= calculada.cantidadNecesaria) {
-      await tx.ordenCompra.update({ where: { id: necesidad.id }, data: { estado: "cubierta" } });
-    }
-
-    return ordenReal;
-  });
-}

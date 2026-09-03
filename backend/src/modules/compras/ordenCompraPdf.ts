@@ -17,7 +17,7 @@ function nf(valor: number, maxDecimales = 2): string {
 
 export class OrdenSinFolioError extends Error {
   constructor() {
-    super("Esta orden todavía no tiene folio — genera la orden desde el Comparador de Cotizaciones primero.");
+    super("Esta orden todavía no tiene folio — genera la orden desde Compras → Órdenes de Compra primero.");
   }
 }
 
@@ -25,26 +25,52 @@ export class OrdenSinFolioError extends Error {
  * Documento Orden de Compra (3.1, 2-sep-2026, 9.14): solicitud de surtido
  * al Proveedor, NO comprobante fiscal — no calcula IVA/IEPS/retenciones
  * (queda para una futura fase de Contabilidad). Solo tiene sentido para
- * una orden que ya pasó por "Generar orden de compra" en el Comparador
+ * una orden que ya pasó por "Generar" en la pestaña "Órdenes de Compra"
  * (folio + Proveedor + precio ya fijos).
+ *
+ * Varias filas, un solo PDF (3-sep-2026, Prioridad 1.2/1.3): cuando una
+ * sesión de armado agrupa varias líneas de origen distinto hacia el mismo
+ * Proveedor, esas filas de OrdenCompra COMPARTEN un folio a propósito (ver
+ * schema) — aquí se buscan TODAS las filas con ese mismo folio y se suman
+ * las que sean del mismo producto, para que el Proveedor vea una sola
+ * línea por producto (nunca de dónde salió cada parte).
  */
 export async function obtenerOrdenCompraParaPdf(id: string) {
-  const orden = await prisma.ordenCompra.findUniqueOrThrow({
-    where: { id },
+  const referencia = await prisma.ordenCompra.findUniqueOrThrow({ where: { id }, select: { numero: true } });
+  if (referencia.numero == null) throw new OrdenSinFolioError();
+
+  const filas = await prisma.ordenCompra.findMany({
+    where: { numero: referencia.numero },
     include: { producto: true, proveedor: true },
+    orderBy: { fechaCreacion: "asc" },
   });
-  if (orden.numero == null || !orden.proveedor || orden.precioUnitario == null) {
-    throw new OrdenSinFolioError();
-  }
+  const primera = filas[0];
+  if (!primera || !primera.proveedor) throw new OrdenSinFolioError();
+
   const empresa = await obtenerEmpresaConfig();
 
-  const cantidad = Number(orden.cantidadSolicitada);
-  const precioUnitario = Number(orden.precioUnitario);
-  const importe = cantidad * precioUnitario;
+  const porProducto = new Map<string, { nombreComercial: string; ingredienteActivo: string; unidad: string; cantidad: number; precioUnitario: number }>();
+  for (const fila of filas) {
+    if (fila.precioUnitario == null) continue;
+    const existente = porProducto.get(fila.productoId);
+    if (existente) {
+      existente.cantidad += Number(fila.cantidadSolicitada);
+    } else {
+      porProducto.set(fila.productoId, {
+        nombreComercial: fila.producto.nombreComercial,
+        ingredienteActivo: fila.producto.ingredienteActivo ?? "—",
+        unidad: fila.producto.unidad,
+        cantidad: Number(fila.cantidadSolicitada),
+        precioUnitario: Number(fila.precioUnitario),
+      });
+    }
+  }
+  const lineas = [...porProducto.values()].map((l) => ({ ...l, importe: l.cantidad * l.precioUnitario }));
+  const importe = lineas.reduce((s, l) => s + l.importe, 0);
 
   return {
-    numero: orden.numero,
-    fecha: (orden.fechaFormalizacion ?? orden.fechaCreacion).toISOString().slice(0, 10),
+    numero: referencia.numero,
+    fecha: (primera.fechaFormalizacion ?? primera.fechaCreacion).toISOString().slice(0, 10),
     empresa: {
       razonSocial: empresa.razonSocial ?? "—",
       rfc: empresa.rfc ?? "—",
@@ -52,15 +78,9 @@ export async function obtenerOrdenCompraParaPdf(id: string) {
       telefono: empresa.telefono ?? "—",
     },
     proveedor: {
-      nombre: orden.proveedor.nombre,
+      nombre: primera.proveedor.nombre,
     },
-    producto: {
-      nombreComercial: orden.producto.nombreComercial,
-      ingredienteActivo: orden.producto.ingredienteActivo ?? "—",
-      unidad: orden.producto.unidad,
-    },
-    cantidad,
-    precioUnitario,
+    lineas,
     importe,
     importeEnLetra: importeALetra(importe),
     firmaAtiende: empresa.firmaAtiendeNombre ?? "—",
@@ -117,14 +137,17 @@ export function generarPdfOrdenCompra(orden: OrdenCompraPdfData): PDFKit.PDFDocu
   doc.fontSize(10).fillColor(NEGRO).font("Helvetica").text(orden.fecha, MARGEN, y + 13);
   y += 40;
 
-  // Tabla de un solo producto — mismo estilo visual que Orden de
-  // Aplicación/Fertirriego (fondo vino, texto blanco en encabezado).
+  // Tabla de producto(s) — mismo estilo visual que Orden de Aplicación/
+  // Fertirriego (fondo vino, texto blanco en encabezado). Una fila por
+  // producto (3-sep-2026): cuando el folio agrupa varias líneas de origen
+  // distinto hacia el mismo Proveedor, ya vienen sumadas por producto
+  // desde `obtenerOrdenCompraParaPdf` — el Proveedor nunca ve de dónde
+  // salió cada parte.
   const anchos = [60, 60, 220, 90, 90];
   const encabezados = ["Cantidad", "Unidad", "Descripción", "Valor unitario", "Importe"];
   const anchoTotal = anchos.reduce((s, a) => s + a, 0);
 
   doc.fontSize(9).font("Helvetica-Bold");
-  const descripcion = `${orden.producto.nombreComercial} (${orden.producto.ingredienteActivo})`;
   const alturaEncabezado = Math.max(20, doc.heightOfString(encabezados[2]!, { width: anchos[2]! - 8 }) + 10);
   doc.rect(MARGEN, y, anchoTotal, alturaEncabezado).fill(VINO);
   let cx = MARGEN;
@@ -134,17 +157,22 @@ export function generarPdfOrdenCompra(orden: OrdenCompraPdfData): PDFKit.PDFDocu
     cx += anchos[i]!;
   });
   y += alturaEncabezado;
+  const yInicioTabla = y - alturaEncabezado;
 
   doc.font("Helvetica").fillColor(NEGRO).fontSize(9);
-  const alturaFila = Math.max(20, doc.heightOfString(descripcion, { width: anchos[2]! - 8 }) + 9);
-  cx = MARGEN;
-  const valoresFila = [nf(orden.cantidad, 3), orden.producto.unidad, descripcion, `$${nf(orden.precioUnitario)}`, `$${nf(orden.importe)}`];
-  valoresFila.forEach((valor, i) => {
-    doc.text(valor, cx + 4, y + 5, { width: anchos[i]! - 8 });
-    cx += anchos[i]!;
-  });
-  doc.rect(MARGEN, y - alturaEncabezado, anchoTotal, alturaEncabezado + alturaFila).strokeColor(GRIS).stroke();
-  y += alturaFila + 16;
+  for (const linea of orden.lineas) {
+    const descripcion = `${linea.nombreComercial} (${linea.ingredienteActivo})`;
+    const alturaFila = Math.max(20, doc.heightOfString(descripcion, { width: anchos[2]! - 8 }) + 9);
+    cx = MARGEN;
+    const valoresFila = [nf(linea.cantidad, 3), linea.unidad, descripcion, `$${nf(linea.precioUnitario)}`, `$${nf(linea.importe)}`];
+    valoresFila.forEach((valor, i) => {
+      doc.text(valor, cx + 4, y + 5, { width: anchos[i]! - 8 });
+      cx += anchos[i]!;
+    });
+    y += alturaFila;
+  }
+  doc.rect(MARGEN, yInicioTabla, anchoTotal, y - yInicioTabla).strokeColor(GRIS).stroke();
+  y += 16;
 
   doc.font("Helvetica-Bold").fontSize(12).text(`Total: $${nf(orden.importe)}`, MARGEN, y, { width: anchoTotal, align: "right" });
   y += 22;
