@@ -14,6 +14,10 @@ export function crearCentroCosto(nombre: string) {
   return prisma.centroCosto.create({ data: { nombre } });
 }
 
+export function editarCentroCosto(id: string, nombre: string) {
+  return prisma.centroCosto.update({ where: { id }, data: { nombre } });
+}
+
 export function actualizarActivoCentroCosto(id: string, activo: boolean) {
   return prisma.centroCosto.update({ where: { id }, data: { activo } });
 }

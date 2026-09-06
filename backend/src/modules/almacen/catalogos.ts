@@ -20,12 +20,19 @@ function actualizarActivo(delegate: CatalogoDelegate, id: string, activo: boolea
   return (delegate as any).update({ where: { id }, data: { activo } });
 }
 
+// Editar nombre (Prioridad 6, 4-sep-2026) — centralizado en Configuración →
+// Catálogos, solo Director General/Encargado de Sistemas (ver catalogos.routes.ts).
+function editar(delegate: CatalogoDelegate, id: string, nombre: string) {
+  return (delegate as any).update({ where: { id }, data: { nombre } });
+}
+
 // Categoría (Prioridad 3, 4-sep-2026) ya no comparte la forma genérica
 // {id, nombre, activo} — cada una decide al darse de alta si el campo
 // Ingrediente Activo debe aparecer al capturar un Producto de ese tipo.
 export const categorias = {
   listar: (todas = false) => listar(prisma.categoriaProducto, todas),
   crear: (nombre: string, requiereIngredienteActivo: boolean) => prisma.categoriaProducto.create({ data: { nombre, requiereIngredienteActivo } }),
+  editar: (id: string, nombre: string) => editar(prisma.categoriaProducto, id, nombre),
   actualizarActivo: (id: string, activo: boolean) => actualizarActivo(prisma.categoriaProducto, id, activo),
   actualizarRequiereIngredienteActivo: (id: string, requiereIngredienteActivo: boolean) =>
     prisma.categoriaProducto.update({ where: { id }, data: { requiereIngredienteActivo } }),
@@ -34,12 +41,14 @@ export const categorias = {
 export const ingredientesActivos = {
   listar: (todas = false) => listar(prisma.ingredienteActivo, todas),
   crear: (nombre: string) => crear(prisma.ingredienteActivo, nombre),
+  editar: (id: string, nombre: string) => editar(prisma.ingredienteActivo, id, nombre),
   actualizarActivo: (id: string, activo: boolean) => actualizarActivo(prisma.ingredienteActivo, id, activo),
 };
 
 export const contenedores = {
   listar: (todas = false) => listar(prisma.contenedor, todas),
   crear: (nombre: string) => crear(prisma.contenedor, nombre),
+  editar: (id: string, nombre: string) => editar(prisma.contenedor, id, nombre),
   actualizarActivo: (id: string, activo: boolean) => actualizarActivo(prisma.contenedor, id, activo),
 };
 
@@ -47,5 +56,6 @@ export const contenedores = {
 export const marcas = {
   listar: (todas = false) => listar(prisma.marca, todas),
   crear: (nombre: string) => crear(prisma.marca, nombre),
+  editar: (id: string, nombre: string) => editar(prisma.marca, id, nombre),
   actualizarActivo: (id: string, activo: boolean) => actualizarActivo(prisma.marca, id, activo),
 };

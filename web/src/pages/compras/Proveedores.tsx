@@ -5,10 +5,12 @@ import FechaInput from "../../components/FechaInput";
 import { formatearFecha } from "../../lib/fecha";
 import { formatearDinero } from "../../lib/numero";
 import { useZonas } from "../../lib/useZonas";
-import ZonasPanel from "../../components/ZonasPanel";
 
 export default function Proveedores() {
-  const { zonas, cargando: cargandoZonas, crear: crearZona, editar: editarZona, actualizarActivo: actualizarActivoZona } = useZonas(true);
+  // Administrar Zonas (editar/desactivar) vive en Configuración → Catálogos
+  // desde la Prioridad 6 (4-sep-2026) — aquí solo se eligen para el
+  // proveedor, ya no se administran.
+  const { zonas } = useZonas(true);
   const zonasActivas = zonas.filter((z) => z.activo);
   const [proveedores, setProveedores] = useState<Proveedor[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -94,8 +96,6 @@ export default function Proveedores() {
 
   return (
     <div>
-      <ZonasPanel zonas={zonas} cargando={cargandoZonas} crear={crearZona} editar={editarZona} actualizarActivo={actualizarActivoZona} />
-
       <div style={{ marginBottom: 14 }}>
         <button
           className="btn-primary"

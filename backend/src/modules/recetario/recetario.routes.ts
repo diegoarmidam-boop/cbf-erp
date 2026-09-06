@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
-import { requireAuth } from "../../middleware/auth.js";
+import { requireAuth, requireDirectorOSistemas } from "../../middleware/auth.js";
 import { mensajeErrorCaptura, mensajeErrorValidacion, unoSolo } from "../../core/http.js";
 import { actualizarActivoReceta, crearReceta, editarReceta, listarRecetas, obtenerReceta, puedeAdministrarRecetas, tiposAplicacion } from "./recetario.js";
 
@@ -27,7 +27,18 @@ tiposAplicacionRouter.post("/", async (req, res) => {
 
 const activoSchema = z.object({ activo: z.boolean() });
 
-tiposAplicacionRouter.patch("/:id/activo", async (req, res) => {
+// Editar nombre o desactivar/reactivar un Tipo de aplicación ya existente
+// es exclusivo de Configuración → Catálogos (Prioridad 6, 4-sep-2026).
+tiposAplicacionRouter.patch("/:id", requireDirectorOSistemas, async (req, res) => {
+  const parsed = nombreSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
+    return;
+  }
+  res.json(await tiposAplicacion.editar(unoSolo(req.params.id), parsed.data.nombre));
+});
+
+tiposAplicacionRouter.patch("/:id/activo", requireDirectorOSistemas, async (req, res) => {
   const parsed = activoSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });

@@ -24,6 +24,7 @@ export function puedeAdministrarRecetas(rol: Rol): boolean {
 export const tiposAplicacion = {
   listar: (todas = false) => prisma.tipoAplicacion.findMany({ where: todas ? undefined : { activo: true }, orderBy: { nombre: "asc" } }),
   crear: (nombre: string) => prisma.tipoAplicacion.create({ data: { nombre } }),
+  editar: (id: string, nombre: string) => prisma.tipoAplicacion.update({ where: { id }, data: { nombre } }),
   actualizarActivo: (id: string, activo: boolean) => prisma.tipoAplicacion.update({ where: { id }, data: { activo } }),
 };
 

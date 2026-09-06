@@ -1,8 +1,8 @@
 import { Router } from "express";
 import { z } from "zod";
-import { requireAuth, requirePermission } from "../../middleware/auth.js";
+import { requireAuth, requireDirectorOSistemas, requirePermission } from "../../middleware/auth.js";
 import { mensajeErrorValidacion, unoSolo } from "../../core/http.js";
-import { actualizarActivoCentroCosto, crearCentroCosto, listarCentrosCosto } from "./centrosCosto.js";
+import { actualizarActivoCentroCosto, crearCentroCosto, editarCentroCosto, listarCentrosCosto } from "./centrosCosto.js";
 
 export const centrosCostoRouter = Router();
 centrosCostoRouter.use(requireAuth);
@@ -25,7 +25,18 @@ centrosCostoRouter.post("/", requirePermission("compras", "ver"), async (req, re
 
 const activoSchema = z.object({ activo: z.boolean() });
 
-centrosCostoRouter.patch("/:id/activo", requirePermission("compras", "ver"), async (req, res) => {
+// Editar nombre o desactivar/reactivar un Centro de Costo ya existente es
+// exclusivo de Configuración → Catálogos (Prioridad 6, 4-sep-2026).
+centrosCostoRouter.patch("/:id", requireDirectorOSistemas, async (req, res) => {
+  const parsed = nombreSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
+    return;
+  }
+  res.json(await editarCentroCosto(unoSolo(req.params.id), parsed.data.nombre));
+});
+
+centrosCostoRouter.patch("/:id/activo", requireDirectorOSistemas, async (req, res) => {
   const parsed = activoSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });

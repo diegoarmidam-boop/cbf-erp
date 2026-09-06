@@ -68,3 +68,21 @@ export function requirePermissionAny(...pares: [string, Accion][]) {
 export function huertaIdDeAlcance(req: Request): string | null {
   return req.usuario?.huertaId ?? null;
 }
+
+// Configuración → Catálogos (Prioridad 6, 4-sep-2026): editar o
+// desactivar/reactivar un valor YA EXISTENTE de cualquier catálogo abierto
+// es exclusivo de Director General/Encargado de Sistemas — sin importar
+// qué rol pueda agregar un valor nuevo ("+") desde el módulo de uso, y sin
+// importar lo que diga la matriz de permisos normal (nunca se confía solo
+// en la UI ocultando el botón). El "+" de cada módulo no pasa por aquí.
+export function requireDirectorOSistemas(req: Request, res: Response, next: NextFunction): void {
+  if (!req.usuario) {
+    res.status(401).json({ error: "No autenticado." });
+    return;
+  }
+  if (req.usuario.rol !== "director_general" && req.usuario.rol !== "encargado_sistemas") {
+    res.status(403).json({ error: "Editar o desactivar un catálogo ya existente es exclusivo de Dirección General." });
+    return;
+  }
+  next();
+}

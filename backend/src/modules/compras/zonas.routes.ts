@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
-import { requireAuth, requirePermission } from "../../middleware/auth.js";
+import { requireAuth, requireDirectorOSistemas, requirePermission } from "../../middleware/auth.js";
 import { mensajeErrorValidacion, unoSolo } from "../../core/http.js";
 import { actualizarActivoZona, crearZona, editarZona, listarZonas } from "./zonas.js";
 
@@ -30,7 +30,10 @@ zonasRouter.post("/", requirePermission("compras", "ver"), async (req, res) => {
 
 const editarZonaSchema = zonaSchema.partial();
 
-zonasRouter.patch("/:id", requirePermission("compras", "ver"), async (req, res) => {
+// Editar o desactivar/reactivar una Zona ya existente es exclusivo de
+// Configuración → Catálogos (Prioridad 6, 4-sep-2026) — antes vivía aquí
+// mismo, con acceso abierto a todo Compras (ZonasPanel en Proveedores.tsx).
+zonasRouter.patch("/:id", requireDirectorOSistemas, async (req, res) => {
   const parsed = editarZonaSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
@@ -41,7 +44,7 @@ zonasRouter.patch("/:id", requirePermission("compras", "ver"), async (req, res) 
 
 const activoSchema = z.object({ activo: z.boolean() });
 
-zonasRouter.patch("/:id/activo", requirePermission("compras", "ver"), async (req, res) => {
+zonasRouter.patch("/:id/activo", requireDirectorOSistemas, async (req, res) => {
   const parsed = activoSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });

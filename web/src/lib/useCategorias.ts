@@ -31,6 +31,12 @@ export function useCategorias(todas = false) {
     return nueva;
   }
 
+  async function editar(id: string, nombre: string) {
+    const actualizada = await api.patch<CategoriaProducto>(`/almacen/categorias/${id}`, { nombre });
+    await refetch();
+    return actualizada;
+  }
+
   async function actualizarActivo(id: string, activo: boolean) {
     await api.patch(`/almacen/categorias/${id}/activo`, { activo });
     await refetch();
@@ -41,5 +47,5 @@ export function useCategorias(todas = false) {
     await refetch();
   }
 
-  return { categorias, cargando, refetch, crear, actualizarActivo, actualizarRequiereIngredienteActivo };
+  return { categorias, cargando, refetch, crear, editar, actualizarActivo, actualizarRequiereIngredienteActivo };
 }

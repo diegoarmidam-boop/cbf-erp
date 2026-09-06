@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
 import { api, ApiError } from "../lib/api";
+import CatalogosTab from "./CatalogosTab";
+
+type Tab = "modulos" | "facturacion" | "catalogos";
 
 interface ModuloConfigItem {
   modulo: string;
@@ -26,6 +29,7 @@ interface EmpresaConfig {
  * (configuracion.routes.ts), esto solo evita que aparezca la opción.
  */
 export default function ConfiguracionSistema() {
+  const [tab, setTab] = useState<Tab>("modulos");
   const [modulos, setModulos] = useState<ModuloConfigItem[]>([]);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -98,88 +102,126 @@ export default function ConfiguracionSistema() {
 
   return (
     <div>
-      <h2 style={{ marginBottom: 6 }}>Configuración del sistema</h2>
-      <p style={{ fontSize: 12.5, color: "var(--ink-soft)", marginBottom: 18, maxWidth: 640 }}>
-        Herramienta de desarrollo: apagar un módulo detiene únicamente las cascadas automáticas que salen de él hacia los demás (mano
-        de obra a Nómina, salida de Almacén, uso diario de Equipos, auto-orden a Compras, etc.) — el módulo sigue funcionando, y lo que
-        antes llegaba automático se vuelve capturable a mano en el módulo destino, con la misma estructura de siempre. No apaga nada
-        para los usuarios más allá de eso, y queda registrado quién y cuándo lo cambió.
-      </p>
+      <h2 style={{ marginBottom: 16 }}>Configuración del sistema</h2>
+
+      <div style={{ display: "flex", gap: 4, overflowX: "auto", marginBottom: 20, borderBottom: "1px solid var(--border)", paddingBottom: 2 }}>
+        {(
+          [
+            { value: "modulos", label: "Módulos" },
+            { value: "facturacion", label: "Facturación y firmas" },
+            { value: "catalogos", label: "Catálogos" },
+          ] as { value: Tab; label: string }[]
+        ).map((t) => (
+          <button
+            key={t.value}
+            onClick={() => setTab(t.value)}
+            style={{
+              padding: "8px 14px",
+              borderRadius: "999px 999px 0 0",
+              border: "none",
+              background: tab === t.value ? "var(--pink-soft)" : "transparent",
+              color: tab === t.value ? "var(--pink)" : "var(--ink-soft)",
+              fontSize: 12.5,
+              fontWeight: 600,
+              whiteSpace: "nowrap",
+              cursor: "pointer",
+            }}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
 
       {error && <div className="tag tag-danger" style={{ display: "block", padding: "8px 12px", marginBottom: 12 }}>{error}</div>}
 
-      {cargando ? (
-        <p>Cargando…</p>
-      ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 8, maxWidth: 480 }}>
-          {modulos.map((m) => (
-            <div
-              key={m.modulo}
-              className="card"
-              style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}
-            >
-              <div style={{ fontSize: 13, fontWeight: 600 }}>{m.etiqueta}</div>
-              <button
-                className={m.comunicacionActiva ? "btn-secondary" : "btn-primary"}
-                disabled={cambiando === m.modulo}
-                onClick={() => alternar(m)}
-                style={{ minWidth: 110 }}
-              >
-                {cambiando === m.modulo ? "…" : m.comunicacionActiva ? "Encendido" : "Apagado"}
-              </button>
+      {tab === "modulos" && (
+        <>
+          <p style={{ fontSize: 12.5, color: "var(--ink-soft)", marginBottom: 18, maxWidth: 640 }}>
+            Herramienta de desarrollo: apagar un módulo detiene únicamente las cascadas automáticas que salen de él hacia los demás
+            (mano de obra a Nómina, salida de Almacén, uso diario de Equipos, auto-orden a Compras, etc.) — el módulo sigue
+            funcionando, y lo que antes llegaba automático se vuelve capturable a mano en el módulo destino, con la misma estructura
+            de siempre. No apaga nada para los usuarios más allá de eso, y queda registrado quién y cuándo lo cambió.
+          </p>
+
+          {cargando ? (
+            <p>Cargando…</p>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, maxWidth: 480 }}>
+              {modulos.map((m) => (
+                <div
+                  key={m.modulo}
+                  className="card"
+                  style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}
+                >
+                  <div style={{ fontSize: 13, fontWeight: 600 }}>{m.etiqueta}</div>
+                  <button
+                    className={m.comunicacionActiva ? "btn-secondary" : "btn-primary"}
+                    disabled={cambiando === m.modulo}
+                    onClick={() => alternar(m)}
+                    style={{ minWidth: 110 }}
+                  >
+                    {cambiando === m.modulo ? "…" : m.comunicacionActiva ? "Encendido" : "Apagado"}
+                  </button>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
+          )}
+        </>
       )}
 
-      <h2 style={{ margin: "32px 0 6px" }}>Datos de facturación y firmas</h2>
-      <p style={{ fontSize: 12.5, color: "var(--ink-soft)", marginBottom: 18, maxWidth: 640 }}>
-        Se usan en la Orden de Compra en PDF y en cualquier otro documento que en el futuro los necesite — se capturan una sola vez
-        aquí, no en cada documento.
-      </p>
+      {tab === "facturacion" && (
+        <>
+          <p style={{ fontSize: 12.5, color: "var(--ink-soft)", marginBottom: 18, maxWidth: 640 }}>
+            Se usan en la Orden de Compra en PDF y en cualquier otro documento que en el futuro los necesite — se capturan una sola
+            vez aquí, no en cada documento.
+          </p>
 
-      <div className="card" style={{ maxWidth: 480, display: "flex", flexDirection: "column", gap: 12 }}>
-        <label className="field">
-          Razón social
-          <input value={empresaForm.razonSocial} onChange={(e) => setEmpresaForm((p) => ({ ...p, razonSocial: e.target.value }))} />
-        </label>
-        <label className="field">
-          RFC
-          <input value={empresaForm.rfc} onChange={(e) => setEmpresaForm((p) => ({ ...p, rfc: e.target.value }))} />
-        </label>
-        <label className="field">
-          Domicilio fiscal
-          <input
-            value={empresaForm.domicilioFiscal}
-            onChange={(e) => setEmpresaForm((p) => ({ ...p, domicilioFiscal: e.target.value }))}
-          />
-        </label>
-        <label className="field">
-          Teléfono
-          <input value={empresaForm.telefono} onChange={(e) => setEmpresaForm((p) => ({ ...p, telefono: e.target.value }))} />
-        </label>
-        <hr style={{ border: "none", borderTop: "1px solid var(--border)", margin: "4px 0" }} />
-        <label className="field">
-          Firma "Atentamente" (quién atiende/genera la Orden de Compra)
-          <input
-            value={empresaForm.firmaAtiendeNombre}
-            onChange={(e) => setEmpresaForm((p) => ({ ...p, firmaAtiendeNombre: e.target.value }))}
-          />
-        </label>
-        <label className="field">
-          Firma "Autorizó"
-          <input
-            value={empresaForm.firmaAutorizaNombre}
-            onChange={(e) => setEmpresaForm((p) => ({ ...p, firmaAutorizaNombre: e.target.value }))}
-          />
-        </label>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <button className="btn-primary" disabled={guardandoEmpresa} onClick={guardarEmpresa}>
-            {guardandoEmpresa ? "Guardando…" : "Guardar"}
-          </button>
-          {empresaGuardada && <span className="tag tag-success">Guardado</span>}
-        </div>
-      </div>
+          <div className="card" style={{ maxWidth: 480, display: "flex", flexDirection: "column", gap: 12 }}>
+            <label className="field">
+              Razón social
+              <input value={empresaForm.razonSocial} onChange={(e) => setEmpresaForm((p) => ({ ...p, razonSocial: e.target.value }))} />
+            </label>
+            <label className="field">
+              RFC
+              <input value={empresaForm.rfc} onChange={(e) => setEmpresaForm((p) => ({ ...p, rfc: e.target.value }))} />
+            </label>
+            <label className="field">
+              Domicilio fiscal
+              <input
+                value={empresaForm.domicilioFiscal}
+                onChange={(e) => setEmpresaForm((p) => ({ ...p, domicilioFiscal: e.target.value }))}
+              />
+            </label>
+            <label className="field">
+              Teléfono
+              <input value={empresaForm.telefono} onChange={(e) => setEmpresaForm((p) => ({ ...p, telefono: e.target.value }))} />
+            </label>
+            <hr style={{ border: "none", borderTop: "1px solid var(--border)", margin: "4px 0" }} />
+            <label className="field">
+              Firma "Atentamente" (quién atiende/genera la Orden de Compra)
+              <input
+                value={empresaForm.firmaAtiendeNombre}
+                onChange={(e) => setEmpresaForm((p) => ({ ...p, firmaAtiendeNombre: e.target.value }))}
+              />
+            </label>
+            <label className="field">
+              Firma "Autorizó"
+              <input
+                value={empresaForm.firmaAutorizaNombre}
+                onChange={(e) => setEmpresaForm((p) => ({ ...p, firmaAutorizaNombre: e.target.value }))}
+              />
+            </label>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <button className="btn-primary" disabled={guardandoEmpresa} onClick={guardarEmpresa}>
+                {guardandoEmpresa ? "Guardando…" : "Guardar"}
+              </button>
+              {empresaGuardada && <span className="tag tag-success">Guardado</span>}
+            </div>
+          </div>
+        </>
+      )}
+
+      {tab === "catalogos" && <CatalogosTab />}
     </div>
   );
 }
