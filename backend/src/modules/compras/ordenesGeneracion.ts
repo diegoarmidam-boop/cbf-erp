@@ -22,6 +22,13 @@ export interface LineaOrigenCotizacion {
   proveedorNombre: string;
   nombreComercial: string;
   precioUnitarioMXN: number;
+  // Tamaño del bulto/costal/bidón de ESTA cotización (Prioridad 1, 4-sep-2026)
+  // — el frontend la usa para precargar la cantidad a comprar ya redondeada
+  // hacia arriba a presentación completa, igual que ya hace el Comparador
+  // (`cantidadComprada`) — antes no viajaba, así que Órdenes de Compra
+  // precargaba el pendiente crudo sin redondear (bug real: Folio 23, 0.2 L
+  // en vez de 25 L).
+  presentacionCantidad: number;
   cantidadDisponibleTotal: boolean;
   cantidadDisponible: number | null;
   cantidadYaUsada: number;
@@ -158,6 +165,7 @@ async function armarLineasDeNecesidades(ordenIds: string[]): Promise<LineaOrigen
         proveedorNombre: cot.proveedor.nombre,
         nombreComercial: cot.productoComercial.nombreComercial,
         precioUnitarioMXN: cot.precioUnitarioMXN,
+        presentacionCantidad: cot.presentacionCantidad,
         cantidadDisponibleTotal: cot.cantidadDisponibleTotal,
         cantidadDisponible: cot.cantidadDisponible,
         cantidadYaUsada: yaUsadaPorCotizacion.get(cot.id) ?? 0,

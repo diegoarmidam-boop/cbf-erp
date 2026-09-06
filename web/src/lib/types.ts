@@ -698,6 +698,7 @@ export interface LineaOrigenCotizacion {
   proveedorNombre: string;
   nombreComercial: string;
   precioUnitarioMXN: number;
+  presentacionCantidad: number;
   cantidadDisponibleTotal: boolean;
   cantidadDisponible: number | null;
   cantidadYaUsada: number;

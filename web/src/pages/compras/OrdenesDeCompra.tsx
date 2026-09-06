@@ -130,7 +130,17 @@ export default function OrdenesDeCompra({ ordenCompraIdInicial }: { ordenCompraI
       });
       return;
     }
-    setAsignaciones((prev) => ({ ...prev, [necesidad.ordenCompraId]: { cotizacionId, cantidad: necesidad.cantidadPendiente } }));
+    // Precarga redondeada a presentación completa (Prioridad 1, 4-sep-2026)
+    // — antes precargaba el pendiente crudo (bug real: Folio 23, 0.2 L en
+    // vez del bulto completo de 25 L). Mismo redondeo que ya usa el
+    // Comparador (Math.ceil a presentaciones completas), aquí sobre lo que
+    // de verdad se está asignando ahora (cantidadPendiente puede ya
+    // reflejar compras parciales previas). Sigue siendo editable a mano.
+    const cotizacion = necesidad.cotizaciones.find((c) => c.cotizacionId === cotizacionId);
+    const presentacion = cotizacion?.presentacionCantidad || 1;
+    const unidades = Math.ceil(necesidad.cantidadPendiente / presentacion);
+    const cantidad = unidades * presentacion;
+    setAsignaciones((prev) => ({ ...prev, [necesidad.ordenCompraId]: { cotizacionId, cantidad } }));
   }
 
   function cambiarCantidad(ordenCompraId: string, cantidad: number) {
@@ -294,6 +304,7 @@ export default function OrdenesDeCompra({ ordenCompraIdInicial }: { ordenCompraI
                           <th></th>
                           <th>Proveedor</th>
                           <th>Marca</th>
+                          <th>Presentación</th>
                           <th>Precio/unidad</th>
                           <th>Disponible</th>
                           <th>Ya usado</th>
@@ -316,6 +327,7 @@ export default function OrdenesDeCompra({ ordenCompraIdInicial }: { ordenCompraI
                               {c.esSustituto && <span className="tag tag-neutral" style={{ marginLeft: 6 }}>Sustituto</span>}
                             </td>
                             <td>{c.nombreComercial}</td>
+                            <td>{formatearNumero(c.presentacionCantidad)} {l.unidad}</td>
                             <td>{formatearDinero(c.precioUnitarioMXN)}</td>
                             <td>{c.cantidadDisponibleTotal ? <span className="tag tag-neutral">Toda</span> : formatearNumero(c.cantidadDisponible ?? 0)}</td>
                             <td>{formatearNumero(c.cantidadYaUsada)}</td>
