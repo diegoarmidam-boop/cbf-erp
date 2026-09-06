@@ -1,60 +1,60 @@
-# Reporte — actualización del documento vivo (3-sep-2026)
+# Reporte — actualización del documento vivo (3-sep-2026, parte 2 / 4-sep-2026)
 
-Sesión larga con 2 partes: (A) 2 ajustes puntuales pedidos directo en el chat (botón "Toda la Huerta" faltante en Fertirriego, y Cierre del día sin fechador), y (B) el prompt `CBF_ERP_Reestructura_Completa_03092026_V11.docx` con 3 prioridades de diseño. Commit `e5b1c5c` sobre `2409495`, rama `main`, ya subido.
+Continuación de la sesión del 3-sep: prompts `CBF_ERP_Reestructura_Completa_03092026_V12.docx` y `V13.docx`, más un incidente de despliegue resuelto el 4-sep. Commit `54f33ca` sobre `8bfebef`, rama `main`, ya subido.
 
-## Parte A — Ajustes puntuales
+## V12 — Prioridad 1: Programar/Recetario solo Ingrediente Activo, nunca marca
 
-**Botón "Toda la Huerta" en Fertirriego.** Diego reportó que no aparecía al seleccionar Secciones de Riego, y preguntó si se había quitado sin su autorización. Se investigó primero: se buscó la cadena "Toda la Huerta" en **todo el historial de git** de `Fertirriego.tsx` — no aparece en ningún commit desde que el archivo existe. Conclusión: nunca se construyó ahí (sí existe en Aplicaciones/Actividades/Granular desde el 16-ago-2026) — no fue una regresión ni algo removido. Se agregó siguiendo el mismo patrón que las otras 3 pantallas, adaptado a Secciones de Riego.
+El selector de "producto" en Granular Programar, Fertirriego Programar, Aplicaciones Programar y Aplicaciones Recetario ya no muestra marcas comerciales — solo Ingrediente Activo. Internamente se resuelve al Producto preferido configurado en Almacén → Preferido/Sustitutos (patrón "resolver temprano" al productoId existente, evitando una migración de esquema mucho más invasiva sobre 5 tablas de producto).
 
-**Cierre del día sin fechador.** Diego pidió que la pantalla ya no obligue a elegir una fecha una por una — ahora lista automáticamente una tarjeta por cada Huerta+fecha que tenga algo capturado y sin cerrar, sin importar la fecha (útil sobre todo tras cargar nómina atrasada). Reutiliza `diasPendientesDeCierre` (ya existía para notificaciones, nunca se había conectado a esta pantalla) — no hizo falta endpoint nuevo. Probado contra datos reales: Viernes 28-ago no aparece (Diego ya lo había cerrado), sí aparecen las 4 tarjetas pendientes (Sábado/Domingo/Lunes/Martes) con el tag de plazo correcto en cada una.
+Se encontró y corrigió un hueco de datos real en el camino: los 11 Ingredientes Activos autorizados no tenían Producto preferido configurado — sin eso, Programar habría quedado inutilizable de inmediato. Verificado que cada uno tenía exactamente 1 producto candidato (sin ambigüedad) antes de hacer el backfill.
 
-## Parte B — Prompt del 3-sep: 3 prioridades
+Compras/Comparador y Almacén quedaron sin tocar, tal como pedía el prompt.
 
-Regla de trabajo pedida por Diego para este prompt: preguntar antes de asumir cualquier cosa no definida — "seguir derecho" nunca autoriza inventar una decisión de producto. Se siguió así: 2 preguntas reales se le hicieron directo a Diego antes de construir la Prioridad 1 (ver abajo), y no se avanzó a la siguiente prioridad hasta que la anterior quedó reportada y validada.
+## V12 — Prioridad 2: Zona del proveedor
 
-### Prioridad 1 — Pestaña "Órdenes de Compra" (la más grande)
+Se agregó el campo Zona al alta/edición de Proveedores, reutilizando el mismo catálogo abierto de Zonas que ya usaba el Comparador (no uno nuevo). Al cotizar con un Proveedor, la Zona se precarga sola desde la que tiene guardada — sigue siendo editable por cotización específica.
 
-Nueva 5ª pestaña de primer nivel en Compras → Órdenes — el único lugar donde de verdad se arma y genera una orden de compra real. "Cotizar"/"Generar orden de compra" desde Pendientes ya no genera nada directo, redirige aquí.
+A petición directa de Diego en el chat: se agregó también un panel "Zonas (flete)" en Proveedores con lista completa administrable (crear, editar, activar/desactivar) — antes solo existía un alta rápida dentro del Comparador.
 
-**3 formas de entrada:** Por Proveedor (todo lo ya cotizado con él en toda la empresa), Por Orden (una programación completa con todos sus productos — decisión de Diego: "una orden son varios productos", distinto del "Por orden" que ya existe en Pendientes, que es individual), Por Producto (todas las necesidades pendientes de ese producto en toda la empresa).
+## V13 — Prioridad 1: 2 bugs reales de Fertirriego
 
-**Pregunta 1 hecha a Diego antes de construir:** ¿"Por Orden" significa una sola necesidad (1 producto) o la programación completa (varios productos)? Confirmó: la programación completa — así quedó.
+**Causa raíz encontrada con evidencia real** (no adivinada): se cruzó el log de producción (`ops/logs/backend.log`, que sí tenía el stack trace exacto del segundo bug) con una reproducción limpia contra la base de datos real usando las funciones del backend directamente. Ambos bugs venían de la misma falla: al reducir lo que necesita una programación (Fertirriego, y por extensión Aplicaciones/Granular que comparten la función), el sistema asumía que *todo* lo que se pedía original ya estaba comprometido como stock real — pero si Almacén no tenía suficiente al programar, lo que se generó fue una compra automática pendiente, nunca una reserva real. Al reducir, intentaba "regresar" a un lote que nunca existió.
 
-**Mecanismo de generación:** después de asignar Proveedor por producto/línea, el sistema agrupa automáticamente por el Proveedor resultante y muestra vista previa antes de generar. Decisión de arquitectura (no de producto): las filas reales de `OrdenCompra` generadas en la misma sesión hacia el mismo Proveedor **comparten un folio** a propósito (el campo `numero` dejó de ser único por fila) — un PDF = un folio = potencialmente varias filas (una por línea de origen), que el PDF combina sumando las que sean del mismo producto. Esto evita una migración de esquema mucho más invasiva (una tabla nueva de "orden generada" con líneas) sin perder nada del comportamiento pedido.
+Se encontró además, en la base de datos real, la programación específica de la sesión de pruebas de Diego que se había quedado atorada en "programada" desde el 3-sep por este mismo bug — 9 de sus 10 productos tenían un movimiento de compromiso real en el historial pero su lote ya no existía.
 
-**Pregunta 2 hecha a Diego, encontrada probando el caso real que motivó esta prioridad:** cuando el mismo Proveedor+Producto se cotizó por separado en 2 necesidades distintas (cada captura con su propia "cantidad disponible"), ¿el tope al generar se agrupa por Proveedor+Producto en conjunto, o cada cotización capturada tiene su propio tope aislado? Confirmó: agrupado por Proveedor+Producto (el disponible real del Proveedor es uno solo). Se toma como vigente la cotización más reciente de ese par — esa parte específica (cuál captura manda cuando hay varias) la decidió Claude Code, tal como Diego indicó.
+**Corrección** en `almacen/movimientos.ts` (compartida por Aplicaciones/Granular/Fertirriego): ahora solo libera lo que de verdad estaba comprometido (verificado contra el historial de movimientos); lo que nunca se comprometió reduce/cancela la compra automática pendiente en vez de intentar liberar stock inexistente. Si el compromiso fue real pero el lote se perdió (el caso de la programación atorada), se recrea el lote en vez de tronar — mismo patrón que ya usa una entrada normal de compra.
 
-**Campo nuevo en el Comparador (1.4):** "Cantidad disponible" — checkbox "Cantidad total disponible" o cantidad exacta, obligatorio uno de los dos, validado en pantalla y backend.
+**Probado:** reproducción exacta del bug 1 (Almacén vacío, programar 6 semanas, reducir a 5) contra la base real — confirmado el error antes del fix, confirmado que desaparece después, y confirmado que la compra automática pendiente se ajusta proporcionalmente sin crear stock fantasma. La programación atorada real se liberó de verdad: quedó "vencida", sus 10 compras automáticas se cancelaron, y el stock comprometido se devolvió a Almacén.
 
-**Probado** con un script de 6 escenarios contra el backend real (datos de prueba creados y borrados, verificado antes/después):
-- Por Orden con split automático a 2 Proveedores (Boro→Proveedor A, Fosfato→Proveedor B): folios distintos, correcto.
-- Por Producto con consolidación (2 programaciones piden el mismo Nitrato al mismo Proveedor, 5L+10L): vista previa consolida en 1 sola línea de 15L, se generan 2 filas en BD que comparten folio, PDF las suma en 15L.
-- Por Proveedor: solo muestra lo genuinamente pendiente (lo cubierto desaparece, sin ruido de otros proveedores).
-- Tope excedido: 8+8=16L pedidos contra 10L reales disponibles → rechazado; ajustado a 6+4=10L → genera correcto, deja 2L y 4L pendientes.
+## V13 — Prioridad 2: Producto Comercial reemplaza texto libre en el Comparador
 
-**Nota dejada para Diego, no bloqueante:** en "En Camino", las líneas consolidadas se ven como tarjetas separadas (una por línea de origen), cada una con "Descargar PDF" dando el mismo documento combinado correcto — si prefiere que se vean agrupadas visualmente ahí también, es un ajuste aparte.
+Se quitó el campo de texto libre "Nombre Comercial" de las cotizaciones — ahora es un selector que solo ofrece el Producto Comercial preferido y los sustitutos autorizados de Almacén para el Ingrediente Activo que se está cotizando (reutilizando `opcionesRecepcionDeProducto`, el mismo mecanismo que ya usaba Compras al recibir). Cada opción se ve como "Nombre + Marca". El selector también se precarga si ya se cotizó ese mismo Ingrediente Activo con ese mismo Proveedor antes — editable en ambos casos.
 
-### Prioridad 2 — Nota estimada de tanque pendiente (Aplicaciones + Almacén)
+Se aprovechó para confirmar y corregir 2.6: Preferido/Sustitutos en Almacén no mostraba la Marca — se agregó.
 
-Exclusiva de Aplicaciones (no Fertirriego, no Granular). Nueva función `calcularTanquePendiente` en `shared` (junto a `calcularMezclaPorTanque` ya existente): a diferencia de esa función (que usa hectáreas totales programadas), esta usa hectáreas **ya reportadas** y redondea tanques hacia **arriba** (no se prepara "1.5 tanques" en la realidad). Puramente informativa — no toca el descuento real de Almacén.
+**Cambio de esquema:** `ComparacionCotizacion.nombreComercial` (texto libre) se reemplazó por `productoComercialId` (FK a Producto). Solo 1 fila existente en producción — se respaldó con el productoId de su propia Comparación antes de aplicar la migración.
 
-Se muestra en ambos lados con el mismo cálculo espejo: tarjeta de Aplicaciones (junto al % de avance) y Almacén Local (columna nueva "En tanque pendiente").
+**Probado:** cotización real de un producto con 2 Proveedores distintos contra la base de datos — selector, marca y precarga verificados correctos; limpieza completa después.
 
-**Probado:** reproducido el ejemplo exacto de Diego (tanque de 10 ha, 15 de 27 ha reportadas) contra el cálculo puro → 1.5 tanques necesarios, 2 preparados, **1000L pendientes** — coincide con su ejemplo. Probado también de punta a punta con una Aplicación real en El Sonrisal (creada, verificada, borrada): Aplicaciones y Almacén Local mostraron el mismo 1000L. Casos borde probados: número exacto de tanques → no muestra nada; cero avance → tampoco.
+## V13 — Prioridad 3: bug real — "Generar orden de compra" no mostraba nada
 
-### Prioridad 3 — Nota de monto acumulado en vivo (Nómina)
+Causa raíz: al reabrir "Cotizar" sobre una orden que ya tenía una Comparación existente, el backend (`obtenerComparacionDeOrden`) regresaba la fila cruda de Prisma en vez de pasarla por el mismo cálculo que arma `ordenesGeneradas`/`cantidadComprada`/etc. — de ahí el error exacto que reportó Diego (`undefined is not an object`). La orden de compra en realidad sí se generaba bien (folio incluido); la pantalla se rompía antes de poder mostrarlo o descargar el PDF.
 
-**3.1, Captura del día:** notita gris en la esquina inferior derecha de cada tarjeta ("Estimado del día: $X"), se recalcula al vuelo con cada cambio, no editable, no afecta el guardado real.
+**Probado:** reproducción completa (generar una orden real con folio) contra la base real — confirmado que antes tronaba con el mismo error y ahora no. Esa prueba consumió el folio real #22 (salto normal en la numeración, sin efecto).
 
-**3.2, Cierre del día Paso 2:** cada tarjeta de persona ahora trae su monto bruto, usando `tarifaAplicada` ya congelada al capturar (no hay que recalcular tarifa).
+## V13 — Prioridad 4: la recepción se mueve de Compras a Almacén
 
-Ambos usan el mismo criterio simple que ya usaba el "Total a Pagar" de Paso 1 (cantidad × tarifa, sin el caso especial de "Depende de Empacadores" — esquema que Paso 1 tampoco desglosa, y que ningún catálogo real usa todavía).
+Nueva pestaña "En Camino" en Almacén — mismo espejo de solo lectura que ya existía en Compras, pero aquí sí se confirma la recepción física (cantidad real, lote/caducidad). El botón "Recibir" se quitó de Compras; el permiso también se reforzó en el backend (`/recibir` ya solo acepta `almacen.capturar`, no `compras.capturar`). Las pestañas "En Camino"/"Recibidas" de Compras pasaron a ser de solo lectura. Se agregó un aviso en el centro de Notificaciones para que Compras se entere cuando Almacén confirma una recepción (ventana de 3 días, mismo criterio que otras alertas por tiempo del sistema).
 
-**Probado contra datos reales:** el sábado 29-ago (21 registros reales ya capturados) — la suma por persona con el criterio nuevo de Paso 2 coincidió **exacto** con el Total a Pagar de Paso 1 ya existente: $4,649.78 en ambos lados. Confirmado que la tarifa general por hora sí está configurada en el sistema (37.5), así que la nota de Captura del día muestra montos reales desde ya.
+**Probado:** simulación completa (orden en camino → recibida como lo haría Bodega) contra la base real — confirmado que aparece correctamente en "Recibidas" de Compras y que la notificación le llega a Compras.
+
+## Incidente de despliegue (4-sep, resuelto)
+
+Después de estos cambios, el backend en vivo quedó corriendo con un proceso que nunca se reinició correctamente — ni con el primer reinicio de la PC (confirmado con `CreationDate` del proceso: seguía siendo el del 3-sep 12:15 pm). Causó "Ruta de API no encontrada" en la pantalla nueva de Almacén. Diagnosticado con una prueba autenticada real (una prueba anterior sin sesión daba un falso positivo) y resuelto terminando el proceso viejo a mano — el sistema quedó sirviendo la versión correcta, verificado con una petición autenticada real después del reinicio.
 
 ## Estado técnico
 
-- Backend, web y `shared` sin errores de TypeScript, build de producción limpio en los 3. `web/dist` reconstruido, `@cbf/shared` reconstruido, backend reiniciado dos veces (antes y después de un fix de agregación de tope encontrado durante las pruebas).
-- 1 migración de Prisma (`20260903141342_ordenes_compra_folio_compartido_y_disponible`): quita el `@unique` de `OrdenCompra.numero` (a propósito, ver Prioridad 1), agrega `cantidadDisponibleTotal`/`cantidadDisponible` a `ComparacionCotizacion` — ambos cambios aditivos, sin pérdida de datos.
-- Todo probado con scripts contra el backend real (sin credenciales de sesión de Diego — no fue posible probar clic a clic en pantalla), datos de prueba creados y borrados en cada caso, verificado con conteos antes/después.
-- Ya subido a GitHub — commit `e5b1c5c` sobre `2409495`, rama `main`.
+- Backend y web sin errores de TypeScript; build de producción limpio en ambos.
+- 2 migraciones de Prisma: `20260903175501_proveedor_zona` (aditiva) y `20260903221644_comparador_producto_comercial` (reemplaza `nombreComercial` por `productoComercialId`, con backfill de la única fila existente).
+- Todo probado con scripts contra el backend real (sin credenciales de sesión de Diego), datos de prueba creados y borrados en cada caso, verificado con conteos antes/después — dos excepciones reales que se dejaron aplicadas a propósito: la liberación de la programación de Fertirriego atorada, y la recepción real que confirmó el flujo completo (ambas fueron el objeto mismo de la prueba, no efectos secundarios).
+- Ya subido a GitHub — commit `54f33ca` sobre `8bfebef`, rama `main`.
