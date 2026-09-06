@@ -61,8 +61,16 @@ export default function OrdenesDeCompra({ ordenCompraIdInicial }: { ordenCompraI
     if (!ordenCompraIdInicial || gruposProgramacion.length === 0) return;
     const grupo = gruposProgramacion.find((g) => g.lineas.some((l) => l.ordenId === ordenCompraIdInicial));
     if (grupo) {
+      // Bug real (Prioridad 5, 4-sep-2026): esto solo ponía el estado de
+      // "cuál programación" pero nunca disparaba la carga real de líneas
+      // (`cargarPorProgramacion` sí la hace) — por eso la primera vez
+      // decía "Sin necesidades pendientes cotizadas" (era cierto que
+      // `lineas` seguía vacío, solo que nunca se había pedido). Cambiar de
+      // pestaña y regresar "arreglaba" el síntoma porque reiniciaba el
+      // estado y forzaba a elegir la tarjeta de nuevo, que sí llama a
+      // cargarPorProgramacion.
       setModo("programacion");
-      setObjetivoProgramacion(grupo);
+      cargarPorProgramacion(grupo);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ordenCompraIdInicial, gruposProgramacion]);

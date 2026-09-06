@@ -12,7 +12,12 @@ proveedoresRouter.use(requireAuth);
 // selector de "cotizar orden" solo debe ofrecer proveedores activos.
 proveedoresRouter.get("/", requirePermission("compras", "ver"), async (req, res) => {
   if (req.query.todas === "true") {
-    res.json(await prisma.proveedor.findMany({ orderBy: { nombre: "asc" } }));
+    // Bug real (Prioridad 5, 4-sep-2026): faltaba `include: { zona: true }`
+    // aquí — la columna Zona de la tabla de Proveedores siempre salía
+    // vacía (aunque sí estaba guardada) porque este camino nunca traía la
+    // relación, solo el `zonaId` crudo. Al editar sí se veía bien porque
+    // el formulario usa `zonaId` directo, no `zona.nombre`.
+    res.json(await prisma.proveedor.findMany({ orderBy: { nombre: "asc" }, include: { zona: true } }));
     return;
   }
   res.json(await listarProveedores());
