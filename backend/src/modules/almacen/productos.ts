@@ -11,8 +11,6 @@ export interface AltaProductoInput {
   ingredienteActivo?: string;
   nombreComercial: string;
   marca?: string;
-  contenedor: string;
-  presentacionCantidad: number;
   unidad: string;
   requiereLote: boolean;
 }

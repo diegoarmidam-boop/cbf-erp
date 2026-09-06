@@ -7,7 +7,15 @@ import SelectConAgregar from "../../components/SelectConAgregar";
 import { presentacionTexto } from "../../lib/producto";
 import { formatearFecha } from "../../lib/fecha";
 import { formatearNumero } from "../../lib/numero";
-import type { CancelacionPendienteBodega, MovimientoAlmacenCentral, Producto, ProductoLote, TipoMovimientoAlmacenCentral } from "../../lib/types";
+import type {
+  CancelacionPendienteBodega,
+  DetalleInventario,
+  GrupoInventario,
+  MovimientoAlmacenCentral,
+  Producto,
+  ProductoLote,
+  TipoMovimientoAlmacenCentral,
+} from "../../lib/types";
 
 const UNIDADES = ["L", "kg", "g", "ml", "pieza", "bulto", "garrafa"];
 
@@ -41,7 +49,6 @@ export default function Inventario() {
   const { productos, cargando, refetch } = useProductos();
   const categorias = useCatalogoAbierto("/almacen/categorias");
   const ingredientes = useCatalogoAbierto("/almacen/ingredientes-activos");
-  const contenedores = useCatalogoAbierto("/almacen/contenedores");
   const marcas = useCatalogoAbierto("/almacen/marcas");
 
   const [stock, setStock] = useState<Record<string, number>>({});
@@ -96,8 +103,6 @@ export default function Inventario() {
   const [ingredienteActivo, setIngredienteActivo] = useState("");
   const [nombreComercial, setNombreComercial] = useState("");
   const [marca, setMarca] = useState("");
-  const [contenedor, setContenedor] = useState("");
-  const [presentacionCantidad, setPresentacionCantidad] = useState("");
   const [unidad, setUnidad] = useState("");
   const [requiereLote, setRequiereLote] = useState(true);
 
@@ -131,8 +136,6 @@ export default function Inventario() {
       ingredienteActivo: requiereIngrediente ? ingredienteActivo || undefined : undefined,
       nombreComercial,
       marca: marca || undefined,
-      contenedor,
-      presentacionCantidad: Number(presentacionCantidad),
       unidad,
       requiereLote,
     };
@@ -146,8 +149,6 @@ export default function Inventario() {
       }
       setNombreComercial("");
       setMarca("");
-      setContenedor("");
-      setPresentacionCantidad("");
       setUnidad("");
       setIngredienteActivo("");
       setCategoria("");
@@ -166,8 +167,6 @@ export default function Inventario() {
     setIngredienteActivo(p.ingredienteActivo ?? "");
     setNombreComercial(p.nombreComercial);
     setMarca(p.marca ?? "");
-    setContenedor(p.contenedor);
-    setPresentacionCantidad(String(p.presentacionCantidad));
     setUnidad(p.unidad);
     setRequiereLote(p.requiereLote);
     setError(null);
@@ -207,12 +206,20 @@ export default function Inventario() {
     });
   }, [productos, busqueda, filtros]);
 
+  const [grupoDetalle, setGrupoDetalle] = useState<GrupoInventario | null>(null);
+
   if (productoDetalleId) {
     return <DetalleProducto productoId={productoDetalleId} onVolver={() => setProductoDetalleId(null)} />;
   }
 
+  if (grupoDetalle) {
+    return <DetalleGrupoInventario grupo={grupoDetalle} onVolver={() => setGrupoDetalle(null)} />;
+  }
+
   return (
     <div>
+      <ExistenciaAgrupada onVerDetalle={setGrupoDetalle} />
+
       {cancelacionesPendientes.length > 0 && (
         <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
           {cancelacionesPendientes.map((c, i) => (
@@ -287,20 +294,8 @@ export default function Inventario() {
             items={marcas.items}
             onAgregar={marcas.agregar}
           />
-          <SelectConAgregar
-            label="Contenedor"
-            value={contenedor}
-            onChange={setContenedor}
-            items={contenedores.items}
-            onAgregar={contenedores.agregar}
-            required
-          />
           <label className="field">
-            Cantidad
-            <input type="number" min={0} step="0.001" value={presentacionCantidad} onChange={(e) => setPresentacionCantidad(e.target.value)} required />
-          </label>
-          <label className="field">
-            Unidad
+            Unidad base (para dosis/consumo)
             <select value={unidad} onChange={(e) => setUnidad(e.target.value)} required>
               <option value="">Selecciona…</option>
               {UNIDADES.map((u) => (
@@ -394,7 +389,6 @@ export default function Inventario() {
               <th>Marca</th>
               <th>Ingrediente activo</th>
               <th>Categoría</th>
-              <th>Presentación</th>
               <th>Existencia</th>
               <th>Autorizado</th>
               <th>Estado</th>
@@ -416,7 +410,6 @@ export default function Inventario() {
                 <td>{p.marca ?? "—"}</td>
                 <td>{p.ingredienteActivo ?? "—"}</td>
                 <td>{p.categoria}</td>
-                <td>{presentacionTexto(p)}</td>
                 <td>
                   {stock[p.id] != null ? `${formatearNumero(stock[p.id]!)} ${p.unidad}` : "—"}
                   {!!comprometido[p.id] && (
@@ -443,7 +436,7 @@ export default function Inventario() {
             ))}
             {productosFiltrados.length === 0 && (
               <tr>
-                <td colSpan={9} style={{ textAlign: "center", color: "var(--ink-soft)" }}>
+                <td colSpan={8} style={{ textAlign: "center", color: "var(--ink-soft)" }}>
                   Ningún producto coincide con la búsqueda/filtros.
                 </td>
               </tr>
@@ -495,7 +488,6 @@ function DetalleProducto({ productoId, onVolver }: { productoId: string; onVolve
             <span className="tag tag-neutral">{producto.categoria}</span>
             {producto.marca && <span className="tag tag-neutral">{producto.marca}</span>}
             {producto.ingredienteActivo && <span className="tag tag-neutral">{producto.ingredienteActivo}</span>}
-            <span className="tag tag-neutral">{presentacionTexto(producto)}</span>
             <span className={`tag ${producto.autorizado ? "tag-success" : "tag-warning"}`}>{producto.autorizado ? "Autorizado" : "Pendiente"}</span>
             <span className={`tag ${producto.activo ? "tag-success" : "tag-danger"}`}>{producto.activo ? "Activo" : "Inactivo"}</span>
           </div>
@@ -530,6 +522,7 @@ function DetalleProducto({ productoId, onVolver }: { productoId: string; onVolve
             <thead>
               <tr>
                 <th>Lote</th>
+                <th>Presentación</th>
                 <th>Caducidad</th>
                 <th>Cantidad</th>
               </tr>
@@ -538,13 +531,18 @@ function DetalleProducto({ productoId, onVolver }: { productoId: string; onVolve
               {lotes.map((l) => (
                 <tr key={l.id}>
                   <td>{l.lote}</td>
+                  <td>
+                    {l.contenedor && l.presentacionCantidad
+                      ? presentacionTexto({ contenedor: l.contenedor, presentacionCantidad: l.presentacionCantidad, unidad: producto?.unidad ?? "" })
+                      : "—"}
+                  </td>
                   <td>{formatearFecha(l.fechaCaducidad)}</td>
                   <td>{formatearNumero(l.cantidadActual)}</td>
                 </tr>
               ))}
               {lotes.length === 0 && (
                 <tr>
-                  <td colSpan={3} style={{ textAlign: "center", color: "var(--ink-soft)" }}>
+                  <td colSpan={4} style={{ textAlign: "center", color: "var(--ink-soft)" }}>
                     Sin lotes registrados.
                   </td>
                 </tr>
@@ -577,6 +575,139 @@ function DetalleProducto({ productoId, onVolver }: { productoId: string; onVolve
             <tr>
               <td colSpan={4} style={{ textAlign: "center", color: "var(--ink-soft)" }}>
                 Sin movimientos todavía.
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/**
+ * Existencia por Ingrediente Activo (Prioridad 2, 4-sep-2026) — la
+ * Presentación dejó de ser fija por Producto Comercial, así que el total ya
+ * no puede verse "por Producto" sin más: se suma por Ingrediente Activo
+ * (agrupando Marcas distintas, mismo criterio "Ingrediente Activo, nunca
+ * marca" ya usado en Programar/Recetario — decisión de Diego, 4-sep-2026).
+ * Los productos sin Ingrediente Activo (empaque, refacciones, etc.) se ven
+ * uno por uno, como antes. El detalle por Nombre+Marca+Presentación vive en
+ * DetalleGrupoInventario, más abajo.
+ */
+function ExistenciaAgrupada({ onVerDetalle }: { onVerDetalle: (grupo: GrupoInventario) => void }) {
+  const [grupos, setGrupos] = useState<GrupoInventario[]>([]);
+  const [cargando, setCargando] = useState(true);
+
+  useEffect(() => {
+    setCargando(true);
+    api
+      .get<GrupoInventario[]>("/almacen/inventario")
+      .then(setGrupos)
+      .finally(() => setCargando(false));
+  }, []);
+
+  return (
+    <div className="card" style={{ marginBottom: 18 }}>
+      <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>Existencia por Ingrediente Activo</div>
+      {cargando ? (
+        <p>Cargando…</p>
+      ) : grupos.length === 0 ? (
+        <p style={{ fontSize: 12.5, color: "var(--ink-soft)" }}>Sin productos en el catálogo todavía.</p>
+      ) : (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+          {grupos.map((g) => (
+            <button
+              key={g.clave}
+              type="button"
+              className="card"
+              onClick={() => onVerDetalle(g)}
+              style={{ textAlign: "left", cursor: "pointer", minWidth: 180, border: "none" }}
+            >
+              <div style={{ fontSize: 12.5, fontWeight: 600 }}>{g.nombre}</div>
+              <div style={{ fontSize: 11, color: "var(--ink-soft)", marginBottom: 4 }}>
+                {g.categoria}
+                {!g.esIngredienteActivo && " · sin Ingrediente Activo"}
+              </div>
+              <div style={{ fontSize: 15, fontWeight: 700 }}>
+                {formatearNumero(g.totalStock)} {g.unidad}
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Detalle de un grupo (2.4): desglose por Nombre Comercial + Marca + Presentación. */
+function DetalleGrupoInventario({ grupo, onVolver }: { grupo: GrupoInventario; onVolver: () => void }) {
+  const [detalle, setDetalle] = useState<DetalleInventario | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const ruta = grupo.esIngredienteActivo
+      ? `/almacen/inventario/ingrediente/${encodeURIComponent(grupo.clave)}/detalle`
+      : `/almacen/inventario/producto/${grupo.clave}/detalle`;
+    api
+      .get<DetalleInventario>(ruta)
+      .then(setDetalle)
+      .catch((err) => setError(err instanceof ApiError ? err.message : "No se pudo cargar."));
+  }, [grupo]);
+
+  return (
+    <div>
+      <button className="btn-secondary" onClick={onVolver} style={{ marginBottom: 14 }}>
+        ← Volver al Inventario
+      </button>
+
+      <div className="card" style={{ marginBottom: 16 }}>
+        <h2>{grupo.nombre}</h2>
+        <div style={{ display: "flex", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
+          <span className="tag tag-neutral">{grupo.categoria}</span>
+        </div>
+        {detalle && (
+          <div className="kpi-card" style={{ maxWidth: 240, marginTop: 12 }}>
+            <div className="label">Existencia total</div>
+            <div className="value">
+              {formatearNumero(detalle.totalStock)} {detalle.unidad}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {error && <div className="tag tag-danger" style={{ display: "block", padding: "8px 12px", marginBottom: 12 }}>{error}</div>}
+
+      <h3 style={{ marginBottom: 10 }}>Por Nombre Comercial + Marca + Presentación</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>Nombre Comercial</th>
+            <th>Marca</th>
+            <th>Presentación</th>
+            <th>Contenedores en existencia</th>
+            <th>Cantidad total</th>
+          </tr>
+        </thead>
+        <tbody>
+          {detalle?.lineas.map((l, i) => (
+            <tr key={i}>
+              <td>{l.nombreComercial}</td>
+              <td>{l.marca ?? "—"}</td>
+              <td>
+                {l.contenedor && l.presentacionCantidad
+                  ? presentacionTexto({ contenedor: l.contenedor, presentacionCantidad: l.presentacionCantidad, unidad: detalle.unidad })
+                  : "Sin registrar"}
+              </td>
+              <td>{l.unidadesFisicas != null ? formatearNumero(l.unidadesFisicas, 2) : "—"}</td>
+              <td>
+                {formatearNumero(l.cantidadTotal)} {detalle.unidad}
+              </td>
+            </tr>
+          ))}
+          {detalle && detalle.lineas.length === 0 && (
+            <tr>
+              <td colSpan={5} style={{ textAlign: "center", color: "var(--ink-soft)" }}>
+                Sin existencia registrada todavía.
               </td>
             </tr>
           )}

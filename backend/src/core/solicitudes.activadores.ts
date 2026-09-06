@@ -31,8 +31,6 @@ const activarAltaProducto: Activador = async (tx, solicitud) => {
     categoria: string;
     ingredienteActivo?: string;
     nombreComercial: string;
-    contenedor: string;
-    presentacionCantidad: number;
     unidad: string;
     requiereLote: boolean;
   };

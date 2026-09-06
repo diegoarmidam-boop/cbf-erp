@@ -4,7 +4,7 @@ import { useAuth } from "../../lib/auth";
 import { useCatalogoAbierto } from "../../lib/useCatalogoAbierto";
 import { useProductos } from "../../lib/useProductos";
 import type { PreferenciaIngredienteActivo } from "../../lib/types";
-import { nombreConMarca, presentacionTexto } from "../../lib/producto";
+import { nombreConMarca } from "../../lib/producto";
 
 const ROLES_PUEDEN_EDITAR = ["director_general", "encargado_sistemas", "gerente_tecnico_produccion"];
 
@@ -144,15 +144,13 @@ export default function Preferencias() {
                   <option value="">Sin preferido definido</option>
                   {productosDelIngrediente.map((p) => (
                     <option key={p.id} value={p.id}>
-                      {nombreConMarca(p)} ({presentacionTexto(p)})
+                      {nombreConMarca(p)}
                     </option>
                   ))}
                 </select>
               ) : (
                 <div style={{ fontSize: 13 }}>
-                  {preferencia.productoPreferido
-                    ? `${nombreConMarca(preferencia.productoPreferido)} (${presentacionTexto(preferencia.productoPreferido)})`
-                    : "Sin preferido definido."}
+                  {preferencia.productoPreferido ? nombreConMarca(preferencia.productoPreferido) : "Sin preferido definido."}
                 </div>
               )}
             </div>
@@ -169,7 +167,7 @@ export default function Preferencias() {
                   <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     <span className="tag tag-neutral">{i + 1}</span>
                     <span style={{ fontSize: 13, flex: 1 }}>
-                      {nombreConMarca(s.producto)} ({presentacionTexto(s.producto)})
+                      {nombreConMarca(s.producto)}
                     </span>
                     {puedeEditar && (
                       <div style={{ display: "flex", gap: 4 }}>
@@ -196,7 +194,7 @@ export default function Preferencias() {
                       <option value="">Selecciona…</option>
                       {productosDisponiblesComoSustituto.map((p) => (
                         <option key={p.id} value={p.id}>
-                          {nombreConMarca(p)} ({presentacionTexto(p)})
+                          {nombreConMarca(p)}
                         </option>
                       ))}
                     </select>

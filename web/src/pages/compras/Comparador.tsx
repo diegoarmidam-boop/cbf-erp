@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api, ApiError, getToken } from "../../lib/api";
 import { useZonas } from "../../lib/useZonas";
+import { useCatalogoAbierto } from "../../lib/useCatalogoAbierto";
 import type {
   ComparacionCalculada,
   ComparacionResumen,
@@ -14,7 +15,7 @@ import type {
 } from "../../lib/types";
 import { formatearInstante } from "../../lib/fecha";
 import { formatearDinero, formatearNumero } from "../../lib/numero";
-import { nombreConMarca } from "../../lib/producto";
+import { nombreConMarca, presentacionTexto } from "../../lib/producto";
 import ConfirmModal from "../../components/ConfirmModal";
 
 interface CotizacionForm {
@@ -24,6 +25,7 @@ interface CotizacionForm {
   moneda: MonedaCotizacion;
   precioValor: string;
   tipoCambio: string;
+  contenedor: string;
   presentacionCantidad: string;
   cantidadDisponibleTotal: boolean;
   cantidadDisponible: string;
@@ -37,6 +39,7 @@ function nuevaCotizacion(): CotizacionForm {
     moneda: "MXN",
     precioValor: "",
     tipoCambio: "",
+    contenedor: "",
     presentacionCantidad: "",
     cantidadDisponibleTotal: true,
     cantidadDisponible: "",
@@ -51,6 +54,7 @@ function cotizacionAPayload(c: CotizacionForm) {
     moneda: c.moneda,
     precioValor: Number(c.precioValor),
     tipoCambio: c.moneda === "USD" ? Number(c.tipoCambio) : undefined,
+    contenedor: c.contenedor,
     presentacionCantidad: Number(c.presentacionCantidad),
     cantidadDisponibleTotal: c.cantidadDisponibleTotal,
     cantidadDisponible: c.cantidadDisponibleTotal ? undefined : Number(c.cantidadDisponible),
@@ -246,7 +250,7 @@ export default function Comparador() {
           {formatearDinero(c.precioValor)} {c.moneda}
           {c.moneda === "USD" && <div style={{ fontSize: 10.5, color: "var(--ink-soft)" }}>≈ {formatearDinero(c.precioValorMXN)} MXN</div>}
         </td>
-        <td>{c.presentacionCantidad}</td>
+        <td>{presentacionTexto({ contenedor: c.contenedor, presentacionCantidad: c.presentacionCantidad, unidad: detalle!.unidad })}</td>
         <td>{c.cantidadDisponibleTotal ? <span className="tag tag-neutral">Toda</span> : formatearNumero(c.cantidadDisponible ?? 0)}</td>
         <td>{formatearDinero(c.precioUnitarioMXN)}</td>
         <td>{c.unidadesAPedir}</td>
@@ -652,6 +656,7 @@ function LineaCotizacionForm({
   // Ingrediente Activo.
   productoId: string;
 }) {
+  const contenedores = useCatalogoAbierto("/almacen/contenedores");
   const [opciones, setOpciones] = useState<Producto[]>([]);
 
   useEffect(() => {
@@ -748,7 +753,18 @@ function LineaCotizacionForm({
         </label>
       )}
       <label className="field">
-        Presentación (tamaño del bulto)
+        Contenedor
+        <select value={c.contenedor} onChange={(e) => onChange({ contenedor: e.target.value })} required>
+          <option value="">Selecciona…</option>
+          {contenedores.items.map((ct) => (
+            <option key={ct.id} value={ct.nombre}>
+              {ct.nombre}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="field">
+        Presentación (cantidad por contenedor)
         <input
           type="number"
           min={0}

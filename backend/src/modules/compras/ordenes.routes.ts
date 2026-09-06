@@ -119,7 +119,9 @@ ordenesRouter.get(
 );
 
 const recibirSchema = z.object({
-  cantidadRecibida: z.number().positive(),
+  contenedor: z.string().min(1),
+  presentacionCantidad: z.number().positive(),
+  numeroUnidades: z.number().positive(),
   lote: z.string().optional(),
   fechaCaducidad: z.string().optional(),
   productoRecibidoId: z.string().min(1),
@@ -136,11 +138,12 @@ ordenesRouter.post("/:id/recibir", requirePermission("almacen", "capturar"), asy
     return;
   }
   try {
-    const orden = await recibirOrden(unoSolo(req.params.id), parsed.data.cantidadRecibida, req.usuario!.usuarioId, {
-      lote: parsed.data.lote,
-      fechaCaducidad: parsed.data.fechaCaducidad,
-      productoRecibidoId: parsed.data.productoRecibidoId,
-    });
+    const orden = await recibirOrden(
+      unoSolo(req.params.id),
+      { contenedor: parsed.data.contenedor, presentacionCantidad: parsed.data.presentacionCantidad, numeroUnidades: parsed.data.numeroUnidades },
+      req.usuario!.usuarioId,
+      { lote: parsed.data.lote, fechaCaducidad: parsed.data.fechaCaducidad, productoRecibidoId: parsed.data.productoRecibidoId }
+    );
     res.json(orden);
   } catch (err) {
     if (err instanceof TransicionInvalidaError) {

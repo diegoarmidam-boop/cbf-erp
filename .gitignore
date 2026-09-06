@@ -17,3 +17,4 @@ mobile/ios/
 mobile/android/
 backend/uploads/
 ops/backup-db.bat
+ops/backups/

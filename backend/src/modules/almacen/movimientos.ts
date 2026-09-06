@@ -58,6 +58,11 @@ interface OpcionesEntrada {
   lote?: string;
   fechaCaducidad?: string;
   referenciaId?: string;
+  // Presentación de esta entrada (Prioridad 2, 4-sep-2026) — se guarda en
+  // el lote para el desglose de Inventario. Null en entradas que no vienen
+  // de una recepción real (ej. abono de sobrante).
+  contenedor?: string;
+  presentacionCantidad?: number;
 }
 
 /**
@@ -78,9 +83,13 @@ export async function registrarEntradaTx(
   const producto = await tx.producto.findUniqueOrThrow({ where: { id: productoId } });
   const claveLote = producto.requiereLote ? (opciones.lote ?? SIN_LOTE) : SIN_LOTE;
 
-  let lote = producto.requiereLote
-    ? await tx.productoLote.findFirst({ where: { productoId, lote: claveLote } })
-    : await tx.productoLote.findFirst({ where: { productoId, lote: SIN_LOTE } });
+  // La Presentación es parte de qué distingue un lote de otro (Prioridad 2,
+  // 4-sep-2026): un mismo string de lote (incl. "ÚNICO") puede recibir
+  // entregas en presentaciones distintas con el tiempo — sin esto se
+  // sumarían ciegas en una sola fila, perdiendo el desglose de Inventario.
+  let lote = await tx.productoLote.findFirst({
+    where: { productoId, lote: claveLote, contenedor: opciones.contenedor ?? null, presentacionCantidad: opciones.presentacionCantidad ?? null },
+  });
 
   if (!lote) {
     lote = await tx.productoLote.create({
@@ -89,6 +98,8 @@ export async function registrarEntradaTx(
         lote: claveLote,
         fechaCaducidad: opciones.fechaCaducidad ? new Date(opciones.fechaCaducidad) : undefined,
         cantidadActual: 0,
+        contenedor: opciones.contenedor,
+        presentacionCantidad: opciones.presentacionCantidad,
       },
     });
   }

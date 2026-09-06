@@ -8,7 +8,7 @@ import type { EstadoLineaPendiente, GrupoPendienteProgramacion, OrdenCompra, Pen
 import FechaInput from "../../components/FechaInput";
 import { formatearFecha, formatearInstante } from "../../lib/fecha";
 import { formatearDinero, formatearNumero } from "../../lib/numero";
-import { presentacionTexto } from "../../lib/producto";
+import { nombreConMarca } from "../../lib/producto";
 import OrdenesDeCompra from "./OrdenesDeCompra";
 
 const ETIQUETAS_ESTADO: Record<string, string> = {
@@ -453,7 +453,7 @@ export default function Ordenes() {
               <option value="">Selecciona…</option>
               {productos.map((p) => (
                 <option key={p.id} value={p.id}>
-                  {p.nombreComercial} ({presentacionTexto(p)})
+                  {nombreConMarca(p)}
                 </option>
               ))}
             </select>

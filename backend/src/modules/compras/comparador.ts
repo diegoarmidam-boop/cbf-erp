@@ -9,6 +9,9 @@ export interface CotizacionInput {
   moneda: MonedaCotizacion;
   precioValor: number;
   tipoCambio?: number;
+  // Presentación de esta cotización (Prioridad 2, 4-sep-2026: `contenedor`
+  // se agrega — el tamaño solo ya existía).
+  contenedor: string;
   presentacionCantidad: number;
   // Cantidad disponible (3-sep-2026, 1.4) — obligatorio uno de los dos:
   // `cantidadDisponibleTotal: true` (el Proveedor surte todo lo que se le
@@ -105,6 +108,7 @@ export async function crearComparacion(input: CrearComparacionInput, creadoPorId
           moneda: c.moneda,
           precioValor: c.precioValor,
           tipoCambio: c.moneda === "USD" ? c.tipoCambio : undefined,
+          contenedor: c.contenedor,
           presentacionCantidad: c.presentacionCantidad,
           cantidadDisponibleTotal: c.cantidadDisponibleTotal,
           cantidadDisponible: c.cantidadDisponibleTotal ? undefined : c.cantidadDisponible,
@@ -131,6 +135,7 @@ export function agregarCotizaciones(comparacionId: string, cotizaciones: Cotizac
       moneda: c.moneda,
       precioValor: c.precioValor,
       tipoCambio: c.moneda === "USD" ? c.tipoCambio : undefined,
+      contenedor: c.contenedor,
       presentacionCantidad: c.presentacionCantidad,
       cantidadDisponibleTotal: c.cantidadDisponibleTotal,
       cantidadDisponible: c.cantidadDisponibleTotal ? undefined : c.cantidadDisponible,
@@ -174,6 +179,7 @@ export interface CotizacionCalculadaSalida {
   precioValor: number;
   tipoCambio: number | null;
   precioValorMXN: number;
+  contenedor: string;
   presentacionCantidad: number;
   cantidadDisponibleTotal: boolean;
   cantidadDisponible: number | null;
@@ -249,6 +255,7 @@ export async function obtenerComparacionCalculada(id: string): Promise<Comparaci
       moneda: c.moneda,
       precioValor: Number(c.precioValor),
       tipoCambio: c.tipoCambio != null ? Number(c.tipoCambio) : null,
+      contenedor: c.contenedor,
       presentacionCantidad: Number(c.presentacionCantidad),
       cantidadDisponibleTotal: c.cantidadDisponibleTotal,
       cantidadDisponible: c.cantidadDisponible != null ? Number(c.cantidadDisponible) : null,

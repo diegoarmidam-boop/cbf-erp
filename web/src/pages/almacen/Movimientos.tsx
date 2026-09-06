@@ -2,7 +2,7 @@ import { useState, type FormEvent } from "react";
 import { api, ApiError } from "../../lib/api";
 import { useProductos } from "../../lib/useProductos";
 import { useHuertas } from "../../lib/useHuertas";
-import { presentacionTexto } from "../../lib/producto";
+import { nombreConMarca } from "../../lib/producto";
 import FechaInput from "../../components/FechaInput";
 
 type Accion = "entrada" | "entregar" | "salida";
@@ -74,7 +74,7 @@ export default function Movimientos() {
             <option value="">Selecciona…</option>
             {productos.map((p) => (
               <option key={p.id} value={p.id}>
-                {p.nombreComercial} ({presentacionTexto(p)})
+                {nombreConMarca(p)}
               </option>
             ))}
           </select>

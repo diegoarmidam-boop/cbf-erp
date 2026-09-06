@@ -21,8 +21,6 @@ const altaSchema = z.object({
   ingredienteActivo: z.string().optional(),
   nombreComercial: z.string().min(1),
   marca: z.string().optional(),
-  contenedor: z.string().min(1),
-  presentacionCantidad: z.number().positive(),
   unidad: z.string().min(1),
   requiereLote: z.boolean(),
 });

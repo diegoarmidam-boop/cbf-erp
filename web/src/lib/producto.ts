@@ -1,7 +1,13 @@
 import type { Producto } from "./types";
 
-/** Combina contenedor + cantidad + unidad solo para mostrarse (ej. "Saco 25 kg") — se capturan por separado. */
-export function presentacionTexto(p: Pick<Producto, "contenedor" | "presentacionCantidad" | "unidad">): string {
+/**
+ * Combina contenedor + cantidad + unidad solo para mostrarse (ej. "Saco 25
+ * kg"). Desde la Prioridad 2 (4-sep-2026) la Presentación ya no es fija por
+ * Producto — se captura por transacción (cotización, recepción, lote), así
+ * que esto ya no recibe un Producto sino la Presentación específica de esa
+ * transacción, más la unidad base del Producto para la etiqueta.
+ */
+export function presentacionTexto(p: { contenedor: string; presentacionCantidad: number | string; unidad: string }): string {
   return `${p.contenedor} ${p.presentacionCantidad} ${p.unidad}`;
 }
 

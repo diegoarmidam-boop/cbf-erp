@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { productosRouter } from "./productos.routes.js";
 import { movimientosRouter } from "./movimientos.routes.js";
+import { inventarioRouter } from "./inventario.routes.js";
 import { almacenLocalRouter } from "./almacen-local.routes.js";
 import { categoriasRouter, contenedoresRouter, ingredientesActivosRouter, marcasRouter } from "./catalogos.routes.js";
 import { preferenciasRouter } from "./preferencias.routes.js";
@@ -8,6 +9,7 @@ import { preferenciasRouter } from "./preferencias.routes.js";
 export const almacenRouter = Router();
 almacenRouter.use("/productos", productosRouter);
 almacenRouter.use("/movimientos", movimientosRouter);
+almacenRouter.use("/inventario", inventarioRouter);
 almacenRouter.use("/local", almacenLocalRouter);
 almacenRouter.use("/categorias", categoriasRouter);
 almacenRouter.use("/ingredientes-activos", ingredientesActivosRouter);

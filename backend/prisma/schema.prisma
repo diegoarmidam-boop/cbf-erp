@@ -335,22 +335,22 @@ model Personal {
   // partir de esta fecha; se limpia manualmente si vuelve a trabajar.
   noDisponibleDesde  DateTime?    @db.Date
 
-  usuario                    Usuario?
-  liquidaciones              Liquidacion[]
-  documentos                 PersonalDocumento[]
-  grupoMiembros              GrupoMiembro[]
-  registrosNomina            RegistroNomina[]
-  prestamos                  Prestamo[]
-  bonosOtorgados             BonoOtorgado[]
-  compromisosEspeciales      CompromisoEspecial[]
-  faltasInjustificadas       FaltaInjustificada[]
-  equipoUsoDiario            EquipoUsoDiario[]
-  grupoAsistenciaDias        GrupoAsistenciaDia[]
-  aplicacionLineasOperador   AplicacionRealizadaLinea[]        @relation("AplicacionLineaOperador")
-  aplicacionLineaPersonas    AplicacionRealizadaLineaPersona[] @relation("AplicacionLineaPersona")
-  equiposComoOperadorDesignado Equipo[]                        @relation("EquipoOperadorDesignado")
-  actividadLineasOperador   ActividadRealizadaLinea[]          @relation("ActividadLineaOperador")
-  actividadLineaPersonas    ActividadRealizadaLineaPersona[]   @relation("ActividadLineaPersona")
+  usuario                      Usuario?
+  liquidaciones                Liquidacion[]
+  documentos                   PersonalDocumento[]
+  grupoMiembros                GrupoMiembro[]
+  registrosNomina              RegistroNomina[]
+  prestamos                    Prestamo[]
+  bonosOtorgados               BonoOtorgado[]
+  compromisosEspeciales        CompromisoEspecial[]
+  faltasInjustificadas         FaltaInjustificada[]
+  equipoUsoDiario              EquipoUsoDiario[]
+  grupoAsistenciaDias          GrupoAsistenciaDia[]
+  aplicacionLineasOperador     AplicacionRealizadaLinea[]        @relation("AplicacionLineaOperador")
+  aplicacionLineaPersonas      AplicacionRealizadaLineaPersona[] @relation("AplicacionLineaPersona")
+  equiposComoOperadorDesignado Equipo[]                          @relation("EquipoOperadorDesignado")
+  actividadLineasOperador      ActividadRealizadaLinea[]         @relation("ActividadLineaOperador")
+  actividadLineaPersonas       ActividadRealizadaLineaPersona[]  @relation("ActividadLineaPersona")
 
   @@index([tipo, activo])
 }
@@ -628,17 +628,17 @@ model PrestamoDescuento {
 // [fechaInicio, fechaFin] es el que se liquida (default: día siguiente al
 // último cierre de Nómina a nivel empresa → último día trabajado).
 model Liquidacion {
-  id                    String   @id @default(uuid())
-  personalId            String
-  personal              Personal @relation(fields: [personalId], references: [id])
-  fechaInicio           DateTime @db.Date
-  fechaFin              DateTime @db.Date
-  bruto                 Decimal  @db.Decimal(10, 2)
-  bonos                 Decimal  @db.Decimal(10, 2)
-  descuentoPrestamos    Decimal  @db.Decimal(10, 2) // 0 si no se confirmó descontar — nunca automático, ver liquidaciones.ts
-  neto                  Decimal  @db.Decimal(10, 2)
-  liquidadoPorId        String
-  fechaLiquidacion      DateTime @default(now())
+  id                 String   @id @default(uuid())
+  personalId         String
+  personal           Personal @relation(fields: [personalId], references: [id])
+  fechaInicio        DateTime @db.Date
+  fechaFin           DateTime @db.Date
+  bruto              Decimal  @db.Decimal(10, 2)
+  bonos              Decimal  @db.Decimal(10, 2)
+  descuentoPrestamos Decimal  @db.Decimal(10, 2) // 0 si no se confirmó descontar — nunca automático, ver liquidaciones.ts
+  neto               Decimal  @db.Decimal(10, 2)
+  liquidadoPorId     String
+  fechaLiquidacion   DateTime @default(now())
 
   @@index([personalId])
 }
@@ -903,47 +903,63 @@ model Marca {
   activo Boolean @default(true)
 }
 
+// Presentación (Contenedor + Cantidad) dejó de ser fija por Producto
+// Comercial (Prioridad 2, 4-sep-2026) — un mismo Producto (misma Marca +
+// mismo Nombre) puede llegar en presentaciones distintas entre una compra
+// y otra (a veces bulto de 25 kg, a veces de 10 kg). Lo único fijo aquí es
+// `unidad`, la unidad BASE para dosis/consumo (kg, L, g) — la Presentación
+// real de cada entrada se captura por transacción: al cotizar
+// (ComparacionCotizacion.contenedor/presentacionCantidad) y al confirmar
+// recepción (OrdenCompraRecepcion.contenedor/presentacionCantidad/
+// numeroUnidades), y queda registrada por lote (ProductoLote.contenedor/
+// presentacionCantidad) para el desglose de Inventario.
 model Producto {
-  id                   String    @id @default(uuid())
-  categoria            String // agroquimico | fertilizante | refaccion | general | ...
-  ingredienteActivo    String?
-  nombreComercial      String
-  marca                String? // catálogo abierto (26-ago-2026), independiente del Proveedor
-  contenedor           String // catálogo abierto (Saco/Bote/Garrafa/Tanque/Bolsa/...)
-  presentacionCantidad Decimal   @db.Decimal(10, 3)
-  unidad               String
-  requiereLote         Boolean   @default(false) // agroquímicos/fertilizantes: true; Almacén General: false
-  autorizado           Boolean   @default(false) // agroquímico/fertilizante deben autorizarse antes de comprarse/aplicarse
-  autorizadoPorId      String?
-  fechaAutorizacion    DateTime?
-  activo               Boolean   @default(true) // desactivar en vez de borrar — hay lotes/movimientos/historial ligados
+  id                String    @id @default(uuid())
+  categoria         String // agroquimico | fertilizante | refaccion | general | ...
+  ingredienteActivo String?
+  nombreComercial   String
+  marca             String? // catálogo abierto (26-ago-2026), independiente del Proveedor
+  unidad            String
+  requiereLote      Boolean   @default(false) // agroquímicos/fertilizantes: true; Almacén General: false
+  autorizado        Boolean   @default(false) // agroquímico/fertilizante deben autorizarse antes de comprarse/aplicarse
+  autorizadoPorId   String?
+  fechaAutorizacion DateTime?
+  activo            Boolean   @default(true) // desactivar en vez de borrar — hay lotes/movimientos/historial ligados
 
-  lotes                          ProductoLote[]
-  movimientosCentral             AlmacenCentralMovimiento[]
-  almacenLocal                   AlmacenLocal[]
-  ordenesCompra                  OrdenCompra[]
-  aplicacionProductos            AplicacionProducto[]
-  fertilizacionGranularProductos FertilizacionGranularProducto[]
-  fertirriegoProductos           FertirriegoProgramacionProducto[]
-  riegoRegistroDiarioProductos   RiegoRegistroDiarioProducto[]
-  comparaciones                  Comparacion[]
-  cotizacionesComoProductoComercial ComparacionCotizacion[] @relation("ProductoComercialDeCotizacion")
-  preferidoDe                    IngredienteActivo[]              @relation("ProductoPreferidoDe")
-  sustitutoDe                    IngredienteActivoSustituto[]      @relation("ProductoSustitutoDe")
-  recetaProductos                RecetaProducto[]
-  recetaFertirriegoProductos     RecetaFertirriegoProducto[]
-  recepcionesComoRecibido        OrdenCompraRecepcion[]           @relation("ProductoRecibidoEnRecepcion")
+  lotes                             ProductoLote[]
+  movimientosCentral                AlmacenCentralMovimiento[]
+  almacenLocal                      AlmacenLocal[]
+  ordenesCompra                     OrdenCompra[]
+  aplicacionProductos               AplicacionProducto[]
+  fertilizacionGranularProductos    FertilizacionGranularProducto[]
+  fertirriegoProductos              FertirriegoProgramacionProducto[]
+  riegoRegistroDiarioProductos      RiegoRegistroDiarioProducto[]
+  comparaciones                     Comparacion[]
+  cotizacionesComoProductoComercial ComparacionCotizacion[]           @relation("ProductoComercialDeCotizacion")
+  preferidoDe                       IngredienteActivo[]               @relation("ProductoPreferidoDe")
+  sustitutoDe                       IngredienteActivoSustituto[]      @relation("ProductoSustitutoDe")
+  recetaProductos                   RecetaProducto[]
+  recetaFertirriegoProductos        RecetaFertirriegoProducto[]
+  recepcionesComoRecibido           OrdenCompraRecepcion[]            @relation("ProductoRecibidoEnRecepcion")
 
   @@index([categoria])
 }
 
 model ProductoLote {
-  id             String    @id @default(uuid())
-  productoId     String
-  producto       Producto  @relation(fields: [productoId], references: [id])
-  lote           String
-  fechaCaducidad DateTime? @db.Date
-  cantidadActual Decimal   @db.Decimal(12, 3)
+  id                   String    @id @default(uuid())
+  productoId           String
+  producto             Producto  @relation(fields: [productoId], references: [id])
+  lote                 String
+  fechaCaducidad       DateTime? @db.Date
+  cantidadActual       Decimal   @db.Decimal(12, 3)
+  // Presentación de ESTE lote (Prioridad 2, 4-sep-2026) — null en lotes de
+  // ajuste/abono que no vienen de una recepción real (ver
+  // movimientos.ts). Un mismo string de `lote` (incl. "ÚNICO", productos
+  // sin lote real) puede tener más de una fila si llegó en presentaciones
+  // distintas — se distinguen por este par, nunca se mezclan en una sola
+  // suma ciega.
+  contenedor           String?
+  presentacionCantidad Decimal?  @db.Decimal(10, 3)
 
   movimientos AlmacenCentralMovimiento[]
 
@@ -1144,14 +1160,23 @@ model CentroCosto {
 }
 
 model OrdenCompraRecepcion {
-  id               String      @id @default(uuid())
-  ordenId          String
-  orden            OrdenCompra @relation(fields: [ordenId], references: [id])
-  cantidadRecibida Decimal     @db.Decimal(12, 3)
-  lote             String?
-  fechaCaducidad   DateTime?   @db.Date
-  fechaRecepcion   DateTime    @default(now())
-  recibidoPorId    String
+  id                   String      @id @default(uuid())
+  ordenId              String
+  orden                OrdenCompra @relation(fields: [ordenId], references: [id])
+  // Presentación al recibir (Prioridad 2, 4-sep-2026) — el formato de
+  // captura es "X Contenedores de Y Cantidad" (ej. "10 Garrafas de 20 L"),
+  // nunca un número suelto a mano. `cantidadRecibida` se sigue guardando
+  // como el TOTAL ya calculado (numeroUnidades × presentacionCantidad) —
+  // es lo que de verdad mueve el inventario y lo que ya lee todo el resto
+  // del sistema, no se duplica esa cuenta en otro lado.
+  contenedor           String
+  presentacionCantidad Decimal     @db.Decimal(10, 3)
+  numeroUnidades       Decimal     @db.Decimal(10, 3)
+  cantidadRecibida     Decimal     @db.Decimal(12, 3)
+  lote                 String?
+  fechaCaducidad       DateTime?   @db.Date
+  fechaRecepcion       DateTime    @default(now())
+  recibidoPorId        String
 
   // Qué producto llegó de verdad a la bodega — el preferido, o alguno de
   // sus sustitutos autorizados (2-sep-2026, 9.14) — confirmado
@@ -1206,13 +1231,13 @@ enum MonedaCotizacion {
 }
 
 model ComparacionCotizacion {
-  id            String           @id @default(uuid())
-  comparacionId String
-  comparacion   Comparacion      @relation(fields: [comparacionId], references: [id])
-  proveedorId   String
-  proveedor     Proveedor        @relation(fields: [proveedorId], references: [id])
-  zonaId        String
-  zona          ZonaFlete        @relation(fields: [zonaId], references: [id])
+  id                   String           @id @default(uuid())
+  comparacionId        String
+  comparacion          Comparacion      @relation(fields: [comparacionId], references: [id])
+  proveedorId          String
+  proveedor            Proveedor        @relation(fields: [proveedorId], references: [id])
+  zonaId               String
+  zona                 ZonaFlete        @relation(fields: [zonaId], references: [id])
   // Producto Comercial cotizado (Prioridad 2, 3-sep-2026) — ya no texto
   // libre: se elige del catálogo de Almacén (9.15), acotado al preferido y
   // los sustitutos autorizados del Ingrediente Activo que se está
@@ -1220,20 +1245,21 @@ model ComparacionCotizacion {
   // opcionesRecepcionDeProducto). El Proveedor no tiene que estar
   // vinculado de antemano a ninguna Marca — cualquiera puede vender
   // cualquier Producto Comercial ya dado de alta.
-  productoComercialId String
-  productoComercial   Producto         @relation("ProductoComercialDeCotizacion", fields: [productoComercialId], references: [id])
-  moneda        MonedaCotizacion @default(MXN)
+  productoComercialId  String
+  productoComercial    Producto         @relation("ProductoComercialDeCotizacion", fields: [productoComercialId], references: [id])
+  moneda               MonedaCotizacion @default(MXN)
   // Precio de la presentación completa, en la moneda capturada (`moneda`)
   // — si moneda=USD, se convierte con `tipoCambio` (capturado a mano cada
   // vez, no un valor compartido del sistema: cada proveedor puede manejar
   // un tipo de cambio distinto ese día).
-  precioValor   Decimal          @db.Decimal(10, 2)
-  tipoCambio    Decimal?         @db.Decimal(10, 4)
-  // Tamaño del bulto/costal/bidón que vende este proveedor, en la misma
-  // unidad del Producto (Comparacion.unidad) — no se vuelve a capturar la
-  // unidad aquí, ya viene fija del producto elegido.
-  presentacionCantidad Decimal   @db.Decimal(10, 3)
-  fechaCreacion DateTime         @default(now())
+  precioValor          Decimal          @db.Decimal(10, 2)
+  tipoCambio           Decimal?         @db.Decimal(10, 4)
+  // Presentación de esta cotización (Prioridad 2, 4-sep-2026: `contenedor`
+  // se agrega — el tamaño solo ya existía) — en la misma unidad del
+  // Producto (Comparacion.unidad), no se vuelve a capturar la unidad aquí.
+  contenedor           String
+  presentacionCantidad Decimal          @db.Decimal(10, 3)
+  fechaCreacion        DateTime         @default(now())
 
   // Cantidad disponible (3-sep-2026, 1.4) — tope real de lo que este
   // Proveedor puede surtir con esta cotización. `true` = "puede surtir
@@ -1264,11 +1290,11 @@ model ComparacionCotizacion {
 // (Prioridad 2) también se captura en el catálogo de Proveedores — ya no
 // es exclusiva del Comparador, se precarga sola de ahí al cotizar.
 model ZonaFlete {
-  id              String   @id @default(uuid())
-  nombre          String   @unique
-  costoFleteKg    Decimal  @db.Decimal(10, 4)
-  esZonaComprador Boolean  @default(false)
-  activo          Boolean  @default(true)
+  id              String  @id @default(uuid())
+  nombre          String  @unique
+  costoFleteKg    Decimal @db.Decimal(10, 4)
+  esZonaComprador Boolean @default(false)
+  activo          Boolean @default(true)
 
   cotizaciones ComparacionCotizacion[]
   proveedores  Proveedor[]
@@ -1334,17 +1360,17 @@ model ActividadRealizada {
 // confirmado con Diego para no perder la flexibilidad que ya tenía
 // Actividades de que cada quien trabaje horas distintas el mismo reporte.
 model ActividadRealizadaLinea {
-  id            String                  @id @default(uuid())
+  id            String               @id @default(uuid())
   realizadaId   String
-  realizada     ActividadRealizada      @relation(fields: [realizadaId], references: [id])
+  realizada     ActividadRealizada   @relation(fields: [realizadaId], references: [id])
   tipo          TipoRecursoActividad
   tractorId     String?
-  tractor       Equipo?                 @relation("ActividadLineaTractor", fields: [tractorId], references: [id])
+  tractor       Equipo?              @relation("ActividadLineaTractor", fields: [tractorId], references: [id])
   operadorId    String?
-  operador      Personal?               @relation("ActividadLineaOperador", fields: [operadorId], references: [id])
-  operadorHoras Decimal?                @db.Decimal(6, 2) // solo si tipo=tractor/mixta
+  operador      Personal?            @relation("ActividadLineaOperador", fields: [operadorId], references: [id])
+  operadorHoras Decimal?             @db.Decimal(6, 2) // solo si tipo=tractor/mixta
   implementoId  String?
-  implemento    Equipo?                 @relation("ActividadLineaImplemento", fields: [implementoId], references: [id])
+  implemento    Equipo?              @relation("ActividadLineaImplemento", fields: [implementoId], references: [id])
 
   personas ActividadRealizadaLineaPersona[]
 

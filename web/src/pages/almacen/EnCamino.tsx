@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import { api, ApiError, getToken } from "../../lib/api";
+import { useCatalogoAbierto } from "../../lib/useCatalogoAbierto";
 import type { OrdenCompra, Producto } from "../../lib/types";
 import FechaInput from "../../components/FechaInput";
 import { formatearFecha } from "../../lib/fecha";
-import { presentacionTexto } from "../../lib/producto";
+import { formatearNumero } from "../../lib/numero";
+import { nombreConMarca } from "../../lib/producto";
 
 /**
  * "En Camino" en Almacén (Prioridad 4, 3-sep-2026) — espejo de la pestaña
@@ -18,13 +20,20 @@ export default function EnCamino() {
   const [ordenes, setOrdenes] = useState<OrdenCompra[]>([]);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const contenedores = useCatalogoAbierto("/almacen/contenedores");
 
   const [recibiendo, setRecibiendo] = useState<string | null>(null);
-  const [cantidadRecibida, setCantidadRecibida] = useState("");
+  // Presentación al recibir (Prioridad 2, 4-sep-2026) — "X Contenedores de Y
+  // Cantidad", el total nunca se captura suelto, se calcula solo.
+  const [contenedor, setContenedor] = useState("");
+  const [presentacionCantidad, setPresentacionCantidad] = useState("");
+  const [numeroUnidades, setNumeroUnidades] = useState("");
   const [lote, setLote] = useState("");
   const [fechaCaducidad, setFechaCaducidad] = useState("");
   const [productoRecibidoId, setProductoRecibidoId] = useState("");
   const [opcionesRecepcion, setOpcionesRecepcion] = useState<Producto[]>([]);
+
+  const totalRecibido = Number(presentacionCantidad || 0) * Number(numeroUnidades || 0);
 
   function cargar() {
     setCargando(true);
@@ -40,7 +49,9 @@ export default function EnCamino() {
   async function abrirRecibir(orden: OrdenCompra) {
     setError(null);
     setRecibiendo(orden.id);
-    setCantidadRecibida(orden.cantidadSolicitada);
+    setContenedor("");
+    setPresentacionCantidad("");
+    setNumeroUnidades("");
     setLote("");
     setFechaCaducidad("");
     setProductoRecibidoId(orden.productoId);
@@ -52,7 +63,9 @@ export default function EnCamino() {
     setError(null);
     try {
       await api.post(`/compras/ordenes/${id}/recibir`, {
-        cantidadRecibida: Number(cantidadRecibida),
+        contenedor,
+        presentacionCantidad: Number(presentacionCantidad),
+        numeroUnidades: Number(numeroUnidades),
         lote: lote || undefined,
         fechaCaducidad: fechaCaducidad || undefined,
         productoRecibidoId,
@@ -127,20 +140,53 @@ export default function EnCamino() {
               {recibiendo === o.id && (
                 <div style={{ marginTop: 12, borderTop: "1px solid var(--border)", paddingTop: 12 }}>
                   <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
-                    <label className="field">
-                      Cantidad recibida
-                      <input type="number" step="0.001" value={cantidadRecibida} onChange={(e) => setCantidadRecibida(e.target.value)} />
-                    </label>
                     <label className="field" style={{ minWidth: 220 }}>
                       Producto que llegó de verdad
                       <select value={productoRecibidoId} onChange={(e) => setProductoRecibidoId(e.target.value)} required>
                         {opcionesRecepcion.map((p) => (
                           <option key={p.id} value={p.id}>
-                            {p.nombreComercial} ({presentacionTexto(p)}){p.id === o.productoId ? " — pedido" : " — sustituto"}
+                            {nombreConMarca(p)}
+                            {p.id === o.productoId ? " — pedido" : " — sustituto"}
                           </option>
                         ))}
                       </select>
                     </label>
+                    <label className="field">
+                      Contenedor
+                      <select value={contenedor} onChange={(e) => setContenedor(e.target.value)} required>
+                        <option value="">Selecciona…</option>
+                        {contenedores.items.map((ct) => (
+                          <option key={ct.id} value={ct.nombre}>
+                            {ct.nombre}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="field">
+                      Cantidad por contenedor ({o.producto.unidad})
+                      <input
+                        type="number"
+                        min={0}
+                        step="0.001"
+                        value={presentacionCantidad}
+                        onChange={(e) => setPresentacionCantidad(e.target.value)}
+                        style={{ width: 140 }}
+                      />
+                    </label>
+                    <label className="field">
+                      Número de Contenedores
+                      <input
+                        type="number"
+                        min={0}
+                        step="0.001"
+                        value={numeroUnidades}
+                        onChange={(e) => setNumeroUnidades(e.target.value)}
+                        style={{ width: 140 }}
+                      />
+                    </label>
+                    <div style={{ fontSize: 12.5, fontWeight: 600, paddingBottom: 8 }}>
+                      Total: {formatearNumero(totalRecibido)} {o.producto.unidad}
+                    </div>
                     {o.producto.requiereLote && (
                       <>
                         <label className="field">

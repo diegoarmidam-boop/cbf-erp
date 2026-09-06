@@ -520,19 +520,25 @@ export function marcarOrdenPagada(id: string) {
  */
 export async function recibirOrden(
   id: string,
-  cantidadRecibida: number,
+  presentacion: { contenedor: string; presentacionCantidad: number; numeroUnidades: number },
   recibidoPorId: string,
   opciones: { lote?: string; fechaCaducidad?: string; productoRecibidoId?: string } = {}
 ) {
   const orden = await prisma.ordenCompra.findUniqueOrThrow({ where: { id } });
   if (orden.estado !== "generada") throw new TransicionInvalidaError("generada");
   const productoRecibidoId = opciones.productoRecibidoId ?? orden.productoId;
+  // El total nunca se captura suelto (Prioridad 2, 4-sep-2026) — siempre
+  // Unidades × Cantidad por unidad de la Presentación con la que llegó.
+  const cantidadRecibida = presentacion.numeroUnidades * presentacion.presentacionCantidad;
 
   return prisma.$transaction(async (tx) => {
     await tx.ordenCompra.update({ where: { id }, data: { estado: "recibida" } });
     await tx.ordenCompraRecepcion.create({
       data: {
         ordenId: id,
+        contenedor: presentacion.contenedor,
+        presentacionCantidad: presentacion.presentacionCantidad,
+        numeroUnidades: presentacion.numeroUnidades,
         cantidadRecibida,
         lote: opciones.lote,
         fechaCaducidad: opciones.fechaCaducidad ? new Date(opciones.fechaCaducidad) : undefined,
@@ -547,6 +553,8 @@ export async function recibirOrden(
       lote: opciones.lote,
       fechaCaducidad: opciones.fechaCaducidad,
       referenciaId: id,
+      contenedor: presentacion.contenedor,
+      presentacionCantidad: presentacion.presentacionCantidad,
     });
 
     // Si esta orden nació automática porque una Aplicación/Fertilización en

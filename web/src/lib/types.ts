@@ -343,8 +343,6 @@ export interface Producto {
   ingredienteActivo: string | null;
   nombreComercial: string;
   marca: string | null;
-  contenedor: string;
-  presentacionCantidad: string;
   unidad: string;
   requiereLote: boolean;
   autorizado: boolean;
@@ -376,6 +374,36 @@ export interface ProductoLote {
   lote: string;
   fechaCaducidad: string | null;
   cantidadActual: string;
+  contenedor: string | null;
+  presentacionCantidad: string | null;
+}
+
+// Inventario agrupado por Ingrediente Activo (Prioridad 2, 4-sep-2026) —
+// la Presentación dejó de ser fija por Producto, así que el total ya no
+// puede verse "por Producto" sin más.
+export interface GrupoInventario {
+  clave: string;
+  esIngredienteActivo: boolean;
+  nombre: string;
+  categoria: string;
+  unidad: string;
+  totalStock: number;
+}
+
+export interface DetalleInventarioLinea {
+  productoId: string;
+  nombreComercial: string;
+  marca: string | null;
+  contenedor: string | null;
+  presentacionCantidad: number | null;
+  unidadesFisicas: number | null;
+  cantidadTotal: number;
+}
+
+export interface DetalleInventario {
+  unidad: string;
+  totalStock: number;
+  lineas: DetalleInventarioLinea[];
 }
 
 export type TipoMovimientoAlmacenCentral =
@@ -643,6 +671,7 @@ export interface CotizacionCalculada {
   precioValor: number;
   tipoCambio: number | null;
   precioValorMXN: number;
+  contenedor: string;
   presentacionCantidad: number;
   cantidadDisponibleTotal: boolean;
   cantidadDisponible: number | null;
@@ -698,6 +727,7 @@ export interface LineaOrigenCotizacion {
   proveedorNombre: string;
   nombreComercial: string;
   precioUnitarioMXN: number;
+  contenedor: string;
   presentacionCantidad: number;
   cantidadDisponibleTotal: boolean;
   cantidadDisponible: number | null;

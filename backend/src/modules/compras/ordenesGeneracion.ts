@@ -28,6 +28,7 @@ export interface LineaOrigenCotizacion {
   // (`cantidadComprada`) — antes no viajaba, así que Órdenes de Compra
   // precargaba el pendiente crudo sin redondear (bug real: Folio 23, 0.2 L
   // en vez de 25 L).
+  contenedor: string;
   presentacionCantidad: number;
   cantidadDisponibleTotal: boolean;
   cantidadDisponible: number | null;
@@ -165,6 +166,7 @@ async function armarLineasDeNecesidades(ordenIds: string[]): Promise<LineaOrigen
         proveedorNombre: cot.proveedor.nombre,
         nombreComercial: cot.productoComercial.nombreComercial,
         precioUnitarioMXN: cot.precioUnitarioMXN,
+        contenedor: cot.contenedor,
         presentacionCantidad: cot.presentacionCantidad,
         cantidadDisponibleTotal: cot.cantidadDisponibleTotal,
         cantidadDisponible: cot.cantidadDisponible,

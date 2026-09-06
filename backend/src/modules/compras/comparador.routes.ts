@@ -54,6 +54,7 @@ const cotizacionSchema = z
     moneda: z.enum(["MXN", "USD"]),
     precioValor: z.number().positive(),
     tipoCambio: z.number().positive().optional(),
+    contenedor: z.string().min(1),
     presentacionCantidad: z.number().positive(),
     cantidadDisponibleTotal: z.boolean(),
     cantidadDisponible: z.number().positive().optional(),
