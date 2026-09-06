@@ -3,11 +3,10 @@ import { useSearchParams } from "react-router-dom";
 import { api, ApiError } from "../../lib/api";
 import { useHuertas } from "../../lib/useHuertas";
 import { usePersonal } from "../../lib/usePersonal";
-import type { Cuadro, Equipo, FertilizacionGranular, GrupoPago, ModoDosisGranular, Producto, RecursoTipo } from "../../lib/types";
+import type { Cuadro, Equipo, FertilizacionGranular, GrupoPago, IngredienteAutorizado, ModoDosisGranular, RecursoTipo } from "../../lib/types";
 import FechaInput from "../../components/FechaInput";
 import { formatearFecha, formatearInstante } from "../../lib/fecha";
 import { formatearNumero } from "../../lib/numero";
-import { presentacionTexto } from "../../lib/producto";
 import ConfirmModal from "../../components/ConfirmModal";
 
 const ETIQUETAS_ESTADO: Record<string, string> = {
@@ -31,13 +30,13 @@ function hoyISO(): string {
 }
 
 interface ProductoGranularForm {
-  productoId: string;
+  ingredienteActivoNombre: string;
   modoDosis: ModoDosisGranular;
   dosisValor: string;
 }
 
 function productoGranularFormVacio(): ProductoGranularForm {
-  return { productoId: "", modoDosis: "kg_ha", dosisValor: "" };
+  return { ingredienteActivoNombre: "", modoDosis: "kg_ha", dosisValor: "" };
 }
 
 export default function Granular() {
@@ -55,7 +54,7 @@ export default function Granular() {
   const [error, setError] = useState<string | null>(null);
 
   const [mostrarForm, setMostrarForm] = useState(false);
-  const [productos, setProductos] = useState<Producto[]>([]);
+  const [ingredientes, setIngredientes] = useState<IngredienteAutorizado[]>([]);
   const [equiposImplemento, setEquiposImplemento] = useState<Equipo[]>([]);
   const [huertaId, setHuertaId] = useState("");
   const [cuadrosHuerta, setCuadrosHuerta] = useState<Cuadro[]>([]);
@@ -106,7 +105,7 @@ export default function Granular() {
   }, [idResaltado, lista]);
 
   useEffect(() => {
-    api.get<Producto[]>("/fertilizantes/granular/productos").then(setProductos);
+    api.get<IngredienteAutorizado[]>("/fertilizantes/granular/productos").then(setIngredientes);
     api.get<Equipo[]>("/fertilizantes/granular/equipos-implemento").then(setEquiposImplemento);
   }, []);
 
@@ -145,7 +144,7 @@ export default function Granular() {
     setError(null);
     const payload = {
       cuadroIds,
-      productos: productosForm.map((p) => ({ productoId: p.productoId, modoDosis: p.modoDosis, dosisValor: Number(p.dosisValor) })),
+      productos: productosForm.map((p) => ({ ingredienteActivoNombre: p.ingredienteActivoNombre, modoDosis: p.modoDosis, dosisValor: Number(p.dosisValor) })),
       recursoTipo,
       equipoId: recursoTipo === "implemento" ? equipoId : undefined,
       fechaInicio,
@@ -174,7 +173,7 @@ export default function Granular() {
     setEditandoProgramadaId(f.id);
     setHuertaId(f.huertaId);
     setCuadroIds(f.cuadros.map((c) => c.cuadro.id));
-    setProductosForm(f.productos.map((p) => ({ productoId: p.productoId, modoDosis: p.modoDosis, dosisValor: String(p.dosisValor) })));
+    setProductosForm(f.productos.map((p) => ({ ingredienteActivoNombre: p.producto.ingredienteActivo ?? "", modoDosis: p.modoDosis, dosisValor: String(p.dosisValor) })));
     setRecursoTipo(f.recursoTipo);
     setEquipoId(f.equipoId ?? "");
     setFechaInicio(f.fechaInicio.slice(0, 10));
@@ -399,12 +398,16 @@ export default function Granular() {
               {productosForm.map((p, i) => (
                 <div key={i} style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
                   <label className="field">
-                    Producto (fertilizante autorizado)
-                    <select value={p.productoId} onChange={(e) => actualizarProductoForm(i, { productoId: e.target.value })} required>
+                    Ingrediente Activo (fertilizante autorizado)
+                    <select
+                      value={p.ingredienteActivoNombre}
+                      onChange={(e) => actualizarProductoForm(i, { ingredienteActivoNombre: e.target.value })}
+                      required
+                    >
                       <option value="">Selecciona…</option>
-                      {productos.map((prod) => (
-                        <option key={prod.id} value={prod.id}>
-                          {prod.nombreComercial} ({presentacionTexto(prod)})
+                      {ingredientes.map((ing) => (
+                        <option key={ing.ingredienteActivoNombre} value={ing.ingredienteActivoNombre}>
+                          {ing.ingredienteActivoNombre}
                         </option>
                       ))}
                     </select>
@@ -476,14 +479,14 @@ export default function Granular() {
                   {f.alertaVencimiento && <span className="tag tag-danger">15+ días sin entregar</span>}{" "}
                   {f.alertaPendienteAplicar && <span className="tag tag-danger">15+ días entregada sin aplicar</span>}
                   <div style={{ fontSize: 13, fontWeight: 600, marginTop: 6 }}>
-                    {f.huerta.nombre} — {f.productos.map((p) => p.producto.nombreComercial).join(" + ")}
+                    {f.huerta.nombre} — {f.productos.map((p) => p.producto.ingredienteActivo ?? p.producto.nombreComercial).join(" + ")}
                   </div>
                   <div style={{ fontSize: 12, color: "var(--ink-soft)" }}>
                     Cuadros: {f.cuadros.map((c) => c.cuadro.nombre).join(", ") || "—"}
                   </div>
                   {f.productos.map((p) => (
                     <div key={p.id} style={{ fontSize: 12, color: "var(--ink-soft)" }}>
-                      {p.producto.nombreComercial}: {formatearNumero(p.cantidadTotalCalculada)} {p.producto.unidad} · {p.dosisValor}{" "}
+                      {p.producto.ingredienteActivo ?? p.producto.nombreComercial}: {formatearNumero(p.cantidadTotalCalculada)} {p.producto.unidad} · {p.dosisValor}{" "}
                       {p.modoDosis === "kg_ha" ? "kg/ha" : "g/planta"}
                     </div>
                   ))}

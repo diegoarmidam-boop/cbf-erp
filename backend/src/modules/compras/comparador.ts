@@ -1,10 +1,11 @@
 import { calcularAhorroForaneo, calcularCotizacion, type MonedaCotizacion } from "@cbf/shared";
 import { prisma } from "../../core/db.js";
+import { opcionesRecepcionDeProducto } from "../almacen/preferencias.js";
 
 export interface CotizacionInput {
   proveedorId: string;
   zonaId: string;
-  nombreComercial: string;
+  productoComercialId: string;
   moneda: MonedaCotizacion;
   precioValor: number;
   tipoCambio?: number;
@@ -57,16 +58,27 @@ export class YaTieneComparacionError extends Error {
 const INCLUDE_COMPARACION = {
   producto: true,
   ordenCompra: { include: { producto: true, proveedor: true } },
-  cotizaciones: { include: { proveedor: true, zona: true }, orderBy: { fechaCreacion: "asc" as const } },
+  cotizaciones: { include: { proveedor: true, zona: true, productoComercial: true }, orderBy: { fechaCreacion: "asc" as const } },
 };
 
 export function listarComparaciones() {
   return prisma.comparacion.findMany({ include: INCLUDE_COMPARACION, orderBy: { fechaCreacion: "desc" } });
 }
 
-/** La Comparación de una OrdenCompra dada, si ya existe — para no duplicar al reabrir "Cotizar". */
-export function obtenerComparacionDeOrden(ordenCompraId: string) {
-  return prisma.comparacion.findUnique({ where: { ordenCompraId }, include: INCLUDE_COMPARACION });
+/**
+ * La Comparación de una OrdenCompra dada, si ya existe — para no duplicar
+ * al reabrir "Cotizar". Bug real (3-sep-2026): regresaba la fila cruda de
+ * Prisma en vez de pasar por `obtenerComparacionCalculada` — le faltaban
+ * `ordenesGeneradas`/`cantidadComprada`/`cantidadPendiente`/mejores
+ * cotizaciones, que el frontend siempre espera (mismo tipo que `GET /:id`).
+ * Reabrir "Cotizar" sobre una Comparación que ya tenía órdenes reales
+ * generadas tronaba con "undefined is not an object (evaluating
+ * 'detalle.ordenesGeneradas.length')".
+ */
+export async function obtenerComparacionDeOrden(ordenCompraId: string) {
+  const comparacion = await prisma.comparacion.findUnique({ where: { ordenCompraId }, select: { id: true } });
+  if (!comparacion) return null;
+  return obtenerComparacionCalculada(comparacion.id);
 }
 
 export async function crearComparacion(input: CrearComparacionInput, creadoPorId: string) {
@@ -89,7 +101,7 @@ export async function crearComparacion(input: CrearComparacionInput, creadoPorId
         create: input.cotizaciones.map((c) => ({
           proveedorId: c.proveedorId,
           zonaId: c.zonaId,
-          nombreComercial: c.nombreComercial,
+          productoComercialId: c.productoComercialId,
           moneda: c.moneda,
           precioValor: c.precioValor,
           tipoCambio: c.moneda === "USD" ? c.tipoCambio : undefined,
@@ -115,7 +127,7 @@ export function agregarCotizaciones(comparacionId: string, cotizaciones: Cotizac
       comparacionId,
       proveedorId: c.proveedorId,
       zonaId: c.zonaId,
-      nombreComercial: c.nombreComercial,
+      productoComercialId: c.productoComercialId,
       moneda: c.moneda,
       precioValor: c.precioValor,
       tipoCambio: c.moneda === "USD" ? c.tipoCambio : undefined,
@@ -157,7 +169,7 @@ export interface CotizacionCalculadaSalida {
   id: string;
   proveedor: { id: string; nombre: string };
   zona: { id: string; nombre: string; esZonaComprador: boolean };
-  nombreComercial: string;
+  productoComercial: { id: string; nombreComercial: string; marca: string | null };
   moneda: MonedaCotizacion;
   precioValor: number;
   tipoCambio: number | null;
@@ -233,7 +245,7 @@ export async function obtenerComparacionCalculada(id: string): Promise<Comparaci
       id: c.id,
       proveedor: { id: c.proveedor.id, nombre: c.proveedor.nombre },
       zona: { id: c.zona.id, nombre: c.zona.nombre, esZonaComprador: c.zona.esZonaComprador },
-      nombreComercial: c.nombreComercial,
+      productoComercial: { id: c.productoComercial.id, nombreComercial: c.productoComercial.nombreComercial, marca: c.productoComercial.marca },
       moneda: c.moneda,
       precioValor: Number(c.precioValor),
       tipoCambio: c.tipoCambio != null ? Number(c.tipoCambio) : null,
@@ -302,5 +314,31 @@ export async function obtenerComparacionCalculada(id: string): Promise<Comparaci
     cantidadComprada,
     cantidadPendiente,
   };
+}
+
+/**
+ * Opciones de Producto Comercial para cotizar un producto en el Comparador
+ * (Prioridad 2, 3-sep-2026) — quitó el texto libre "Nombre Comercial":
+ * ahora solo se puede elegir el preferido y los sustitutos autorizados del
+ * mismo Ingrediente Activo (mismo criterio que "qué llegó de verdad" al
+ * recibir una orden, ver opcionesRecepcionDeProducto). Si se manda
+ * `proveedorId`, también trae `ultimoUsadoId`: el Producto Comercial con el
+ * que se cotizó por última vez este mismo Ingrediente Activo con ese mismo
+ * Proveedor (2.5) — el selector lo precarga, pero sigue siendo editable.
+ */
+export async function opcionesProductoComercial(productoId: string, proveedorId?: string) {
+  const opciones = await opcionesRecepcionDeProducto(productoId);
+  let ultimoUsadoId: string | null = null;
+  if (proveedorId) {
+    const producto = await prisma.producto.findUniqueOrThrow({ where: { id: productoId } });
+    if (producto.ingredienteActivo) {
+      const ultima = await prisma.comparacionCotizacion.findFirst({
+        where: { proveedorId, comparacion: { producto: { ingredienteActivo: producto.ingredienteActivo } } },
+        orderBy: { fechaCreacion: "desc" },
+      });
+      ultimoUsadoId = ultima?.productoComercialId ?? null;
+    }
+  }
+  return { opciones, ultimoUsadoId };
 }
 

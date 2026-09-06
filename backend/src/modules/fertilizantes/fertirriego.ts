@@ -18,6 +18,7 @@ import { obtenerVersionVigente } from "../unidades-produccion/cuadros.js";
 import { ProductoNoAutorizadoFertilizanteError, StockNoComprometidoError, TransicionFertilizacionInvalidaError } from "./granular.js";
 import { actualizarDosisProductoEnRecetaFertirriego, obtenerRecetaFertirriego, ROLES_RECETAS_FERTIRRIEGO } from "./recetario-fertirriego.js";
 import { cancelarOrdenesDeReferencia } from "../compras/ordenes.js";
+import { resolverProductoPreferidoPorNombre } from "../almacen/preferencias.js";
 
 const DIAS_VENCIMIENTO = 15;
 
@@ -34,10 +35,22 @@ async function hectareasDeSecciones(seccionIds: string[], fecha: Date): Promise<
   return hectareasTotales;
 }
 
+// Ingrediente Activo, nunca marca (Prioridad 1, 3-sep-2026) — Programar ya
+// no captura productoId directamente, se resuelve al Producto preferido.
 export interface ProductoFertirriegoInput {
-  productoId: string;
+  ingredienteActivoNombre: string;
   dosisValor: number;
   dosisUnidad: ModoDosisFertirriego;
+}
+
+interface ProductoFertirriegoResuelto extends ProductoFertirriegoInput {
+  productoId: string;
+}
+
+async function resolverIngredientesFertirriego(productos: ProductoFertirriegoInput[]): Promise<ProductoFertirriegoResuelto[]> {
+  return Promise.all(
+    productos.map(async (p) => ({ ...p, productoId: await resolverProductoPreferidoPorNombre(p.ingredienteActivoNombre) }))
+  );
 }
 
 export interface ProgramarFertirriegoInput {
@@ -69,7 +82,9 @@ async function validarUsoDeRecetaFertirriego(recetaId: string, usuarioRol: Rol, 
   const receta = await obtenerRecetaFertirriego(recetaId);
   if (!ROLES_RECETAS_FERTIRRIEGO.includes(usuarioRol)) {
     const mismasDosis = receta.productos.every((rp) => {
-      const enviado = productos.find((p) => p.productoId === rp.productoId);
+      // Comparación por Ingrediente Activo (Prioridad 1) — la receta guarda
+      // internamente el Producto preferido resuelto.
+      const enviado = productos.find((p) => p.ingredienteActivoNombre === rp.producto.ingredienteActivo);
       return enviado && Number(rp.dosisValor) === enviado.dosisValor && rp.dosisUnidad === enviado.dosisUnidad;
     });
     if (!mismasDosis || receta.productos.length !== productos.length) {
@@ -97,7 +112,8 @@ export async function programarFertirriego(input: ProgramarFertirriegoInput, cre
   if (!input.productos || input.productos.length === 0) {
     throw new Error("Elige al menos un producto.");
   }
-  const productos = await prisma.producto.findMany({ where: { id: { in: input.productos.map((p) => p.productoId) } } });
+  const productosResueltos = await resolverIngredientesFertirriego(input.productos);
+  const productos = await prisma.producto.findMany({ where: { id: { in: productosResueltos.map((p) => p.productoId) } } });
   for (const p of productos) {
     if (p.categoria !== "fertilizante" || !p.autorizado) {
       throw new ProductoNoAutorizadoFertilizanteError();
@@ -107,7 +123,7 @@ export async function programarFertirriego(input: ProgramarFertirriegoInput, cre
   if (input.recetaId) {
     await validarUsoDeRecetaFertirriego(input.recetaId, usuarioRol, input.productos);
     if (input.actualizarRecetaOriginal) {
-      for (const p of input.productos) {
+      for (const p of productosResueltos) {
         await actualizarDosisProductoEnRecetaFertirriego(input.recetaId, p.productoId, p.dosisValor, p.dosisUnidad);
       }
     }
@@ -146,7 +162,7 @@ export async function programarFertirriego(input: ProgramarFertirriegoInput, cre
       data: input.seccionIds.map((seccionId) => ({ fertirriegoId: fertirriego.id, seccionId })),
     });
 
-    for (const p of input.productos) {
+    for (const p of productosResueltos) {
       const cantidadTotalCalculada = calcularCantidadTotalFertirriego(p.dosisValor, p.dosisUnidad, hectareasTotales);
       const cantidadCampania = cantidadTotalCalculada * riegosCampania;
       await tx.fertirriegoProgramacionProducto.create({
@@ -205,7 +221,8 @@ export async function editarFertirriegoProgramada(id: string, input: Omit<Progra
     throw new YaHayAvanceRegistradoFertirriegoError();
   }
 
-  const productosNuevos = await prisma.producto.findMany({ where: { id: { in: input.productos.map((p) => p.productoId) } } });
+  const productosResueltos = await resolverIngredientesFertirriego(input.productos);
+  const productosNuevos = await prisma.producto.findMany({ where: { id: { in: productosResueltos.map((p) => p.productoId) } } });
   for (const p of productosNuevos) {
     if (p.categoria !== "fertilizante" || !p.autorizado) {
       throw new ProductoNoAutorizadoFertilizanteError();
@@ -215,7 +232,7 @@ export async function editarFertirriegoProgramada(id: string, input: Omit<Progra
   if (input.recetaId) {
     await validarUsoDeRecetaFertirriego(input.recetaId, usuarioRol, input.productos);
     if (input.actualizarRecetaOriginal) {
-      for (const p of input.productos) {
+      for (const p of productosResueltos) {
         await actualizarDosisProductoEnRecetaFertirriego(input.recetaId, p.productoId, p.dosisValor, p.dosisUnidad);
       }
     }
@@ -238,7 +255,7 @@ export async function editarFertirriegoProgramada(id: string, input: Omit<Progra
 
   return prisma.$transaction(async (tx) => {
     const productosAnteriores = new Map(fertirriego.productos.map((p) => [p.productoId, p]));
-    const productoIdsNuevos = new Set(input.productos.map((p) => p.productoId));
+    const productoIdsNuevos = new Set(productosResueltos.map((p) => p.productoId));
 
     for (const anterior of fertirriego.productos) {
       if (productoIdsNuevos.has(anterior.productoId)) continue;
@@ -247,7 +264,7 @@ export async function editarFertirriegoProgramada(id: string, input: Omit<Progra
       await tx.fertirriegoProgramacionProducto.delete({ where: { id: anterior.id } });
     }
 
-    for (const p of input.productos) {
+    for (const p of productosResueltos) {
       const cantidadNueva = calcularCantidadTotalFertirriego(p.dosisValor, p.dosisUnidad, hectareasTotales);
       const cantidadCampaniaNueva = cantidadNueva * riegosCampaniaNueva;
       const anterior = productosAnteriores.get(p.productoId);

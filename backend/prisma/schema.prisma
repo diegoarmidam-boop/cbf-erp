@@ -927,6 +927,7 @@ model Producto {
   fertirriegoProductos           FertirriegoProgramacionProducto[]
   riegoRegistroDiarioProductos   RiegoRegistroDiarioProducto[]
   comparaciones                  Comparacion[]
+  cotizacionesComoProductoComercial ComparacionCotizacion[] @relation("ProductoComercialDeCotizacion")
   preferidoDe                    IngredienteActivo[]              @relation("ProductoPreferidoDe")
   sustitutoDe                    IngredienteActivoSustituto[]      @relation("ProductoSustitutoDe")
   recetaProductos                RecetaProducto[]
@@ -1038,6 +1039,15 @@ model Proveedor {
   diasCredito        Int? // término general de pago (ej. "15 días de crédito") — alimenta Cuentas por Pagar (9.14)
   datosFacturacion   Json?
   activo             Boolean   @default(true)
+
+  // Zona (Prioridad 2, 3-sep-2026) — de dónde envía normalmente este
+  // Proveedor, para precargar sola la Zona al cotizar con él en el
+  // Comparador (mismo catálogo abierto de ZonaFlete, no uno nuevo). Sigue
+  // siendo editable por cotización específica — esto solo evita
+  // repreguntarla cada vez. Null en proveedores que no la tengan capturada
+  // todavía (queda igual que hoy: se elige a mano al cotizar).
+  zonaId String?
+  zona   ZonaFlete? @relation(fields: [zonaId], references: [id])
 
   ordenesCompra           OrdenCompra[]
   comparacionCotizaciones ComparacionCotizacion[]
@@ -1203,10 +1213,15 @@ model ComparacionCotizacion {
   proveedor     Proveedor        @relation(fields: [proveedorId], references: [id])
   zonaId        String
   zona          ZonaFlete        @relation(fields: [zonaId], references: [id])
-  // Cómo le llama ESTE proveedor a ESTE producto — puede diferir del
-  // nombreComercial del catálogo interno, es la referencia para verificar
-  // que es el mismo insumo entre cotizaciones de distintos proveedores.
-  nombreComercial String
+  // Producto Comercial cotizado (Prioridad 2, 3-sep-2026) — ya no texto
+  // libre: se elige del catálogo de Almacén (9.15), acotado al preferido y
+  // los sustitutos autorizados del Ingrediente Activo que se está
+  // cotizando (mismo criterio que "qué llegó de verdad" al recibir, ver
+  // opcionesRecepcionDeProducto). El Proveedor no tiene que estar
+  // vinculado de antemano a ninguna Marca — cualquiera puede vender
+  // cualquier Producto Comercial ya dado de alta.
+  productoComercialId String
+  productoComercial   Producto         @relation("ProductoComercialDeCotizacion", fields: [productoComercialId], references: [id])
   moneda        MonedaCotizacion @default(MXN)
   // Precio de la presentación completa, en la moneda capturada (`moneda`)
   // — si moneda=USD, se convierte con `tipoCambio` (capturado a mano cada
@@ -1241,12 +1256,13 @@ model ComparacionCotizacion {
   @@index([comparacionId])
 }
 
-// Catálogo abierto de Zonas y flete (29-ago-2026) — exclusivo del
-// Comparador de insumos agrícolas, no es un campo general de Proveedores
-// ni se usa en otro módulo. Costo de flete $/kg editable por Diego en
-// cualquier momento. Exactamente una Zona debe ser "la Zona del
-// comprador" (Campeche) — su flete queda fijo en $0 por definición,
-// forzado en el backend sin importar qué se capture (ver zonas.ts).
+// Catálogo abierto de Zonas y flete (29-ago-2026, exclusivo de Compras —
+// insumos agrícolas). Costo de flete $/kg editable por Diego en cualquier
+// momento. Exactamente una Zona debe ser "la Zona del comprador"
+// (Campeche) — su flete queda fijo en $0 por definición, forzado en el
+// backend sin importar qué se capture (ver zonas.ts). Desde el 3-sep-2026
+// (Prioridad 2) también se captura en el catálogo de Proveedores — ya no
+// es exclusiva del Comparador, se precarga sola de ahí al cotizar.
 model ZonaFlete {
   id              String   @id @default(uuid())
   nombre          String   @unique
@@ -1255,6 +1271,7 @@ model ZonaFlete {
   activo          Boolean  @default(true)
 
   cotizaciones ComparacionCotizacion[]
+  proveedores  Proveedor[]
 }
 
 // ============================================================

@@ -86,7 +86,7 @@ granularRouter.get("/:id", requirePermission("fertilizantes", "ver"), async (req
 });
 
 const productoGranularSchema = z.object({
-  productoId: z.string().min(1),
+  ingredienteActivoNombre: z.string().min(1),
   modoDosis: z.enum(["kg_ha", "g_planta"]),
   dosisValor: z.number().positive(),
 });

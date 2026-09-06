@@ -143,13 +143,6 @@ export default function Ordenes() {
   const [mostrarNuevoCentroCosto, setMostrarNuevoCentroCosto] = useState(false);
   const [nuevoCentroCostoNombre, setNuevoCentroCostoNombre] = useState("");
 
-  const [recibiendo, setRecibiendo] = useState<string | null>(null);
-  const [cantidadRecibida, setCantidadRecibida] = useState("");
-  const [lote, setLote] = useState("");
-  const [fechaCaducidad, setFechaCaducidad] = useState("");
-  const [opcionesRecepcion, setOpcionesRecepcion] = useState<Producto[]>([]);
-  const [productoRecibidoId, setProductoRecibidoId] = useState("");
-
   function cargarTodo() {
     api
       .get<OrdenCompra[]>("/compras/ordenes?incluirCerradas=true")
@@ -254,35 +247,6 @@ export default function Ordenes() {
 
   function irACotizar(ordenId: string) {
     navigate(`/compras/comparador?ordenCompraId=${ordenId}`);
-  }
-
-  async function abrirRecibir(orden: OrdenCompra) {
-    setRecibiendo(orden.id);
-    setCantidadRecibida("");
-    setLote("");
-    setFechaCaducidad("");
-    setProductoRecibidoId(orden.productoId);
-    const opciones = await api.get<Producto[]>(`/compras/ordenes/${orden.id}/opciones-recepcion`);
-    setOpcionesRecepcion(opciones);
-  }
-
-  async function confirmarRecibir(id: string) {
-    setError(null);
-    try {
-      await api.post(`/compras/ordenes/${id}/recibir`, {
-        cantidadRecibida: Number(cantidadRecibida),
-        lote: lote || undefined,
-        fechaCaducidad: fechaCaducidad || undefined,
-        productoRecibidoId,
-      });
-      setRecibiendo(null);
-      setCantidadRecibida("");
-      setLote("");
-      setFechaCaducidad("");
-      cargarTodo();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "No se pudo recibir.");
-    }
   }
 
   function descargarPdf(id: string, numero: number | null) {
@@ -439,11 +403,6 @@ export default function Ordenes() {
                 Cotizar
               </button>
             )}
-            {o.estado === "generada" && recibiendo !== o.id && (
-              <button className="btn-primary" onClick={() => abrirRecibir(o)}>
-                Recibir
-              </button>
-            )}
             {o.numero != null && (
               <button className="btn-secondary" onClick={() => descargarPdf(o.id, o.numero)}>
                 Descargar PDF
@@ -472,42 +431,6 @@ export default function Ordenes() {
                 Recibido: {o.recepciones.map((r) => `${r.cantidadRecibida} ${o.producto.unidad} el ${formatearInstante(r.fechaRecepcion)}`).join(" · ")}
               </div>
             )}
-          </div>
-        )}
-
-        {recibiendo === o.id && (
-          <div style={{ marginTop: 12, borderTop: "1px solid var(--border)", paddingTop: 12 }}>
-            <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
-              <label className="field">
-                Cantidad recibida
-                <input type="number" step="0.001" value={cantidadRecibida} onChange={(e) => setCantidadRecibida(e.target.value)} />
-              </label>
-              <label className="field" style={{ minWidth: 220 }}>
-                Producto que llegó de verdad
-                <select value={productoRecibidoId} onChange={(e) => setProductoRecibidoId(e.target.value)} required>
-                  {opcionesRecepcion.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.nombreComercial} ({presentacionTexto(p)}){p.id === o.productoId ? " — pedido" : " — sustituto"}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              {o.producto.requiereLote && (
-                <>
-                  <label className="field">
-                    Lote
-                    <input value={lote} onChange={(e) => setLote(e.target.value)} />
-                  </label>
-                  <label className="field">
-                    Caducidad
-                    <FechaInput value={fechaCaducidad} onChange={setFechaCaducidad} />
-                  </label>
-                </>
-              )}
-              <button className="btn-primary" onClick={() => confirmarRecibir(o.id)}>
-                Confirmar recepción
-              </button>
-            </div>
           </div>
         )}
       </div>
@@ -750,6 +673,9 @@ export default function Ordenes() {
 
       {tab === "en_camino" && (
         <>
+          <p style={{ fontSize: 12, color: "var(--ink-soft)", marginBottom: 10 }}>
+            Solo lectura — la recepción física ya se confirma desde Almacén → "En Camino" (Prioridad 4).
+          </p>
           <BarraFiltros mostrarFechaYTipoAplicacion />
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             {ordenesEnCamino.map((o) => tarjetaOrdenIndividual(o, false))}
@@ -760,6 +686,9 @@ export default function Ordenes() {
 
       {tab === "recibidas" && (
         <>
+          <p style={{ fontSize: 12, color: "var(--ink-soft)", marginBottom: 10 }}>
+            Espejo de solo lectura de lo que Almacén ya confirmó recibido (Prioridad 4).
+          </p>
           <BarraFiltros mostrarFechaYTipoAplicacion />
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             {ordenesRecibidas.map((o) => tarjetaOrdenIndividual(o, false))}

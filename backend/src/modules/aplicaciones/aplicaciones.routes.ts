@@ -30,6 +30,7 @@ import {
   YaHayAvanceReportadoError,
 } from "./aplicaciones.js";
 import { AjusteInvalidoError, confirmarRecepcionAjuste, listarAjustesPendientesConfirmar } from "../almacen/movimientos.js";
+import { ProductoPreferidoNoConfiguradoError } from "../almacen/preferencias.js";
 import { listarCancelacionesPendientesConfirmarGranular } from "../fertilizantes/granular.js";
 import { construirOrdenAplicacion, OrdenSinCapacidadTanqueError } from "../ordenes/ordenes.js";
 import { generarPdfOrdenAplicacion } from "../ordenes/pdf.js";
@@ -166,7 +167,7 @@ aplicacionesRouter.get("/:id/orden.pdf", requirePermission("aplicaciones", "ver"
 });
 
 const productoAplicacionSchema = z.object({
-  productoId: z.string().min(1),
+  ingredienteActivoNombre: z.string().min(1),
   concentracionValor: z.number().positive(),
   concentracionUnidad: z.enum(["ml_l", "g_l", "kg_l"]),
 });
@@ -196,7 +197,7 @@ aplicacionesRouter.post("/", requirePermission("aplicaciones", "capturar"), asyn
     const aplicacion = await programarAplicacion(parsed.data, req.usuario!.usuarioId, req.usuario!.rol);
     res.status(201).json(aplicacion);
   } catch (err) {
-    if (err instanceof ProductoNoAutorizadoAplicacionError) {
+    if (err instanceof ProductoNoAutorizadoAplicacionError || err instanceof ProductoPreferidoNoConfiguradoError) {
       res.status(409).json({ error: err.message });
       return;
     }
@@ -226,7 +227,12 @@ aplicacionesRouter.patch("/:id", requirePermission("aplicaciones", "capturar"), 
     const aplicacion = await editarAplicacionProgramada(unoSolo(req.params.id), parsed.data, req.usuario!.usuarioId, req.usuario!.rol);
     res.json(aplicacion);
   } catch (err) {
-    if (err instanceof ProductoNoAutorizadoAplicacionError || err instanceof YaHayAvanceReportadoError || err instanceof TransicionAplicacionInvalidaError) {
+    if (
+      err instanceof ProductoNoAutorizadoAplicacionError ||
+      err instanceof YaHayAvanceReportadoError ||
+      err instanceof TransicionAplicacionInvalidaError ||
+      err instanceof ProductoPreferidoNoConfiguradoError
+    ) {
       res.status(409).json({ error: err.message });
       return;
     }

@@ -328,6 +328,15 @@ export interface DiaAsistencia {
   estado: EstadoAsistenciaDia;
 }
 
+// Catálogo de Ingredientes Activos autorizados para Programar/Recetario
+// (Prioridad 1, 3-sep-2026) — nunca marca. Reemplaza a Producto[] en los
+// selectores de Programar (Granular/Fertirriego/Aplicaciones) y Recetario.
+export interface IngredienteAutorizado {
+  ingredienteActivoNombre: string;
+  categoria: string;
+  productoPreferidoId: string | null;
+}
+
 export interface Producto {
   id: string;
   categoria: string;
@@ -452,6 +461,10 @@ export interface Proveedor {
   creditoVencimiento: string | null;
   diasCredito: number | null;
   activo: boolean;
+  // Zona (Prioridad 2, 3-sep-2026) — de dónde envía normalmente, para
+  // precargar sola la Zona al cotizar con él en el Comparador.
+  zonaId: string | null;
+  zona: { id: string; nombre: string } | null;
 }
 
 export interface MejorProveedor {
@@ -604,6 +617,14 @@ export interface ZonaFlete {
 
 export type MonedaCotizacion = "MXN" | "USD";
 
+// Producto Comercial reemplaza "Nombre Comercial" libre en el Comparador
+// (Prioridad 2, 3-sep-2026): opciones = preferido + sustitutos autorizados
+// del Ingrediente Activo cotizado; ultimoUsadoId = precarga por Proveedor.
+export interface OpcionesProductoComercial {
+  opciones: Producto[];
+  ultimoUsadoId: string | null;
+}
+
 export interface ComparacionResumen {
   id: string;
   fechaCreacion: string;
@@ -617,7 +638,7 @@ export interface CotizacionCalculada {
   id: string;
   proveedor: { id: string; nombre: string };
   zona: { id: string; nombre: string; esZonaComprador: boolean };
-  nombreComercial: string;
+  productoComercial: { id: string; nombreComercial: string; marca: string | null };
   moneda: MonedaCotizacion;
   precioValor: number;
   tipoCambio: number | null;

@@ -3,6 +3,7 @@ import { formatearNumero } from "../lib/numero";
 
 interface ProductoNombre {
   productoId: string;
+  ingredienteActivo: string | null;
   nombreComercial: string;
   concentracionUnidad: "ml_l" | "g_l" | "kg_l";
 }
@@ -57,7 +58,8 @@ export default function MezclaPorTanque({
             </div>
             <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12.5 }}>
               {mezcla.map((m) => {
-                const nombre = productos.find((p) => p.productoId === m.productoId)?.nombreComercial ?? m.productoId;
+                const encontrado = productos.find((p) => p.productoId === m.productoId);
+                const nombre = encontrado?.ingredienteActivo ?? encontrado?.nombreComercial ?? m.productoId;
                 const unidad = productos.find((p) => p.productoId === m.productoId)?.concentracionUnidad ?? "ml_l";
                 return (
                   <li key={m.productoId}>
@@ -78,7 +80,8 @@ export default function MezclaPorTanque({
             <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12.5 }}>
               {mezcla.map((m) => {
                 if (!m.tanqueParcial) return null;
-                const nombre = productos.find((p) => p.productoId === m.productoId)?.nombreComercial ?? m.productoId;
+                const encontrado = productos.find((p) => p.productoId === m.productoId);
+                const nombre = encontrado?.ingredienteActivo ?? encontrado?.nombreComercial ?? m.productoId;
                 const unidad = productos.find((p) => p.productoId === m.productoId)?.concentracionUnidad ?? "ml_l";
                 return (
                   <li key={m.productoId}>

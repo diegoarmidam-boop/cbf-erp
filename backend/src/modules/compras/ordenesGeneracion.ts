@@ -156,7 +156,7 @@ async function armarLineasDeNecesidades(ordenIds: string[]): Promise<LineaOrigen
         cotizacionId: cot.id,
         proveedorId: cot.proveedor.id,
         proveedorNombre: cot.proveedor.nombre,
-        nombreComercial: cot.nombreComercial,
+        nombreComercial: cot.productoComercial.nombreComercial,
         precioUnitarioMXN: cot.precioUnitarioMXN,
         cantidadDisponibleTotal: cot.cantidadDisponibleTotal,
         cantidadDisponible: cot.cantidadDisponible,
@@ -261,7 +261,7 @@ export async function validarYAgruparAsignaciones(asignaciones: AsignacionInput[
   const cotizacionIds = [...new Set(asignaciones.map((a) => a.cotizacionId))];
   const cotizaciones = await prisma.comparacionCotizacion.findMany({
     where: { id: { in: cotizacionIds } },
-    include: { proveedor: true, zona: true, comparacion: { include: { producto: true, ordenCompra: true } } },
+    include: { proveedor: true, zona: true, productoComercial: true, comparacion: { include: { producto: true, ordenCompra: true } } },
   });
   const cotizacionPorId = new Map(cotizaciones.map((c) => [c.id, c]));
 
@@ -289,7 +289,7 @@ export async function validarYAgruparAsignaciones(asignaciones: AsignacionInput[
       excedidas.push({
         cotizacionId: cotRef?.id ?? clave,
         proveedorNombre: cotRef?.proveedor.nombre ?? "—",
-        nombreComercial: cotRef?.nombreComercial ?? "—",
+        nombreComercial: cotRef?.productoComercial.nombreComercial ?? "—",
         disponible,
         asignado: totalConEsto,
       });

@@ -28,6 +28,8 @@ const altaSchema = z.object({
   creditoVencimiento: z.string().optional(),
   diasCredito: z.number().int().nonnegative().optional(),
   datosFacturacion: z.record(z.string(), z.unknown()).optional(),
+  // Zona (Prioridad 2, 3-sep-2026) — de dónde envía normalmente el proveedor.
+  zonaId: z.string().min(1).optional(),
 });
 
 proveedoresRouter.post("/", requirePermission("compras", "capturar"), async (req, res) => {

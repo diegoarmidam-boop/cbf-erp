@@ -122,4 +122,63 @@ export async function opcionesRecepcionDeProducto(productoId: string) {
   return opciones;
 }
 
+export interface IngredienteAutorizado {
+  ingredienteActivoNombre: string;
+  categoria: string;
+  productoPreferidoId: string | null;
+}
+
+/**
+ * Catálogo de Ingredientes Activos autorizados para Programar/Recetario
+ * (Prioridad 1, 3-sep-2026) — derivado de los Productos ya autorizados
+ * (`Producto.autorizado`), agrupados por su Ingrediente Activo. No es un
+ * campo de autorización nuevo en IngredienteActivo: se sigue autorizando
+ * por Producto exactamente igual que antes (Almacén → Productos), esto
+ * solo agrupa el resultado para que Programar/Recetario nunca vuelvan a
+ * mostrar una marca — "efectivamente" un catálogo de Ingredientes Activos
+ * autorizados por categoría, tal como pidió Diego.
+ */
+export async function ingredientesAutorizados(categoria?: string): Promise<IngredienteAutorizado[]> {
+  const productos = await prisma.producto.findMany({
+    where: { autorizado: true, activo: true, ingredienteActivo: { not: null }, ...(categoria ? { categoria } : {}) },
+    select: { ingredienteActivo: true, categoria: true },
+  });
+  const categoriaPorNombre = new Map<string, string>();
+  for (const p of productos) categoriaPorNombre.set(p.ingredienteActivo!, p.categoria);
+  const nombres = [...categoriaPorNombre.keys()];
+  if (nombres.length === 0) return [];
+
+  const ingredientes = await prisma.ingredienteActivo.findMany({ where: { nombre: { in: nombres } } });
+  const preferidoPorNombre = new Map(ingredientes.map((i) => [i.nombre, i.productoPreferidoId]));
+
+  return nombres
+    .map((nombre) => ({
+      ingredienteActivoNombre: nombre,
+      categoria: categoriaPorNombre.get(nombre)!,
+      productoPreferidoId: preferidoPorNombre.get(nombre) ?? null,
+    }))
+    .sort((a, b) => a.ingredienteActivoNombre.localeCompare(b.ingredienteActivoNombre, "es"));
+}
+
+export class ProductoPreferidoNoConfiguradoError extends Error {
+  constructor(ingredienteActivoNombre: string) {
+    super(
+      `"${ingredienteActivoNombre}" todavía no tiene Producto preferido configurado — ve a Almacén → Preferencias y configúralo antes de programar con este Ingrediente Activo.`
+    );
+  }
+}
+
+/**
+ * Resuelve el productoId REAL a usar (el preferido) para un Ingrediente
+ * Activo por nombre — Programar/Recetario ya nunca capturan un productoId
+ * directamente (Prioridad 1, 3-sep-2026), solo el Ingrediente Activo; esto
+ * resuelve la marca por debajo, igual que ya hacía Compras al recibir
+ * (opcionesRecepcionDeProducto) y sustitutos autorizados.
+ */
+export async function resolverProductoPreferidoPorNombre(ingredienteActivoNombre: string): Promise<string> {
+  const ingrediente = await prisma.ingredienteActivo.findUnique({ where: { nombre: ingredienteActivoNombre } });
+  if (!ingrediente?.productoPreferidoId) throw new ProductoPreferidoNoConfiguradoError(ingredienteActivoNombre);
+  return ingrediente.productoPreferidoId;
+}
+
 export { ProductoIngredienteActivoInvalidoError, SustitutoDuplicadoError, SustitutoEsElPreferidoError };

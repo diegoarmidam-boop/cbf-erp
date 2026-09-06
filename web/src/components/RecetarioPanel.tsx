@@ -2,19 +2,19 @@ import { useState, type FormEvent } from "react";
 import { api, ApiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { useCatalogoAbierto } from "../lib/useCatalogoAbierto";
-import type { ConcentracionUnidad, ModuloReceta, Producto, Receta } from "../lib/types";
-import { presentacionTexto } from "../lib/producto";
+import type { ConcentracionUnidad, IngredienteAutorizado, ModuloReceta, Receta } from "../lib/types";
 
 export const ROLES_PUEDEN_RECETAS = ["director_general", "encargado_sistemas", "gerente_tecnico_produccion"];
 
+// Ingrediente Activo, nunca marca (Prioridad 1, 3-sep-2026).
 interface ProductoRecetaForm {
-  productoId: string;
+  ingredienteActivoNombre: string;
   concentracionValor: string;
   concentracionUnidad: ConcentracionUnidad;
 }
 
 function productoFormVacio(): ProductoRecetaForm {
-  return { productoId: "", concentracionValor: "", concentracionUnidad: "ml_l" };
+  return { ingredienteActivoNombre: "", concentracionValor: "", concentracionUnidad: "ml_l" };
 }
 
 /**
@@ -30,13 +30,13 @@ function productoFormVacio(): ProductoRecetaForm {
  */
 export default function RecetarioPanel({
   modulo,
-  productos,
+  ingredientes,
   recetas,
   cargando,
   refetch,
 }: {
   modulo: ModuloReceta;
-  productos: Producto[];
+  ingredientes: IngredienteAutorizado[];
   // Recetas/refetch vienen del padre (Aplicaciones), que ya llama
   // useRecetas para el selector "Usar receta" del formulario de Programar
   // — si este panel tuviera su propia instancia del hook, crear una
@@ -59,8 +59,6 @@ export default function RecetarioPanel({
   const [litrosPorHa, setLitrosPorHa] = useState("");
   const [productosForm, setProductosForm] = useState<ProductoRecetaForm[]>([productoFormVacio()]);
 
-  const productosDisponibles = productos.filter((p) => p.categoria === (modulo === "aplicaciones" ? "agroquimico" : "fertilizante"));
-
   function limpiarForm() {
     setEditandoId(null);
     setNombre("");
@@ -75,7 +73,13 @@ export default function RecetarioPanel({
     setNombre(r.nombre);
     setTipoAplicacionId(r.tipoAplicacionId ?? "");
     setLitrosPorHa(String(r.litrosPorHa));
-    setProductosForm(r.productos.map((p) => ({ productoId: p.productoId, concentracionValor: String(p.concentracionValor), concentracionUnidad: p.concentracionUnidad })));
+    setProductosForm(
+      r.productos.map((p) => ({
+        ingredienteActivoNombre: p.producto.ingredienteActivo ?? "",
+        concentracionValor: String(p.concentracionValor),
+        concentracionUnidad: p.concentracionUnidad,
+      }))
+    );
     setError(null);
     setMostrarForm(true);
   }
@@ -108,7 +112,7 @@ export default function RecetarioPanel({
       tipoAplicacionId: tipoAplicacionId || undefined,
       litrosPorHa: Number(litrosPorHa),
       productos: productosForm.map((p) => ({
-        productoId: p.productoId,
+        ingredienteActivoNombre: p.ingredienteActivoNombre,
         concentracionValor: Number(p.concentracionValor),
         concentracionUnidad: p.concentracionUnidad,
       })),
@@ -188,12 +192,16 @@ export default function RecetarioPanel({
               {productosForm.map((p, i) => (
                 <div key={i} style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
                   <label className="field">
-                    Producto
-                    <select value={p.productoId} onChange={(e) => actualizarProducto(i, { productoId: e.target.value })} required>
+                    Ingrediente Activo
+                    <select
+                      value={p.ingredienteActivoNombre}
+                      onChange={(e) => actualizarProducto(i, { ingredienteActivoNombre: e.target.value })}
+                      required
+                    >
                       <option value="">Selecciona…</option>
-                      {productosDisponibles.map((prod) => (
-                        <option key={prod.id} value={prod.id}>
-                          {prod.nombreComercial} ({presentacionTexto(prod)})
+                      {ingredientes.map((ing) => (
+                        <option key={ing.ingredienteActivoNombre} value={ing.ingredienteActivoNombre}>
+                          {ing.ingredienteActivoNombre}
                         </option>
                       ))}
                     </select>
@@ -249,7 +257,7 @@ export default function RecetarioPanel({
                 {r.tipoAplicacion && <span className="tag tag-neutral">{r.tipoAplicacion.nombre}</span>}{" "}
                 {!r.activo && <span className="tag tag-danger">Inactiva</span>}
                 <div style={{ fontSize: 11.5, color: "var(--ink-soft)" }}>
-                  {r.productos.map((p) => `${p.producto.nombreComercial} (${p.concentracionValor} ${p.concentracionUnidad.replace("_", "/")})`).join(" + ")}
+                  {r.productos.map((p) => `${p.producto.ingredienteActivo ?? p.producto.nombreComercial} (${p.concentracionValor} ${p.concentracionUnidad.replace("_", "/")})`).join(" + ")}
                   {" · "}
                   {r.litrosPorHa} L/ha
                 </div>

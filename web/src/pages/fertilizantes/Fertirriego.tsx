@@ -3,11 +3,10 @@ import { api, ApiError } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
 import { useHuertas } from "../../lib/useHuertas";
 import { useRecetasFertirriego } from "../../lib/useRecetasFertirriego";
-import type { ModoDosisFertirriego, FertirriegoProgramacion, FrecuenciaFertirriego, OrdenFertirriego, Producto, SeccionRiego } from "../../lib/types";
+import type { ModoDosisFertirriego, FertirriegoProgramacion, FrecuenciaFertirriego, IngredienteAutorizado, OrdenFertirriego, SeccionRiego } from "../../lib/types";
 import FechaInput from "../../components/FechaInput";
 import { formatearFecha } from "../../lib/fecha";
 import { formatearNumero } from "../../lib/numero";
-import { presentacionTexto } from "../../lib/producto";
 import RecetarioFertirriegoPanel, { ROLES_PUEDEN_RECETAS_FERTIRRIEGO } from "../../components/RecetarioFertirriegoPanel";
 import OrdenFertirriegoView from "../../components/OrdenFertirriegoView";
 import ConfirmModal from "../../components/ConfirmModal";
@@ -38,13 +37,13 @@ function hoyISO(): string {
 }
 
 interface ProductoFertirriegoForm {
-  productoId: string;
+  ingredienteActivoNombre: string;
   dosisValor: string;
   dosisUnidad: ModoDosisFertirriego;
 }
 
 function productoFertirriegoFormVacio(): ProductoFertirriegoForm {
-  return { productoId: "", dosisValor: "", dosisUnidad: "kg_ha" };
+  return { ingredienteActivoNombre: "", dosisValor: "", dosisUnidad: "kg_ha" };
 }
 
 export default function Fertirriego() {
@@ -59,7 +58,7 @@ export default function Fertirriego() {
   const [mostrarRecetario, setMostrarRecetario] = useState(false);
 
   const [mostrarForm, setMostrarForm] = useState(false);
-  const [productos, setProductos] = useState<Producto[]>([]);
+  const [ingredientes, setIngredientes] = useState<IngredienteAutorizado[]>([]);
   const [huertaId, setHuertaId] = useState("");
   const [seccionesHuerta, setSeccionesHuerta] = useState<SeccionRiego[]>([]);
   const [seccionIds, setSeccionIds] = useState<string[]>([]);
@@ -111,7 +110,7 @@ export default function Fertirriego() {
   useEffect(cargar, [mostrarCerradas]);
 
   useEffect(() => {
-    api.get<Producto[]>("/fertilizantes/granular/productos").then(setProductos);
+    api.get<IngredienteAutorizado[]>("/fertilizantes/granular/productos").then(setIngredientes);
   }, []);
 
   useEffect(() => {
@@ -153,7 +152,7 @@ export default function Fertirriego() {
     if (!id) return;
     const receta = recetas.find((r) => r.id === id);
     if (!receta) return;
-    setProductosForm(receta.productos.map((p) => ({ productoId: p.productoId, dosisValor: String(p.dosisValor), dosisUnidad: p.dosisUnidad })));
+    setProductosForm(receta.productos.map((p) => ({ ingredienteActivoNombre: p.producto.ingredienteActivo ?? "", dosisValor: String(p.dosisValor), dosisUnidad: p.dosisUnidad })));
   }
 
   function huboDesvioDeReceta(): boolean {
@@ -162,7 +161,7 @@ export default function Fertirriego() {
     if (!receta) return false;
     if (receta.productos.length !== productosForm.length) return true;
     return receta.productos.some((rp) => {
-      const actual = productosForm.find((p) => p.productoId === rp.productoId);
+      const actual = productosForm.find((p) => p.ingredienteActivoNombre === rp.producto.ingredienteActivo);
       return !actual || Number(rp.dosisValor) !== Number(actual.dosisValor) || rp.dosisUnidad !== actual.dosisUnidad;
     });
   }
@@ -182,7 +181,7 @@ export default function Fertirriego() {
     setConfirmandoDesvioReceta(false);
     const payload = {
       seccionIds,
-      productos: productosForm.map((p) => ({ productoId: p.productoId, dosisValor: Number(p.dosisValor), dosisUnidad: p.dosisUnidad })),
+      productos: productosForm.map((p) => ({ ingredienteActivoNombre: p.ingredienteActivoNombre, dosisValor: Number(p.dosisValor), dosisUnidad: p.dosisUnidad })),
       frecuencia,
       fechaInicio,
       fechaFin,
@@ -216,7 +215,7 @@ export default function Fertirriego() {
     setEditandoProgramadaId(f.id);
     setHuertaId(f.huertaId);
     setSeccionIds(f.secciones.map((s) => s.seccion.id));
-    setProductosForm(f.productos.map((p) => ({ productoId: p.productoId, dosisValor: p.dosisValor, dosisUnidad: p.dosisUnidad })));
+    setProductosForm(f.productos.map((p) => ({ ingredienteActivoNombre: p.producto.ingredienteActivo ?? "", dosisValor: p.dosisValor, dosisUnidad: p.dosisUnidad })));
     setFrecuencia(f.frecuencia);
     setFechaInicio(f.fechaInicio.slice(0, 10));
     setFechaFin(f.fechaFin.slice(0, 10));
@@ -261,7 +260,7 @@ export default function Fertirriego() {
       </div>
 
       {mostrarRecetario && (
-        <RecetarioFertirriegoPanel productos={productos} recetas={recetas} cargando={cargandoRecetas} refetch={refetchRecetas} />
+        <RecetarioFertirriegoPanel ingredientes={ingredientes} recetas={recetas} cargando={cargandoRecetas} refetch={refetchRecetas} />
       )}
 
       <p style={{ fontSize: 12, color: "var(--ink-soft)", marginBottom: 14 }}>
@@ -332,17 +331,17 @@ export default function Fertirriego() {
               {productosForm.map((p, i) => (
                 <div key={i} style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
                   <label className="field">
-                    Producto (fertilizante autorizado)
+                    Ingrediente Activo (fertilizante autorizado)
                     <select
-                      value={p.productoId}
-                      onChange={(e) => actualizarProductoForm(i, { productoId: e.target.value })}
+                      value={p.ingredienteActivoNombre}
+                      onChange={(e) => actualizarProductoForm(i, { ingredienteActivoNombre: e.target.value })}
                       required
                       disabled={!!recetaId && !puedeAjustarReceta}
                     >
                       <option value="">Selecciona…</option>
-                      {productos.map((prod) => (
-                        <option key={prod.id} value={prod.id}>
-                          {prod.nombreComercial} ({presentacionTexto(prod)})
+                      {ingredientes.map((ing) => (
+                        <option key={ing.ingredienteActivoNombre} value={ing.ingredienteActivoNombre}>
+                          {ing.ingredienteActivoNombre}
                         </option>
                       ))}
                     </select>
@@ -450,14 +449,14 @@ export default function Fertirriego() {
                   {!f.comprometido && f.estado === "programada" && <span className="tag tag-neutral">Esperando compra automática</span>}{" "}
                   {f.alertaVencimiento && <span className="tag tag-danger">15+ días sin entregar</span>}
                   <div style={{ fontSize: 13, fontWeight: 600, marginTop: 6 }}>
-                    {f.huerta.nombre} — {f.productos.map((p) => p.producto.nombreComercial).join(" + ")}
+                    {f.huerta.nombre} — {f.productos.map((p) => p.producto.ingredienteActivo ?? p.producto.nombreComercial).join(" + ")}
                   </div>
                   <div style={{ fontSize: 12, color: "var(--ink-soft)" }}>
                     Secciones: {f.secciones.map((s) => s.seccion.nombre).join(", ") || "—"}
                   </div>
                   {f.productos.map((p) => (
                     <div key={p.id} style={{ fontSize: 12, color: "var(--ink-soft)" }}>
-                      {p.producto.nombreComercial}: {formatearNumero(p.cantidadTotalCalculada)} {p.producto.unidad} por riego · {p.dosisValor}{" "}
+                      {p.producto.ingredienteActivo ?? p.producto.nombreComercial}: {formatearNumero(p.cantidadTotalCalculada)} {p.producto.unidad} por riego · {p.dosisValor}{" "}
                       {p.dosisUnidad.replace("_", "/")}
                       {" · "}
                       <strong>

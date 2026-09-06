@@ -4,8 +4,12 @@ import type { Proveedor } from "../../lib/types";
 import FechaInput from "../../components/FechaInput";
 import { formatearFecha } from "../../lib/fecha";
 import { formatearDinero } from "../../lib/numero";
+import { useZonas } from "../../lib/useZonas";
+import ZonasPanel from "../../components/ZonasPanel";
 
 export default function Proveedores() {
+  const { zonas, cargando: cargandoZonas, crear: crearZona, editar: editarZona, actualizarActivo: actualizarActivoZona } = useZonas(true);
+  const zonasActivas = zonas.filter((z) => z.activo);
   const [proveedores, setProveedores] = useState<Proveedor[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [mostrarForm, setMostrarForm] = useState(false);
@@ -13,6 +17,7 @@ export default function Proveedores() {
   const [creditoMonto, setCreditoMonto] = useState("");
   const [creditoVencimiento, setCreditoVencimiento] = useState("");
   const [diasCredito, setDiasCredito] = useState("");
+  const [zonaId, setZonaId] = useState("");
   const [editandoDiasId, setEditandoDiasId] = useState<string | null>(null);
   const [diasCreditoEdit, setDiasCreditoEdit] = useState("");
   const [editandoId, setEditandoId] = useState<string | null>(null);
@@ -44,6 +49,7 @@ export default function Proveedores() {
       creditoMonto: creditoMonto ? Number(creditoMonto) : undefined,
       creditoVencimiento: creditoVencimiento || undefined,
       diasCredito: diasCredito ? Number(diasCredito) : undefined,
+      zonaId: zonaId || undefined,
     };
     try {
       if (editandoId) {
@@ -55,6 +61,7 @@ export default function Proveedores() {
       setCreditoMonto("");
       setCreditoVencimiento("");
       setDiasCredito("");
+      setZonaId("");
       setMostrarForm(false);
       setEditandoId(null);
       cargar();
@@ -69,6 +76,7 @@ export default function Proveedores() {
     setCreditoMonto(p.creditoMonto != null ? String(p.creditoMonto) : "");
     setCreditoVencimiento(p.creditoVencimiento ? p.creditoVencimiento.slice(0, 10) : "");
     setDiasCredito(p.diasCredito != null ? String(p.diasCredito) : "");
+    setZonaId(p.zonaId ?? "");
     setError(null);
     setMostrarForm(true);
   }
@@ -86,6 +94,8 @@ export default function Proveedores() {
 
   return (
     <div>
+      <ZonasPanel zonas={zonas} cargando={cargandoZonas} crear={crearZona} editar={editarZona} actualizarActivo={actualizarActivoZona} />
+
       <div style={{ marginBottom: 14 }}>
         <button
           className="btn-primary"
@@ -96,6 +106,7 @@ export default function Proveedores() {
               setCreditoMonto("");
               setCreditoVencimiento("");
               setDiasCredito("");
+              setZonaId("");
             }
             setMostrarForm((v) => !v);
           }}
@@ -122,6 +133,18 @@ export default function Proveedores() {
             Días de crédito
             <input type="number" min={0} step="1" value={diasCredito} onChange={(e) => setDiasCredito(e.target.value)} placeholder="Ej. 15" />
           </label>
+          <label className="field">
+            Zona (de dónde envía normalmente)
+            <select value={zonaId} onChange={(e) => setZonaId(e.target.value)}>
+              <option value="">Sin especificar</option>
+              {zonasActivas.map((z) => (
+                <option key={z.id} value={z.id}>
+                  {z.nombre}
+                  {z.esZonaComprador ? " (local)" : ""}
+                </option>
+              ))}
+            </select>
+          </label>
           <button className="btn-primary" type="submit">
             {editandoId ? "Guardar cambios" : "Guardar"}
           </button>
@@ -137,6 +160,7 @@ export default function Proveedores() {
             <th>Crédito</th>
             <th>Vence</th>
             <th>Días de crédito</th>
+            <th>Zona</th>
             <th>Estado</th>
             <th></th>
           </tr>
@@ -178,6 +202,7 @@ export default function Proveedores() {
                   </button>
                 )}
               </td>
+              <td>{p.zona?.nombre ?? "—"}</td>
               <td>
                 <span className={`tag ${p.activo ? "tag-success" : "tag-danger"}`}>{p.activo ? "Activo" : "Inactivo"}</span>
               </td>

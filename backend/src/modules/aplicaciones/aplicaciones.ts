@@ -2,7 +2,7 @@ import { calcularCantidadTotal, calcularMezclaPorTanque, calcularTanquePendiente
 import type { Prisma, Rol } from "@prisma/client";
 import { prisma } from "../../core/db.js";
 import type { TransactionClient } from "../../core/db.js";
-import { productosAutorizados } from "../almacen/productos.js";
+import { ingredientesAutorizados, resolverProductoPreferidoPorNombre } from "../almacen/preferencias.js";
 import { actualizarDosisProductoEnReceta, obtenerReceta, ROLES_RECETAS } from "../recetario/recetario.js";
 import {
   ajustarCantidadProducto,
@@ -65,10 +65,25 @@ export class NoSePuedeCancelarError extends Error {
 
 export type ModalidadAplicacion = "mochila" | "turbina" | "aguilon";
 
+// Ingrediente Activo, nunca marca (Prioridad 1, 3-sep-2026) — Programar ya
+// no captura productoId directamente, solo el Ingrediente Activo; se
+// resuelve al Producto preferido de ese Ingrediente al escribir (ver
+// `resolverIngredientesAPlicacion` más abajo). Evita que distintos
+// ingenieros programen distinta marca para lo mismo.
 export interface ProductoAplicacionInput {
-  productoId: string;
+  ingredienteActivoNombre: string;
   concentracionValor: number;
   concentracionUnidad: ConcentracionUnidad;
+}
+
+interface ProductoAplicacionResuelto extends ProductoAplicacionInput {
+  productoId: string;
+}
+
+async function resolverIngredientesAplicacion(productos: ProductoAplicacionInput[]): Promise<ProductoAplicacionResuelto[]> {
+  return Promise.all(
+    productos.map(async (p) => ({ ...p, productoId: await resolverProductoPreferidoPorNombre(p.ingredienteActivoNombre) }))
+  );
 }
 
 export interface ProgramarAplicacionInput {
@@ -122,7 +137,10 @@ async function validarUsoDeReceta(
   if (!ROLES_RECETAS.includes(usuarioRol)) {
     const mismaAgua = Number(receta.litrosPorHa) === litrosMezclaPorHa;
     const mismasDosis = receta.productos.every((rp) => {
-      const enviado = productos.find((p) => p.productoId === rp.productoId);
+      // Comparación por Ingrediente Activo (Prioridad 1, 3-sep-2026) — la
+      // receta guarda internamente el Producto preferido resuelto, pero lo
+      // que capturó/envió el usuario es el Ingrediente Activo.
+      const enviado = productos.find((p) => p.ingredienteActivoNombre === rp.producto.ingredienteActivo);
       return enviado && Number(rp.concentracionValor) === enviado.concentracionValor && rp.concentracionUnidad === enviado.concentracionUnidad;
     });
     if (!mismaAgua || !mismasDosis || receta.productos.length !== productos.length) {
@@ -148,7 +166,11 @@ export async function programarAplicacion(input: ProgramarAplicacionInput, cread
   if (!input.productos || input.productos.length === 0) {
     throw new Error("Elige al menos un producto.");
   }
-  const productos = await prisma.producto.findMany({ where: { id: { in: input.productos.map((p) => p.productoId) } } });
+  // Ingrediente Activo, nunca marca (Prioridad 1) — se resuelve al Producto
+  // preferido de cada Ingrediente aquí, una sola vez; el resto de esta
+  // función sigue operando con productoId exactamente como antes.
+  const productosResueltos = await resolverIngredientesAplicacion(input.productos);
+  const productos = await prisma.producto.findMany({ where: { id: { in: productosResueltos.map((p) => p.productoId) } } });
   for (const p of productos) {
     if (p.categoria !== "agroquimico" || !p.autorizado) {
       throw new ProductoNoAutorizadoAplicacionError();
@@ -158,7 +180,7 @@ export async function programarAplicacion(input: ProgramarAplicacionInput, cread
   if (input.recetaId) {
     await validarUsoDeReceta(input.recetaId, usuarioRol, input.litrosMezclaPorHa, input.productos);
     if (input.actualizarRecetaOriginal) {
-      for (const p of input.productos) {
+      for (const p of productosResueltos) {
         await actualizarDosisProductoEnReceta(input.recetaId, p.productoId, p.concentracionValor, p.concentracionUnidad);
       }
     }
@@ -191,7 +213,7 @@ export async function programarAplicacion(input: ProgramarAplicacionInput, cread
       data: input.cuadroIds.map((cuadroId) => ({ aplicacionId: aplicacion.id, cuadroId })),
     });
 
-    for (const p of input.productos) {
+    for (const p of productosResueltos) {
       const cantidadTotalCalculada = calcularCantidadTotal(p.concentracionValor, p.concentracionUnidad, input.litrosMezclaPorHa, hectareasTotales);
       await tx.aplicacionProducto.create({
         data: {
@@ -262,7 +284,8 @@ export async function editarAplicacionProgramada(aplicacionId: string, input: Om
   }
   if (aplicacion.realizadas.length > 0) throw new YaHayAvanceReportadoError();
 
-  const productosNuevos = await prisma.producto.findMany({ where: { id: { in: input.productos.map((p) => p.productoId) } } });
+  const productosResueltos = await resolverIngredientesAplicacion(input.productos);
+  const productosNuevos = await prisma.producto.findMany({ where: { id: { in: productosResueltos.map((p) => p.productoId) } } });
   for (const p of productosNuevos) {
     if (p.categoria !== "agroquimico" || !p.autorizado) throw new ProductoNoAutorizadoAplicacionError();
   }
@@ -271,7 +294,7 @@ export async function editarAplicacionProgramada(aplicacionId: string, input: Om
   if (recetaId) {
     await validarUsoDeReceta(recetaId, usuarioRol, input.litrosMezclaPorHa, input.productos);
     if (input.actualizarRecetaOriginal) {
-      for (const p of input.productos) {
+      for (const p of productosResueltos) {
         await actualizarDosisProductoEnReceta(recetaId, p.productoId, p.concentracionValor, p.concentracionUnidad);
       }
     }
@@ -289,7 +312,7 @@ export async function editarAplicacionProgramada(aplicacionId: string, input: Om
 
   return prisma.$transaction(async (tx) => {
     const productosAnteriores = new Map(aplicacion.productos.map((p) => [p.productoId, p]));
-    const productoIdsNuevos = new Set(input.productos.map((p) => p.productoId));
+    const productoIdsNuevos = new Set(productosResueltos.map((p) => p.productoId));
 
     // Productos quitados por completo de la edición: baja de 100% de lo apartado.
     for (const anterior of aplicacion.productos) {
@@ -298,7 +321,7 @@ export async function editarAplicacionProgramada(aplicacionId: string, input: Om
       await tx.aplicacionProducto.delete({ where: { id: anterior.id } });
     }
 
-    for (const p of input.productos) {
+    for (const p of productosResueltos) {
       const cantidadNueva = calcularCantidadTotal(p.concentracionValor, p.concentracionUnidad, input.litrosMezclaPorHa, hectareasTotales);
       const anterior = productosAnteriores.get(p.productoId);
       const cantidadAnterior = anterior ? Number(anterior.cantidadTotalCalculada) : 0;
@@ -1074,7 +1097,7 @@ export async function listarCancelacionesPendientesConfirmar() {
 
 /** Catálogo de agroquímicos ya autorizados — lo único elegible al programar (9.7). */
 export function productosParaAplicacion() {
-  return productosAutorizados("agroquimico");
+  return ingredientesAutorizados("agroquimico");
 }
 
 /** Implementos elegibles en una línea de Turbina/Aguilón (9.7/9.13). */

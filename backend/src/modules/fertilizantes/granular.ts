@@ -10,6 +10,7 @@ import {
   stockTotalProductoTx,
 } from "../almacen/movimientos.js";
 import { listarEquipos } from "../equipos/equipos.js";
+import { ingredientesAutorizados, resolverProductoPreferidoPorNombre } from "../almacen/preferencias.js";
 import { obtenerVersionVigente } from "../unidades-produccion/cuadros.js";
 import { obtenerConfigNomina } from "../nomina/config.js";
 import { aActividadCalc } from "../nomina/util.js";
@@ -61,10 +62,22 @@ export class NoSePuedeCancelarError extends Error {
   }
 }
 
+// Ingrediente Activo, nunca marca (Prioridad 1, 3-sep-2026) — Programar ya
+// no captura productoId directamente, se resuelve al Producto preferido.
 export interface ProductoGranularInput {
-  productoId: string;
+  ingredienteActivoNombre: string;
   modoDosis: ModoDosisGranular;
   dosisValor: number;
+}
+
+interface ProductoGranularResuelto extends ProductoGranularInput {
+  productoId: string;
+}
+
+async function resolverIngredientesGranular(productos: ProductoGranularInput[]): Promise<ProductoGranularResuelto[]> {
+  return Promise.all(
+    productos.map(async (p) => ({ ...p, productoId: await resolverProductoPreferidoPorNombre(p.ingredienteActivoNombre) }))
+  );
 }
 
 export interface ProgramarGranularInput {
@@ -96,7 +109,8 @@ export async function programarGranular(input: ProgramarGranularInput, creadoPor
   if (!input.productos || input.productos.length === 0) {
     throw new Error("Elige al menos un producto.");
   }
-  const productos = await prisma.producto.findMany({ where: { id: { in: input.productos.map((p) => p.productoId) } } });
+  const productosResueltos = await resolverIngredientesGranular(input.productos);
+  const productos = await prisma.producto.findMany({ where: { id: { in: productosResueltos.map((p) => p.productoId) } } });
   for (const p of productos) {
     if (p.categoria !== "fertilizante" || !p.autorizado) {
       throw new ProductoNoAutorizadoFertilizanteError();
@@ -135,7 +149,7 @@ export async function programarGranular(input: ProgramarGranularInput, creadoPor
       data: input.cuadroIds.map((cuadroId) => ({ fertilizacionId: fertilizacion.id, cuadroId })),
     });
 
-    for (const p of input.productos) {
+    for (const p of productosResueltos) {
       const cantidadTotalCalculada = calcularCantidadTotalGranular(p.modoDosis, p.dosisValor, hectareasTotales, plantasTotales);
       await tx.fertilizacionGranularProducto.create({
         data: {
@@ -197,7 +211,8 @@ export async function editarGranularProgramada(id: string, input: Omit<Programar
   }
   if (fertilizacion.realizadas.length > 0) throw new YaHayAvanceReportadoGranularError();
 
-  const productosNuevos = await prisma.producto.findMany({ where: { id: { in: input.productos.map((p) => p.productoId) } } });
+  const productosResueltos = await resolverIngredientesGranular(input.productos);
+  const productosNuevos = await prisma.producto.findMany({ where: { id: { in: productosResueltos.map((p) => p.productoId) } } });
   for (const p of productosNuevos) {
     if (p.categoria !== "fertilizante" || !p.autorizado) throw new ProductoNoAutorizadoFertilizanteError();
   }
@@ -222,7 +237,7 @@ export async function editarGranularProgramada(id: string, input: Omit<Programar
 
   return prisma.$transaction(async (tx) => {
     const productosAnteriores = new Map(fertilizacion.productos.map((p) => [p.productoId, p]));
-    const productoIdsNuevos = new Set(input.productos.map((p) => p.productoId));
+    const productoIdsNuevos = new Set(productosResueltos.map((p) => p.productoId));
 
     for (const anterior of fertilizacion.productos) {
       if (productoIdsNuevos.has(anterior.productoId)) continue;
@@ -230,7 +245,7 @@ export async function editarGranularProgramada(id: string, input: Omit<Programar
       await tx.fertilizacionGranularProducto.delete({ where: { id: anterior.id } });
     }
 
-    for (const p of input.productos) {
+    for (const p of productosResueltos) {
       const cantidadNueva = calcularCantidadTotalGranular(p.modoDosis, p.dosisValor, hectareasTotales, plantasTotales);
       const anterior = productosAnteriores.get(p.productoId);
       const cantidadAnterior = anterior ? Number(anterior.cantidadTotalCalculada) : 0;
@@ -763,7 +778,7 @@ export async function listarCancelacionesPendientesConfirmarGranular() {
 
 /** Catálogo de fertilizantes ya autorizados — lo único elegible al programar (9.5). */
 export function productosParaFertilizacion() {
-  return prisma.producto.findMany({ where: { categoria: "fertilizante", autorizado: true }, orderBy: { nombreComercial: "asc" } });
+  return ingredientesAutorizados("fertilizante");
 }
 
 /** Implementos elegibles cuando el recurso es "Con implemento" (9.5/9.13). */

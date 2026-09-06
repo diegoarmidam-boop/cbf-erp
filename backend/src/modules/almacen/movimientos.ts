@@ -287,6 +287,13 @@ export async function comprometerAdicional(
  * días sin salir de bodega, o cancelación manual — 9.7) — regresa la
  * cantidad al primer lote del producto; la precisión de a qué lote exacto
  * regresa no importa a nivel de negocio, solo el total agregado del stock.
+ * Si no existe ningún lote (bug real, 3-sep-2026: encontrado en una
+ * programación de Fertirriego atorada en producción — el compromiso
+ * original SÍ existía en el historial de movimientos, pero su lote ya no
+ * — probablemente por una limpieza de datos de prueba fuera de la app),
+ * se crea uno nuevo igual que hace `registrarEntradaTx` con una entrada
+ * normal, en vez de tronar la operación: quien llama aquí ya confirmó que
+ * de verdad hubo un compromiso que hay que devolver.
  */
 export async function liberarComprometido(
   tx: TransactionClient,
@@ -296,12 +303,42 @@ export async function liberarComprometido(
   capturadoPorId: string,
   motivo: string
 ): Promise<void> {
-  const lote = await tx.productoLote.findFirst({ where: { productoId } });
-  if (!lote) throw new Error("No hay lote al que regresar el stock liberado.");
+  let lote = await tx.productoLote.findFirst({ where: { productoId } });
+  if (!lote) {
+    lote = await tx.productoLote.create({ data: { productoId, lote: SIN_LOTE, cantidadActual: 0 } });
+  }
   await tx.productoLote.update({ where: { id: lote.id }, data: { cantidadActual: { increment: cantidad } } });
   await tx.almacenCentralMovimiento.create({
     data: { productoId, tipo: "ajuste_manual", cantidad, referenciaId, capturadoPorId, motivoAjuste: motivo },
   });
+}
+
+/**
+ * Reduce (o cancela si llega a $0) las compras automáticas todavía
+ * pendientes de una Aplicación/Fertilización para un producto — usado
+ * cuando baja la cantidad necesaria pero esa cantidad nunca llegó a
+ * comprometerse de verdad (intentarComprometer/comprometerAdicional
+ * fallaron por falta de stock en su momento y generaron esta compra en su
+ * lugar), así que no hay nada que liberar de Almacén, solo que ya no hace
+ * falta comprar tanto.
+ */
+async function reducirCompraPendiente(tx: TransactionClient, referenciaId: string, productoId: string, cantidadAReducir: number): Promise<void> {
+  const pendientes = await tx.ordenCompra.findMany({
+    where: { referenciaAplicacionId: referenciaId, productoId, estado: { in: ["pendiente_autorizar", "pendiente_cotizar"] } },
+    orderBy: { fechaCreacion: "desc" },
+  });
+  let restante = cantidadAReducir;
+  for (const orden of pendientes) {
+    if (restante <= 0.0001) break;
+    const solicitada = Number(orden.cantidadSolicitada);
+    if (solicitada <= restante + 0.0001) {
+      await tx.ordenCompra.update({ where: { id: orden.id }, data: { estado: "cancelada" } });
+      restante -= solicitada;
+    } else {
+      await tx.ordenCompra.update({ where: { id: orden.id }, data: { cantidadSolicitada: solicitada - restante } });
+      restante = 0;
+    }
+  }
 }
 
 /**
@@ -349,7 +386,26 @@ export async function ajustarCantidadProducto(
 
   const sobrante = -delta;
   if (!entregada) {
-    await liberarComprometido(tx, productoId, sobrante, referenciaId, editadoPorId, "Ajuste de dosis — sobrante liberado antes de entregar.");
+    // Bug real (3-sep-2026): esto asumía que TODO `cantidadAnterior` estaba
+    // de verdad comprometido en Almacén, pero si el compromiso original
+    // falló por falta de stock, lo que hay en su lugar es una compra
+    // automática pendiente (ver intentarComprometer/comprometerAdicional),
+    // nunca un lote descontado — liberarComprometido tronaba con "No hay
+    // lote al que regresar el stock liberado." Ahora solo libera lo que de
+    // verdad está comprometido (según el historial de movimientos) y el
+    // resto simplemente reduce/cancela la compra pendiente.
+    const comprometidos = await tx.almacenCentralMovimiento.findMany({
+      where: { referenciaId, productoId, tipo: "salida_comprometida" },
+    });
+    const totalComprometido = comprometidos.reduce((s, m) => s + Number(m.cantidad), 0);
+    const aLiberar = Math.min(sobrante, totalComprometido);
+    if (aLiberar > 0.0001) {
+      await liberarComprometido(tx, productoId, aLiberar, referenciaId, editadoPorId, "Ajuste de dosis — sobrante liberado antes de entregar.");
+    }
+    const sinComprometer = sobrante - aLiberar;
+    if (sinComprometer > 0.0001) {
+      await reducirCompraPendiente(tx, referenciaId, productoId, sinComprometer);
+    }
     return;
   }
 

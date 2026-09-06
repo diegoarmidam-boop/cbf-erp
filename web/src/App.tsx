@@ -24,6 +24,7 @@ import DoNotHire from "./pages/rh/DoNotHire";
 import Accesos from "./pages/rh/Accesos";
 import AlmacenLayout from "./pages/almacen/AlmacenLayout";
 import Inventario from "./pages/almacen/Inventario";
+import EnCamino from "./pages/almacen/EnCamino";
 import Movimientos from "./pages/almacen/Movimientos";
 import AlmacenLocalPage from "./pages/almacen/AlmacenLocalPage";
 import Preferencias from "./pages/almacen/Preferencias";
@@ -105,6 +106,7 @@ export default function App() {
             <Route path="/almacen" element={<AlmacenLayout />}>
               <Route index element={<Navigate to="inventario" replace />} />
               <Route path="inventario" element={<Inventario />} />
+              <Route path="en-camino" element={<EnCamino />} />
               <Route path="movimientos" element={<Movimientos />} />
               <Route path="local" element={<AlmacenLocalPage />} />
               <Route path="preferencias" element={<Preferencias />} />

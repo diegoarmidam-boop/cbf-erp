@@ -1,7 +1,7 @@
 import { prisma } from "../../core/db.js";
 
 export function listarProveedores() {
-  return prisma.proveedor.findMany({ where: { activo: true }, orderBy: { nombre: "asc" } });
+  return prisma.proveedor.findMany({ where: { activo: true }, orderBy: { nombre: "asc" }, include: { zona: true } });
 }
 
 export interface AltaProveedorInput {
@@ -10,6 +10,9 @@ export interface AltaProveedorInput {
   creditoVencimiento?: string;
   diasCredito?: number;
   datosFacturacion?: Record<string, unknown>;
+  // Zona (Prioridad 2, 3-sep-2026) — de dónde envía normalmente, para
+  // precargarla sola al cotizar con él en el Comparador (2.1/2.2).
+  zonaId?: string;
 }
 
 export function crearProveedor(input: AltaProveedorInput) {
@@ -20,7 +23,9 @@ export function crearProveedor(input: AltaProveedorInput) {
       creditoVencimiento: input.creditoVencimiento ? new Date(input.creditoVencimiento) : undefined,
       diasCredito: input.diasCredito,
       datosFacturacion: input.datosFacturacion,
+      zonaId: input.zonaId,
     },
+    include: { zona: true },
   });
 }
 
@@ -37,7 +42,9 @@ export function editarProveedor(id: string, input: AltaProveedorInput) {
       creditoVencimiento: input.creditoVencimiento ? new Date(input.creditoVencimiento) : undefined,
       diasCredito: input.diasCredito,
       datosFacturacion: input.datosFacturacion,
+      zonaId: input.zonaId ?? null,
     },
+    include: { zona: true },
   });
 }
 

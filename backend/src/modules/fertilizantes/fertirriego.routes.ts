@@ -32,7 +32,7 @@ fertirriegoRouter.use(requireAuth);
 // no, Express intenta interpretar "recetario" como un id de programación.
 const dosisFertirriegoEnum = z.enum(["kg_ha", "l_ha", "g_ha"]);
 const recetaFertirriegoProductoSchema = z.object({
-  productoId: z.string().min(1),
+  ingredienteActivoNombre: z.string().min(1),
   dosisValor: z.number().positive(),
   dosisUnidad: dosisFertirriegoEnum,
 });
@@ -167,7 +167,7 @@ fertirriegoRouter.get("/:id/orden.pdf", requirePermission("fertilizantes", "ver"
 });
 
 const productoFertirriegoSchema = z.object({
-  productoId: z.string().min(1),
+  ingredienteActivoNombre: z.string().min(1),
   dosisValor: z.number().positive(),
   dosisUnidad: dosisFertirriegoEnum,
 });

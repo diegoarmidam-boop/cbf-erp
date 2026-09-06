@@ -6,11 +6,10 @@ import { useHuertas } from "../../lib/useHuertas";
 import { usePersonal } from "../../lib/usePersonal";
 import { useRecetas } from "../../lib/useRecetas";
 import { useCatalogoAbierto } from "../../lib/useCatalogoAbierto";
-import type { Aplicacion, AplicacionRealizadaLinea, ConcentracionUnidad, Cuadro, Equipo, ModalidadAplicacion, OrdenAplicacion, Producto } from "../../lib/types";
+import type { Aplicacion, AplicacionRealizadaLinea, ConcentracionUnidad, Cuadro, Equipo, IngredienteAutorizado, ModalidadAplicacion, OrdenAplicacion } from "../../lib/types";
 import FechaInput from "../../components/FechaInput";
 import { formatearFecha, formatearInstante } from "../../lib/fecha";
 import { formatearNumero } from "../../lib/numero";
-import { presentacionTexto } from "../../lib/producto";
 import RecetarioPanel, { ROLES_PUEDEN_RECETAS } from "../../components/RecetarioPanel";
 import MezclaPorTanque from "../../components/MezclaPorTanque";
 import OrdenAplicacionView from "../../components/OrdenAplicacionView";
@@ -48,14 +47,15 @@ function nuevaKey(): string {
   return `linea-${Date.now()}-${contadorKey}`;
 }
 
+// Ingrediente Activo, nunca marca (Prioridad 1, 3-sep-2026).
 interface ProductoForm {
-  productoId: string;
+  ingredienteActivoNombre: string;
   concentracionValor: string;
   concentracionUnidad: ConcentracionUnidad;
 }
 
 function productoFormVacio(): ProductoForm {
-  return { productoId: "", concentracionValor: "", concentracionUnidad: "ml_l" };
+  return { ingredienteActivoNombre: "", concentracionValor: "", concentracionUnidad: "ml_l" };
 }
 
 interface LineaForm {
@@ -126,7 +126,7 @@ function NotaTanquePendiente({
   productos,
 }: {
   nota: NonNullable<Aplicacion["notaTanquePendiente"]>;
-  productos: { productoId: string; nombreComercial: string; concentracionUnidad: ConcentracionUnidad }[];
+  productos: { productoId: string; ingredienteActivo: string | null; nombreComercial: string; concentracionUnidad: ConcentracionUnidad }[];
 }) {
   const { tanquesNecesarios, tanquesPreparados } = nota[0]!;
   const tanquesCompletosUsados = Math.floor(tanquesNecesarios + 1e-9);
@@ -140,7 +140,7 @@ function NotaTanquePendiente({
       {nota
         .map((n) => {
           const p = productos.find((x) => x.productoId === n.productoId);
-          return `${formatearCantidadTanque(p?.concentracionUnidad ?? "ml_l", n.cantidadProductoPendiente)} de ${p?.nombreComercial ?? n.productoId}`;
+          return `${formatearCantidadTanque(p?.concentracionUnidad ?? "ml_l", n.cantidadProductoPendiente)} de ${p?.ingredienteActivo ?? p?.nombreComercial ?? n.productoId}`;
         })
         .join(" + ")}
     </div>
@@ -168,7 +168,7 @@ export default function Aplicaciones() {
 
   // ---- Programar ----
   const [mostrarForm, setMostrarForm] = useState(false);
-  const [productos, setProductos] = useState<Producto[]>([]);
+  const [ingredientes, setIngredientes] = useState<IngredienteAutorizado[]>([]);
   const [huertaId, setHuertaId] = useState("");
   const [cuadrosHuerta, setCuadrosHuerta] = useState<Cuadro[]>([]);
   const [cuadroIds, setCuadroIds] = useState<string[]>([]);
@@ -236,7 +236,7 @@ export default function Aplicaciones() {
   }, [idResaltado, aplicaciones]);
 
   useEffect(() => {
-    api.get<Producto[]>("/aplicaciones/productos").then(setProductos);
+    api.get<IngredienteAutorizado[]>("/aplicaciones/productos").then(setIngredientes);
     api.get<Equipo[]>("/aplicaciones/equipos-tractor").then(setTractores);
     api.get<Equipo[]>("/aplicaciones/equipos-implemento").then(setImplementos);
   }, []);
@@ -280,7 +280,13 @@ export default function Aplicaciones() {
     const receta = recetas.find((r) => r.id === id);
     if (!receta) return;
     setLitrosMezclaPorHa(String(receta.litrosPorHa));
-    setProductosForm(receta.productos.map((p) => ({ productoId: p.productoId, concentracionValor: String(p.concentracionValor), concentracionUnidad: p.concentracionUnidad })));
+    setProductosForm(
+      receta.productos.map((p) => ({
+        ingredienteActivoNombre: p.producto.ingredienteActivo ?? "",
+        concentracionValor: String(p.concentracionValor),
+        concentracionUnidad: p.concentracionUnidad,
+      }))
+    );
     // Precarga el Tipo de aplicación de la receta (25-ago-2026) — sigue
     // siendo editable después, no es parte del candado de dosis.
     if (receta.tipoAplicacionId) setTipoAplicacionId(receta.tipoAplicacionId);
@@ -302,7 +308,7 @@ export default function Aplicaciones() {
     if (Number(receta.litrosPorHa) !== Number(litrosMezclaPorHa)) return true;
     if (receta.productos.length !== productosForm.length) return true;
     return receta.productos.some((rp) => {
-      const actual = productosForm.find((p) => p.productoId === rp.productoId);
+      const actual = productosForm.find((p) => p.ingredienteActivoNombre === rp.producto.ingredienteActivo);
       return !actual || Number(rp.concentracionValor) !== Number(actual.concentracionValor) || rp.concentracionUnidad !== actual.concentracionUnidad;
     });
   }
@@ -311,7 +317,7 @@ export default function Aplicaciones() {
     return {
       cuadroIds,
       productos: productosForm.map((p) => ({
-        productoId: p.productoId,
+        ingredienteActivoNombre: p.ingredienteActivoNombre,
         concentracionValor: Number(p.concentracionValor),
         concentracionUnidad: p.concentracionUnidad,
       })),
@@ -373,7 +379,11 @@ export default function Aplicaciones() {
     setHuertaId(a.huertaId);
     setCuadroIds(a.cuadros.map((c) => c.cuadro.id));
     setProductosForm(
-      a.productos.map((p) => ({ productoId: p.productoId, concentracionValor: String(p.concentracionValor), concentracionUnidad: p.concentracionUnidad }))
+      a.productos.map((p) => ({
+        ingredienteActivoNombre: p.producto.ingredienteActivo ?? "",
+        concentracionValor: String(p.concentracionValor),
+        concentracionUnidad: p.concentracionUnidad,
+      }))
     );
     setRecursoSugerido(a.recursoSugerido);
     setLitrosMezclaPorHa(String(a.litrosMezclaPorHa));
@@ -567,7 +577,7 @@ export default function Aplicaciones() {
       </div>
 
       {mostrarRecetario && (
-        <RecetarioPanel modulo="aplicaciones" productos={productos} recetas={recetas} cargando={cargandoRecetas} refetch={refetchRecetas} />
+        <RecetarioPanel modulo="aplicaciones" ingredientes={ingredientes} recetas={recetas} cargando={cargandoRecetas} refetch={refetchRecetas} />
       )}
 
       {mostrarForm && (
@@ -648,17 +658,17 @@ export default function Aplicaciones() {
               {productosForm.map((p, i) => (
                 <div key={i} style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
                   <label className="field">
-                    Producto (agroquímico autorizado)
+                    Ingrediente Activo (agroquímico autorizado)
                     <select
-                      value={p.productoId}
-                      onChange={(e) => actualizarProductoForm(i, { productoId: e.target.value })}
+                      value={p.ingredienteActivoNombre}
+                      onChange={(e) => actualizarProductoForm(i, { ingredienteActivoNombre: e.target.value })}
                       required
                       disabled={!!recetaId && !puedeAjustarReceta}
                     >
                       <option value="">Selecciona…</option>
-                      {productos.map((prod) => (
-                        <option key={prod.id} value={prod.id}>
-                          {prod.nombreComercial} ({presentacionTexto(prod)})
+                      {ingredientes.map((ing) => (
+                        <option key={ing.ingredienteActivoNombre} value={ing.ingredienteActivoNombre}>
+                          {ing.ingredienteActivoNombre}
                         </option>
                       ))}
                     </select>
@@ -795,14 +805,14 @@ export default function Aplicaciones() {
                   {a.alertaVencimiento && <span className="tag tag-danger">15+ días sin entregar</span>}{" "}
                   {a.alertaPendienteAplicar && <span className="tag tag-danger">15+ días entregada sin aplicar</span>}
                   <div style={{ fontSize: 13, fontWeight: 600, marginTop: 6 }}>
-                    {a.huerta.nombre} — {a.productos.map((p) => p.producto.nombreComercial).join(" + ")}
+                    {a.huerta.nombre} — {a.productos.map((p) => p.producto.ingredienteActivo ?? p.producto.nombreComercial).join(" + ")}
                   </div>
                   <div style={{ fontSize: 12, color: "var(--ink-soft)" }}>
                     Cuadros: {a.cuadros.map((c) => c.cuadro.nombre).join(", ") || "—"}
                   </div>
                   {a.productos.map((p) => (
                     <div key={p.id} style={{ fontSize: 12, color: "var(--ink-soft)" }}>
-                      {p.producto.nombreComercial}: {formatearNumero(p.cantidadTotalCalculada)} {p.producto.unidad} · {p.concentracionValor}{" "}
+                      {p.producto.ingredienteActivo ?? p.producto.nombreComercial}: {formatearNumero(p.cantidadTotalCalculada)} {p.producto.unidad} · {p.concentracionValor}{" "}
                       {p.concentracionUnidad.replace("_", "/")}
                     </div>
                   ))}
@@ -815,7 +825,12 @@ export default function Aplicaciones() {
                       <MezclaPorTanque
                         mezcla={a.mezclaPorTanque}
                         capacidadTanque={Number(a.capacidadTanque)}
-                        productos={a.productos.map((p) => ({ productoId: p.productoId, nombreComercial: p.producto.nombreComercial, concentracionUnidad: p.concentracionUnidad }))}
+                        productos={a.productos.map((p) => ({
+                          productoId: p.productoId,
+                          ingredienteActivo: p.producto.ingredienteActivo,
+                          nombreComercial: p.producto.nombreComercial,
+                          concentracionUnidad: p.concentracionUnidad,
+                        }))}
                       />
                     </div>
                   )}
@@ -828,7 +843,12 @@ export default function Aplicaciones() {
                   {a.notaTanquePendiente && a.notaTanquePendiente.length > 0 && (
                     <NotaTanquePendiente
                       nota={a.notaTanquePendiente}
-                      productos={a.productos.map((p) => ({ productoId: p.productoId, nombreComercial: p.producto.nombreComercial, concentracionUnidad: p.concentracionUnidad }))}
+                      productos={a.productos.map((p) => ({
+                        productoId: p.productoId,
+                        ingredienteActivo: p.producto.ingredienteActivo,
+                        nombreComercial: p.producto.nombreComercial,
+                        concentracionUnidad: p.concentracionUnidad,
+                      }))}
                     />
                   )}
                   {a.estado === "cancelada" && (

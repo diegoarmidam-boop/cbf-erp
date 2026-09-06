@@ -2,15 +2,25 @@ import { useEffect, useState, type FormEvent } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api, ApiError, getToken } from "../../lib/api";
 import { useZonas } from "../../lib/useZonas";
-import type { ComparacionCalculada, ComparacionResumen, CotizacionCalculada, MonedaCotizacion, OrdenCompra, Proveedor } from "../../lib/types";
+import type {
+  ComparacionCalculada,
+  ComparacionResumen,
+  CotizacionCalculada,
+  MonedaCotizacion,
+  OpcionesProductoComercial,
+  OrdenCompra,
+  Producto,
+  Proveedor,
+} from "../../lib/types";
 import { formatearInstante } from "../../lib/fecha";
 import { formatearDinero, formatearNumero } from "../../lib/numero";
+import { nombreConMarca } from "../../lib/producto";
 import ConfirmModal from "../../components/ConfirmModal";
 
 interface CotizacionForm {
   proveedorId: string;
   zonaId: string;
-  nombreComercial: string;
+  productoComercialId: string;
   moneda: MonedaCotizacion;
   precioValor: string;
   tipoCambio: string;
@@ -23,7 +33,7 @@ function nuevaCotizacion(): CotizacionForm {
   return {
     proveedorId: "",
     zonaId: "",
-    nombreComercial: "",
+    productoComercialId: "",
     moneda: "MXN",
     precioValor: "",
     tipoCambio: "",
@@ -37,7 +47,7 @@ function cotizacionAPayload(c: CotizacionForm) {
   return {
     proveedorId: c.proveedorId,
     zonaId: c.zonaId,
-    nombreComercial: c.nombreComercial,
+    productoComercialId: c.productoComercialId,
     moneda: c.moneda,
     precioValor: Number(c.precioValor),
     tipoCambio: c.moneda === "USD" ? Number(c.tipoCambio) : undefined,
@@ -231,7 +241,7 @@ export default function Comparador() {
         <td>
           {c.zona.nombre} {c.zona.esZonaComprador && <span className="tag tag-neutral">Local</span>}
         </td>
-        <td>{c.nombreComercial}</td>
+        <td>{nombreConMarca(c.productoComercial)}</td>
         <td>
           {formatearDinero(c.precioValor)} {c.moneda}
           {c.moneda === "USD" && <div style={{ fontSize: 10.5, color: "var(--ink-soft)" }}>≈ {formatearDinero(c.precioValorMXN)} MXN</div>}
@@ -342,7 +352,7 @@ export default function Comparador() {
                 <tr>
                   <th>Proveedor</th>
                   <th>Zona</th>
-                  <th>Nombre comercial</th>
+                  <th>Producto Comercial</th>
                   <th>Precio presentación</th>
                   <th>Presentación</th>
                   <th>Disponible</th>
@@ -401,6 +411,7 @@ export default function Comparador() {
               onChange={(cambios) => setCotizacionNueva((prev) => ({ ...prev, ...cambios }))}
               proveedores={proveedores}
               zonas={zonas}
+              productoId={detalle.producto.id}
             />
             <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
               <button className="btn-secondary" onClick={() => setAgregandoCotizacion(false)}>
@@ -476,7 +487,13 @@ export default function Comparador() {
           <GestorZonas crearZona={crearZona} />
           {cotizaciones.map((c, j) => (
             <div key={j} className="card" style={{ marginBottom: 10, background: "var(--surface-soft, #fafafa)" }}>
-              <LineaCotizacionForm c={c} onChange={(cambios) => actualizarCotizacion(j, cambios)} proveedores={proveedores} zonas={zonas} />
+              <LineaCotizacionForm
+                c={c}
+                onChange={(cambios) => actualizarCotizacion(j, cambios)}
+                proveedores={proveedores}
+                zonas={zonas}
+                productoId={listaCompra.find((o) => o.id === ordenId)?.productoId ?? ""}
+              />
               {cotizaciones.length > 1 && (
                 <button
                   type="button"
@@ -624,17 +641,48 @@ function LineaCotizacionForm({
   onChange,
   proveedores,
   zonas,
+  productoId,
 }: {
   c: CotizacionForm;
   onChange: (cambios: Partial<CotizacionForm>) => void;
   proveedores: Proveedor[];
   zonas: { id: string; nombre: string; esZonaComprador: boolean }[];
+  // Producto que se está cotizando (Prioridad 2, 3-sep-2026) — acota el
+  // selector de Producto Comercial al preferido/sustitutos de su mismo
+  // Ingrediente Activo.
+  productoId: string;
 }) {
+  const [opciones, setOpciones] = useState<Producto[]>([]);
+
+  useEffect(() => {
+    if (!productoId) {
+      setOpciones([]);
+      return;
+    }
+    api.get<OpcionesProductoComercial>(`/compras/comparador/opciones-producto/${productoId}`).then((r) => setOpciones(r.opciones));
+  }, [productoId]);
+
+  async function alElegirProveedor(proveedorId: string) {
+    const proveedor = proveedores.find((p) => p.id === proveedorId);
+    let productoComercialId = c.productoComercialId;
+    if (productoId && proveedorId) {
+      // Precarga (2.5): el Producto Comercial con el que se cotizó por
+      // última vez este mismo Ingrediente Activo con este mismo Proveedor
+      // — sigue siendo editable en el selector de abajo.
+      const r = await api.get<OpcionesProductoComercial>(`/compras/comparador/opciones-producto/${productoId}?proveedorId=${proveedorId}`);
+      setOpciones(r.opciones);
+      if (r.ultimoUsadoId) productoComercialId = r.ultimoUsadoId;
+    }
+    // Precarga de Zona (Prioridad 2, 3-sep-2026): a partir de la que tiene
+    // guardada este Proveedor — sigue siendo editable abajo.
+    onChange({ proveedorId, zonaId: proveedor?.zonaId ?? "", productoComercialId });
+  }
+
   return (
     <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
       <label className="field">
         Proveedor
-        <select value={c.proveedorId} onChange={(e) => onChange({ proveedorId: e.target.value })} required>
+        <select value={c.proveedorId} onChange={(e) => alElegirProveedor(e.target.value)} required>
           <option value="">Selecciona…</option>
           {proveedores.map((p) => (
             <option key={p.id} value={p.id}>
@@ -656,8 +704,15 @@ function LineaCotizacionForm({
         </select>
       </label>
       <label className="field">
-        Nombre comercial (de este proveedor)
-        <input value={c.nombreComercial} onChange={(e) => onChange({ nombreComercial: e.target.value })} required style={{ width: 160 }} />
+        Producto Comercial
+        <select value={c.productoComercialId} onChange={(e) => onChange({ productoComercialId: e.target.value })} required>
+          <option value="">Selecciona…</option>
+          {opciones.map((p) => (
+            <option key={p.id} value={p.id}>
+              {nombreConMarca(p)}
+            </option>
+          ))}
+        </select>
       </label>
       <label className="field">
         Moneda

@@ -39,7 +39,7 @@ tiposAplicacionRouter.patch("/:id/activo", async (req, res) => {
 const moduloEnum = z.enum(["aplicaciones", "fertirriego"]);
 const concentracionUnidadEnum = z.enum(["ml_l", "g_l", "kg_l"]);
 const recetaProductoSchema = z.object({
-  productoId: z.string().min(1),
+  ingredienteActivoNombre: z.string().min(1),
   concentracionValor: z.number().positive(),
   concentracionUnidad: concentracionUnidadEnum,
 });

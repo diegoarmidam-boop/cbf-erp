@@ -11,6 +11,7 @@ import {
   listarComparaciones,
   obtenerComparacionCalculada,
   obtenerComparacionDeOrden,
+  opcionesProductoComercial,
   OrdenNoPendienteDeCotizarError,
   YaTieneComparacionError,
 } from "./comparador.js";
@@ -28,6 +29,14 @@ comparadorRouter.get("/por-orden/:ordenCompraId", requirePermission("compras", "
   res.json(comparacion);
 });
 
+// Opciones de Producto Comercial (preferido + sustitutos autorizados) para
+// cotizar un producto, más la precarga por Proveedor (2.2/2.5, 3-sep-2026).
+// Registrada ANTES de "/:id" para que Express no la confunda con un id de Comparación.
+comparadorRouter.get("/opciones-producto/:productoId", requirePermission("compras", "ver"), async (req, res) => {
+  const proveedorId = typeof req.query.proveedorId === "string" ? req.query.proveedorId : undefined;
+  res.json(await opcionesProductoComercial(unoSolo(req.params.productoId), proveedorId));
+});
+
 comparadorRouter.get("/:id", requirePermission("compras", "ver"), async (req, res) => {
   const comparacion = await obtenerComparacionCalculada(unoSolo(req.params.id));
   if (!comparacion) {
@@ -41,7 +50,7 @@ const cotizacionSchema = z
   .object({
     proveedorId: z.string().min(1),
     zonaId: z.string().min(1),
-    nombreComercial: z.string().min(1),
+    productoComercialId: z.string().min(1),
     moneda: z.enum(["MXN", "USD"]),
     precioValor: z.number().positive(),
     tipoCambio: z.number().positive().optional(),

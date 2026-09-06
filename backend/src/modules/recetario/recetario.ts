@@ -1,5 +1,6 @@
 import type { ConcentracionUnidad, ModuloReceta, Rol } from "@prisma/client";
 import { prisma } from "../../core/db.js";
+import { resolverProductoPreferidoPorNombre } from "../almacen/preferencias.js";
 
 /**
  * Recetario (20-ago-2026): paquetes técnicos precargados de Aplicaciones y
@@ -26,10 +27,23 @@ export const tiposAplicacion = {
   actualizarActivo: (id: string, activo: boolean) => prisma.tipoAplicacion.update({ where: { id }, data: { activo } }),
 };
 
+// Ingrediente Activo, nunca marca (Prioridad 1, 3-sep-2026) — el Recetario
+// ya no captura productoId, solo el Ingrediente Activo; se resuelve al
+// Producto preferido al guardar (ver crearReceta/editarReceta).
 export interface RecetaProductoInput {
-  productoId: string;
+  ingredienteActivoNombre: string;
   concentracionValor: number;
   concentracionUnidad: ConcentracionUnidad;
+}
+
+async function resolverProductosReceta(productos: RecetaProductoInput[]) {
+  return Promise.all(
+    productos.map(async (p) => ({
+      productoId: await resolverProductoPreferidoPorNombre(p.ingredienteActivoNombre),
+      concentracionValor: p.concentracionValor,
+      concentracionUnidad: p.concentracionUnidad,
+    }))
+  );
 }
 
 export interface RecetaInput {
@@ -57,6 +71,7 @@ export function obtenerReceta(id: string) {
 
 export async function crearReceta(input: RecetaInput, creadoPorId: string) {
   if (input.productos.length === 0) throw new Error("Una receta necesita al menos un producto.");
+  const productosResueltos = await resolverProductosReceta(input.productos);
   return prisma.receta.create({
     data: {
       nombre: input.nombre,
@@ -64,13 +79,7 @@ export async function crearReceta(input: RecetaInput, creadoPorId: string) {
       tipoAplicacionId: input.tipoAplicacionId,
       litrosPorHa: input.litrosPorHa,
       creadoPorId,
-      productos: {
-        create: input.productos.map((p) => ({
-          productoId: p.productoId,
-          concentracionValor: p.concentracionValor,
-          concentracionUnidad: p.concentracionUnidad,
-        })),
-      },
+      productos: { create: productosResueltos },
     },
     include: { tipoAplicacion: true, productos: { include: { producto: true } } },
   });
@@ -88,8 +97,9 @@ export interface EditarRecetaInput {
 // preservar por producto (a diferencia de una Aplicación ya programada,
 // que sí necesita conservar cada reporte).
 export async function editarReceta(id: string, input: EditarRecetaInput) {
+  const productosResueltos = input.productos ? await resolverProductosReceta(input.productos) : undefined;
   return prisma.$transaction(async (tx) => {
-    if (input.productos) {
+    if (productosResueltos) {
       await tx.recetaProducto.deleteMany({ where: { recetaId: id } });
     }
     return tx.receta.update({
@@ -98,17 +108,7 @@ export async function editarReceta(id: string, input: EditarRecetaInput) {
         nombre: input.nombre,
         tipoAplicacionId: input.tipoAplicacionId,
         litrosPorHa: input.litrosPorHa,
-        ...(input.productos
-          ? {
-              productos: {
-                create: input.productos.map((p) => ({
-                  productoId: p.productoId,
-                  concentracionValor: p.concentracionValor,
-                  concentracionUnidad: p.concentracionUnidad,
-                })),
-              },
-            }
-          : {}),
+        ...(productosResueltos ? { productos: { create: productosResueltos } } : {}),
       },
       include: { tipoAplicacion: true, productos: { include: { producto: true } } },
     });

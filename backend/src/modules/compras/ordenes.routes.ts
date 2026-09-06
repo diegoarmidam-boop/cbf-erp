@@ -36,6 +36,14 @@ ordenesRouter.get("/", requirePermission("compras", "ver"), async (req, res) => 
   res.json(await listarOrdenes(estado, req.query.incluirCerradas === "true"));
 });
 
+// "En Camino" (Prioridad 4, 3-sep-2026): espejo de solo lectura para
+// Almacén, para que Bodega sepa con anticipación qué va a llegar — desde
+// aquí también confirma la recepción física (ver /recibir más abajo).
+// Registrada ANTES de "/:id/..." para no chocar con esas rutas.
+ordenesRouter.get("/en-camino", requirePermissionAny(["compras", "ver"], ["almacen", "capturar"]), async (_req, res) => {
+  res.json(await listarOrdenes("generada"));
+});
+
 const crearSchema = z.object({
   productoId: z.string().min(1),
   cantidadSolicitada: z.number().positive(),
@@ -118,9 +126,10 @@ const recibirSchema = z.object({
 });
 
 // Recibir es, físicamente, una acción de Almacén ("Almacén la recibe" —
-// 9.14/9.15) aunque viva en el ciclo de la orden de Compras — se acepta
-// cualquiera de los dos permisos.
-ordenesRouter.post("/:id/recibir", requirePermissionAny(["compras", "capturar"], ["almacen", "capturar"]), async (req, res) => {
+// 9.14/9.15), y desde la Prioridad 4 (3-sep-2026) ya solo se hace desde ahí
+// — Compras dejó de tener el botón, y este permiso deja de aceptar
+// compras.capturar para que tampoco se pueda por API directa.
+ordenesRouter.post("/:id/recibir", requirePermission("almacen", "capturar"), async (req, res) => {
   const parsed = recibirSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
@@ -144,7 +153,8 @@ ordenesRouter.post("/:id/recibir", requirePermissionAny(["compras", "capturar"],
 
 // Orden de Compra en PDF (3.1, 2-sep-2026) — solo tiene sentido para
 // órdenes ya "generada"/"recibida"/"cubierta" (tienen folio asignado).
-ordenesRouter.get("/:id/orden-compra.pdf", requirePermission("compras", "ver"), async (req, res) => {
+// Almacén también puede descargarla desde "En Camino" (Prioridad 4).
+ordenesRouter.get("/:id/orden-compra.pdf", requirePermissionAny(["compras", "ver"], ["almacen", "capturar"]), async (req, res) => {
   try {
     const orden = await obtenerOrdenCompraParaPdf(unoSolo(req.params.id));
     const doc = generarPdfOrdenCompra(orden);

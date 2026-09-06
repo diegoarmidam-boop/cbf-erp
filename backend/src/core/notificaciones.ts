@@ -80,6 +80,36 @@ export async function obtenerNotificaciones(rol: Rol, huertaIdAlcance: string | 
     }
   }
 
+  // 2-bis) Órdenes recibidas recientemente (Prioridad 4, 3-sep-2026): la
+  // confirmación de recepción ahora la hace Almacén, no Compras — este es
+  // el aviso de que ya llegó, para que Compras lo sepa sin tener que estar
+  // consultando "Recibidas" a cada rato. Se acota a los últimos 3 días
+  // (mismo criterio "ventana de tiempo" que el resto de este archivo,
+  // ej. CxP próxima a vencer) porque una recepción no tiene un estado
+  // futuro que la "resuelva" — a diferencia de una autorización pendiente,
+  // sin ventana se quedaría como aviso para siempre.
+  if (await tienePermiso(rol, "compras", "ver")) {
+    const DIAS_AVISO_RECIBIDA = 3;
+    const limite = Date.now() - DIAS_AVISO_RECIBIDA * 86_400_000;
+    const recibidas = await listarOrdenes("recibida");
+    for (const o of recibidas) {
+      const ultimaRecepcion = o.recepciones.reduce(
+        (mas, r) => (mas && mas.fechaRecepcion > r.fechaRecepcion ? mas : r),
+        o.recepciones[0]
+      );
+      if (!ultimaRecepcion || ultimaRecepcion.fechaRecepcion.getTime() < limite) continue;
+      notificaciones.push({
+        id: `orden-recibida-${o.id}`,
+        tipo: "orden_recibida",
+        titulo: "Almacén confirmó la recepción de una orden",
+        detalle: `${o.producto.nombreComercial} — ${o.cantidadSolicitada} ${o.producto.unidad}${o.proveedor ? ` de ${o.proveedor.nombre}` : ""}`,
+        urgente: false,
+        fecha: ultimaRecepcion.fechaRecepcion.toISOString(),
+        enlace: `/compras/ordenes?tab=recibidas&id=${o.id}`,
+      });
+    }
+  }
+
   // 3) Cuentas por Pagar próximas a vencer.
   if (await tienePermiso(rol, "compras", "ver")) {
     const cxp = await listarCxP();

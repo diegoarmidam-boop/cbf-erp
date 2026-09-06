@@ -2,6 +2,7 @@ import { NavLink, Outlet } from "react-router-dom";
 
 const TABS = [
   { to: "inventario", label: "Inventario" },
+  { to: "en-camino", label: "En Camino" },
   { to: "movimientos", label: "Movimientos" },
   { to: "local", label: "Almacén Local" },
   { to: "preferencias", label: "Preferido/Sustitutos" },

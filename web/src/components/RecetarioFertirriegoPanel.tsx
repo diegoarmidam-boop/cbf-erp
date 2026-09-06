@@ -1,19 +1,19 @@
 import { useState, type FormEvent } from "react";
 import { api, ApiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import type { ModoDosisFertirriego, Producto, RecetaFertirriego } from "../lib/types";
-import { presentacionTexto } from "../lib/producto";
+import type { IngredienteAutorizado, ModoDosisFertirriego, RecetaFertirriego } from "../lib/types";
 
 export const ROLES_PUEDEN_RECETAS_FERTIRRIEGO = ["director_general", "encargado_sistemas", "gerente_tecnico_produccion"];
 
+// Ingrediente Activo, nunca marca (Prioridad 1, 3-sep-2026).
 interface ProductoRecetaFertirriegoForm {
-  productoId: string;
+  ingredienteActivoNombre: string;
   dosisValor: string;
   dosisUnidad: ModoDosisFertirriego;
 }
 
 function productoFormVacio(): ProductoRecetaFertirriegoForm {
-  return { productoId: "", dosisValor: "", dosisUnidad: "kg_ha" };
+  return { ingredienteActivoNombre: "", dosisValor: "", dosisUnidad: "kg_ha" };
 }
 
 /**
@@ -24,12 +24,12 @@ function productoFormVacio(): ProductoRecetaFertirriegoForm {
  * FertirriegoProgramacion.
  */
 export default function RecetarioFertirriegoPanel({
-  productos,
+  ingredientes,
   recetas,
   cargando,
   refetch,
 }: {
-  productos: Producto[];
+  ingredientes: IngredienteAutorizado[];
   recetas: RecetaFertirriego[];
   cargando: boolean;
   refetch: () => void;
@@ -43,8 +43,6 @@ export default function RecetarioFertirriegoPanel({
   const [nombre, setNombre] = useState("");
   const [productosForm, setProductosForm] = useState<ProductoRecetaFertirriegoForm[]>([productoFormVacio()]);
 
-  const productosDisponibles = productos.filter((p) => p.categoria === "fertilizante");
-
   function limpiarForm() {
     setEditandoId(null);
     setNombre("");
@@ -55,7 +53,7 @@ export default function RecetarioFertirriegoPanel({
   function iniciarEdicion(r: RecetaFertirriego) {
     setEditandoId(r.id);
     setNombre(r.nombre);
-    setProductosForm(r.productos.map((p) => ({ productoId: p.productoId, dosisValor: String(p.dosisValor), dosisUnidad: p.dosisUnidad })));
+    setProductosForm(r.productos.map((p) => ({ ingredienteActivoNombre: p.producto.ingredienteActivo ?? "", dosisValor: String(p.dosisValor), dosisUnidad: p.dosisUnidad })));
     setError(null);
     setMostrarForm(true);
   }
@@ -77,7 +75,7 @@ export default function RecetarioFertirriegoPanel({
     setError(null);
     const payload = {
       nombre,
-      productos: productosForm.map((p) => ({ productoId: p.productoId, dosisValor: Number(p.dosisValor), dosisUnidad: p.dosisUnidad })),
+      productos: productosForm.map((p) => ({ ingredienteActivoNombre: p.ingredienteActivoNombre, dosisValor: Number(p.dosisValor), dosisUnidad: p.dosisUnidad })),
     };
     try {
       if (editandoId) {
@@ -128,12 +126,16 @@ export default function RecetarioFertirriegoPanel({
               {productosForm.map((p, i) => (
                 <div key={i} style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
                   <label className="field">
-                    Producto
-                    <select value={p.productoId} onChange={(e) => actualizarProducto(i, { productoId: e.target.value })} required>
+                    Ingrediente Activo
+                    <select
+                      value={p.ingredienteActivoNombre}
+                      onChange={(e) => actualizarProducto(i, { ingredienteActivoNombre: e.target.value })}
+                      required
+                    >
                       <option value="">Selecciona…</option>
-                      {productosDisponibles.map((prod) => (
-                        <option key={prod.id} value={prod.id}>
-                          {prod.nombreComercial} ({presentacionTexto(prod)})
+                      {ingredientes.map((ing) => (
+                        <option key={ing.ingredienteActivoNombre} value={ing.ingredienteActivoNombre}>
+                          {ing.ingredienteActivoNombre}
                         </option>
                       ))}
                     </select>
@@ -188,7 +190,7 @@ export default function RecetarioFertirriegoPanel({
                 <span style={{ fontSize: 12.5, fontWeight: 600 }}>{r.nombre}</span>{" "}
                 {!r.activo && <span className="tag tag-danger">Inactiva</span>}
                 <div style={{ fontSize: 11.5, color: "var(--ink-soft)" }}>
-                  {r.productos.map((p) => `${p.producto.nombreComercial} (${p.dosisValor} ${p.dosisUnidad.replace("_", "/")})`).join(" + ")}
+                  {r.productos.map((p) => `${p.producto.ingredienteActivo ?? p.producto.nombreComercial} (${p.dosisValor} ${p.dosisUnidad.replace("_", "/")})`).join(" + ")}
                 </div>
               </div>
               {puedeAdministrar && (
