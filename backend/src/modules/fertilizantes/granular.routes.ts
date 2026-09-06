@@ -152,8 +152,11 @@ granularRouter.patch("/:id", requirePermission("fertilizantes", "capturar"), asy
   }
 });
 
-// Confirmar entrega es una acción de Almacén (9.5/9.15), no de quien programó.
-granularRouter.post("/:id/entregar", requirePermission("almacen", "capturar"), async (req, res) => {
+// Confirmar entrega es, físicamente, una acción de Almacén — pero el
+// Supervisor de Huerta suele ser quien va a recoger directo a bodega, y no
+// siempre tiene acceso a Almacén como módulo aparte (Prioridad 4,
+// 4-sep-2026): el botón también funciona con el propio permiso de Fertilizantes.
+granularRouter.post("/:id/entregar", requirePermissionAny(["almacen", "capturar"], ["fertilizantes", "capturar"]), async (req, res) => {
   try {
     const fertilizacion = await confirmarEntregaGranular(unoSolo(req.params.id), req.usuario!.usuarioId);
     res.json(fertilizacion);

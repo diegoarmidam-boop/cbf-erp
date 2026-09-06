@@ -248,9 +248,13 @@ aplicacionesRouter.patch("/:id", requirePermission("aplicaciones", "capturar"), 
   }
 });
 
-// Confirmar entrega es, físicamente, una acción de Almacén (quien
-// entrega el producto a la Huerta) — no de quien programó (9.7/9.15).
-aplicacionesRouter.post("/:id/entregar", requirePermission("almacen", "capturar"), async (req, res) => {
+// Confirmar entrega es, físicamente, una acción de Almacén (quien entrega
+// el producto a la Huerta) — pero el Supervisor de Huerta suele ser quien
+// va a recoger directo a bodega, y no siempre tiene acceso a Almacén como
+// módulo aparte (decisión de Diego, 4-sep-2026, Prioridad 4): el botón
+// tiene que funcionar también con el propio permiso de Aplicaciones, para
+// no depender de que el supervisor tenga acceso cruzado a Almacén.
+aplicacionesRouter.post("/:id/entregar", requirePermissionAny(["almacen", "capturar"], ["aplicaciones", "capturar"]), async (req, res) => {
   try {
     const aplicacion = await confirmarEntrega(unoSolo(req.params.id), req.usuario!.usuarioId);
     res.json(aplicacion);

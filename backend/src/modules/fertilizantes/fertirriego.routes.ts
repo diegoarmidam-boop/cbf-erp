@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import type { Rol } from "@prisma/client";
-import { requireAuth, requirePermission, huertaIdDeAlcance } from "../../middleware/auth.js";
+import { requireAuth, requirePermission, requirePermissionAny, huertaIdDeAlcance } from "../../middleware/auth.js";
 import { mensajeErrorCaptura, mensajeErrorValidacion, unoSolo } from "../../core/http.js";
 import {
   confirmarEntregaFertirriego,
@@ -243,9 +243,13 @@ fertirriegoRouter.patch("/:id", requirePermission("fertilizantes", "capturar"), 
   }
 });
 
-// Confirmar entrega es una acción de Almacén (9.5/9.15). A partir de aquí la
-// ejecución diaria del fertirriego vive en Riego (9.6), todavía no construido.
-fertirriegoRouter.post("/:id/entregar", requirePermission("almacen", "capturar"), async (req, res) => {
+// Confirmar entrega es, físicamente, una acción de Almacén — pero el
+// Supervisor de Huerta suele ser quien va a recoger directo a bodega, y no
+// siempre tiene acceso a Almacén como módulo aparte (Prioridad 4,
+// 4-sep-2026): el botón también funciona con el propio permiso de
+// Fertilizantes. A partir de aquí la ejecución diaria del fertirriego vive
+// en Riego (9.6).
+fertirriegoRouter.post("/:id/entregar", requirePermissionAny(["almacen", "capturar"], ["fertilizantes", "capturar"]), async (req, res) => {
   try {
     const fertirriego = await confirmarEntregaFertirriego(unoSolo(req.params.id), req.usuario!.usuarioId);
     res.json(fertirriego);
