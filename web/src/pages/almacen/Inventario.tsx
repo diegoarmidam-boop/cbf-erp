@@ -3,7 +3,9 @@ import { useSearchParams } from "react-router-dom";
 import { api, ApiError } from "../../lib/api";
 import { useProductos } from "../../lib/useProductos";
 import { useCatalogoAbierto } from "../../lib/useCatalogoAbierto";
+import { useCategorias } from "../../lib/useCategorias";
 import SelectConAgregar from "../../components/SelectConAgregar";
+import SelectCategoriaConAgregar from "../../components/SelectCategoriaConAgregar";
 import { presentacionTexto } from "../../lib/producto";
 import { formatearFecha } from "../../lib/fecha";
 import { formatearNumero } from "../../lib/numero";
@@ -47,7 +49,7 @@ interface Filtro {
 
 export default function Inventario() {
   const { productos, cargando, refetch } = useProductos();
-  const categorias = useCatalogoAbierto("/almacen/categorias");
+  const { categorias: listaCategorias, crear: crearCategoria } = useCategorias();
   const ingredientes = useCatalogoAbierto("/almacen/ingredientes-activos");
   const marcas = useCatalogoAbierto("/almacen/marcas");
 
@@ -106,7 +108,9 @@ export default function Inventario() {
   const [unidad, setUnidad] = useState("");
   const [requiereLote, setRequiereLote] = useState(true);
 
-  const requiereIngrediente = categoria === "agroquimico" || categoria === "fertilizante";
+  // Prioridad 3, 4-sep-2026: reemplaza la regla vieja hardcodeada
+  // ("agroquimico"/"fertilizante") — cada Categoría decide por sí misma.
+  const requiereIngrediente = listaCategorias.find((c) => c.nombre === categoria)?.requiereIngredienteActivo ?? false;
 
   const [busqueda, setBusqueda] = useState("");
   const [mostrarFiltros, setMostrarFiltros] = useState(false);
@@ -174,7 +178,7 @@ export default function Inventario() {
   }
 
   function valoresDeColumna(columna: Columna): string[] {
-    if (columna === "categoria") return categorias.items.map((c) => c.nombre);
+    if (columna === "categoria") return listaCategorias.map((c) => c.nombre);
     if (columna === "ingredienteActivo") return ingredientes.items.map((i) => i.nombre);
     if (columna === "estado") return ["activo", "inactivo"];
     return ["si", "no"];
@@ -266,14 +270,7 @@ export default function Inventario() {
 
       {mostrarForm && (
         <form onSubmit={onSubmit} className="card" style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-start", marginBottom: 18 }}>
-          <SelectConAgregar
-            label="Categoría"
-            value={categoria}
-            onChange={setCategoria}
-            items={categorias.items}
-            onAgregar={categorias.agregar}
-            required
-          />
+          <SelectCategoriaConAgregar value={categoria} onChange={setCategoria} items={listaCategorias} onAgregar={crearCategoria} required />
           {requiereIngrediente && (
             <SelectConAgregar
               label="Ingrediente activo"

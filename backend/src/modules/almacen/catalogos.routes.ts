@@ -37,7 +37,47 @@ function catalogoRouter(catalogo: { listar: (todas?: boolean) => Promise<unknown
   return router;
 }
 
-export const categoriasRouter = catalogoRouter(categorias);
+// Categoría (Prioridad 3, 4-sep-2026): alta con su propio check "¿Requiere
+// Ingrediente Activo?", y una ruta aparte para poder ajustarlo después en
+// una categoría ya existente (útil mientras no exista la pantalla
+// centralizada de Catálogos — ver Prioridad 6 del mismo prompt).
+const categoriaAltaSchema = z.object({ nombre: z.string().min(1), requiereIngredienteActivo: z.boolean() });
+const requiereIngredienteSchema = z.object({ requiereIngredienteActivo: z.boolean() });
+
+export const categoriasRouter = Router();
+categoriasRouter.use(requireAuth);
+
+categoriasRouter.get("/", requirePermission("almacen", "ver"), async (req, res) => {
+  res.json(await categorias.listar(req.query.todas === "true"));
+});
+
+categoriasRouter.post("/", requirePermission("almacen", "capturar"), async (req, res) => {
+  const parsed = categoriaAltaSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
+    return;
+  }
+  res.status(201).json(await categorias.crear(parsed.data.nombre, parsed.data.requiereIngredienteActivo));
+});
+
+categoriasRouter.patch("/:id/activo", requirePermission("almacen", "editar"), async (req, res) => {
+  const parsed = activoSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
+    return;
+  }
+  res.json(await categorias.actualizarActivo(unoSolo(req.params.id), parsed.data.activo));
+});
+
+categoriasRouter.patch("/:id/requiere-ingrediente-activo", requirePermission("almacen", "editar"), async (req, res) => {
+  const parsed = requiereIngredienteSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
+    return;
+  }
+  res.json(await categorias.actualizarRequiereIngredienteActivo(unoSolo(req.params.id), parsed.data.requiereIngredienteActivo));
+});
+
 export const ingredientesActivosRouter = catalogoRouter(ingredientesActivos);
 export const contenedoresRouter = catalogoRouter(contenedores);
 export const marcasRouter = catalogoRouter(marcas);

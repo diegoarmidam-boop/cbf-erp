@@ -20,10 +20,15 @@ function actualizarActivo(delegate: CatalogoDelegate, id: string, activo: boolea
   return (delegate as any).update({ where: { id }, data: { activo } });
 }
 
+// Categoría (Prioridad 3, 4-sep-2026) ya no comparte la forma genérica
+// {id, nombre, activo} — cada una decide al darse de alta si el campo
+// Ingrediente Activo debe aparecer al capturar un Producto de ese tipo.
 export const categorias = {
   listar: (todas = false) => listar(prisma.categoriaProducto, todas),
-  crear: (nombre: string) => crear(prisma.categoriaProducto, nombre),
+  crear: (nombre: string, requiereIngredienteActivo: boolean) => prisma.categoriaProducto.create({ data: { nombre, requiereIngredienteActivo } }),
   actualizarActivo: (id: string, activo: boolean) => actualizarActivo(prisma.categoriaProducto, id, activo),
+  actualizarRequiereIngredienteActivo: (id: string, requiereIngredienteActivo: boolean) =>
+    prisma.categoriaProducto.update({ where: { id }, data: { requiereIngredienteActivo } }),
 };
 
 export const ingredientesActivos = {

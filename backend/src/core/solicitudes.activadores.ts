@@ -34,7 +34,15 @@ const activarAltaProducto: Activador = async (tx, solicitud) => {
     unidad: string;
     requiereLote: boolean;
   };
-  await tx.producto.create({ data: { ...datos, autorizado: true, fechaAutorizacion: new Date() } });
+  // Ingrediente Activo obligatorio según la Categoría (Prioridad 3,
+  // 4-sep-2026) — mismo criterio que productos.ts, se revalida aquí porque
+  // la propuesta se guardó tal cual se capturó, sin pasar por esa validación.
+  const categoria = await tx.categoriaProducto.findUnique({ where: { nombre: datos.categoria } });
+  const ingredienteActivo = categoria?.requiereIngredienteActivo ? (datos.ingredienteActivo ?? null) : null;
+  if (categoria?.requiereIngredienteActivo && !ingredienteActivo) {
+    throw new Error(`La categoría "${datos.categoria}" requiere capturar un Ingrediente Activo.`);
+  }
+  await tx.producto.create({ data: { ...datos, ingredienteActivo, autorizado: true, fechaAutorizacion: new Date() } });
 };
 activadoresSolicitud.producto_alta = activarAltaProducto;
 activadoresSolicitud.producto_regulado_alta = activarAltaProducto;

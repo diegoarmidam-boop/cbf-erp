@@ -848,10 +848,17 @@ model EquipoUsoDiario {
 // de Producto. `categoria` e `ingredienteActivo` en Producto se guardan como
 // texto plano (así los sigue leyendo la lógica de FIFO/regulación existente);
 // estos catálogos solo respaldan el dropdown y permiten agregar valores.
+// requiereIngredienteActivo (Prioridad 3, 4-sep-2026): reemplaza la regla
+// vieja hardcodeada "solo si categoria === agroquimico || fertilizante",
+// que quedó desactualizada desde que "Agroquímico" genérico se reemplazó
+// por tipos específicos (fungicida, herbicida, foliar, etc. — 15-ago-2026).
+// Ahora cada Categoría decide por sí misma, al darse de alta, si el campo
+// Ingrediente Activo debe aparecer al capturar un Producto de ese tipo.
 model CategoriaProducto {
-  id     String  @id @default(uuid())
-  nombre String  @unique
-  activo Boolean @default(true)
+  id                        String  @id @default(uuid())
+  nombre                    String  @unique
+  requiereIngredienteActivo Boolean @default(false)
+  activo                    Boolean @default(true)
 }
 
 model IngredienteActivo {

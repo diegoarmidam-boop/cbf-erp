@@ -19,10 +19,35 @@ export function listarProductos(categoria?: string) {
   return prisma.producto.findMany({ where: { categoria }, orderBy: { nombreComercial: "asc" } });
 }
 
-export function crearProductoAutorizado(input: AltaProductoInput, autorizadoPorId?: string) {
+export class IngredienteActivoRequeridoError extends Error {
+  constructor(categoria: string) {
+    super(`La categoría "${categoria}" requiere capturar un Ingrediente Activo.`);
+  }
+}
+
+/**
+ * Ingrediente Activo obligatorio según la Categoría (Prioridad 3, 4-sep-2026)
+ * — nunca se confía solo en que la UI oculte/muestre el campo, se valida
+ * también aquí. Devuelve el valor de `ingredienteActivo` a guardar de
+ * verdad: `null` si la Categoría no lo requiere (aunque el cliente haya
+ * mandado uno — nunca queda un valor viejo colgando si cambia de
+ * Categoría), o el capturado si sí lo requiere.
+ */
+async function resolverIngredienteActivoPorCategoria(input: AltaProductoInput): Promise<string | null> {
+  const categoria = await prisma.categoriaProducto.findUnique({ where: { nombre: input.categoria } });
+  if (categoria?.requiereIngredienteActivo) {
+    if (!input.ingredienteActivo) throw new IngredienteActivoRequeridoError(input.categoria);
+    return input.ingredienteActivo;
+  }
+  return null;
+}
+
+export async function crearProductoAutorizado(input: AltaProductoInput, autorizadoPorId?: string) {
+  const ingredienteActivo = await resolverIngredienteActivoPorCategoria(input);
   return prisma.producto.create({
     data: {
       ...input,
+      ingredienteActivo,
       autorizado: true,
       autorizadoPorId,
       fechaAutorizacion: autorizadoPorId ? new Date() : undefined,
@@ -31,8 +56,9 @@ export function crearProductoAutorizado(input: AltaProductoInput, autorizadoPorI
 }
 
 /** Editar un producto ya dado de alta — corrige nombre/presentación/ingrediente activo sin perder lotes/movimientos históricos (misma fila, no se recrea). */
-export function editarProducto(id: string, input: AltaProductoInput) {
-  return prisma.producto.update({ where: { id }, data: input });
+export async function editarProducto(id: string, input: AltaProductoInput) {
+  const ingredienteActivo = await resolverIngredienteActivoPorCategoria(input);
+  return prisma.producto.update({ where: { id }, data: { ...input, ingredienteActivo } });
 }
 
 /** Catálogo de compra: solo productos ya autorizados y activos pueden elegirse (bloque 4/9.5/9.7). */

@@ -355,6 +355,13 @@ export interface CatalogoAbiertoItem {
   activo: boolean;
 }
 
+// Categoría (Prioridad 3, 4-sep-2026) ya no comparte la forma genérica de
+// los demás catálogos abiertos — decide al darse de alta si el campo
+// Ingrediente Activo debe aparecer al capturar un Producto de ese tipo.
+export interface CategoriaProducto extends CatalogoAbiertoItem {
+  requiereIngredienteActivo: boolean;
+}
+
 export interface IngredienteActivoSustituto {
   id: string;
   productoId: string;

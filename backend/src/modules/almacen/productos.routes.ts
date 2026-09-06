@@ -5,7 +5,7 @@ import { tienePermiso } from "../../core/permissions.js";
 import { crearSolicitud } from "../../core/solicitudes.js";
 import { prisma } from "../../core/db.js";
 import { mensajeErrorValidacion, unoSolo } from "../../core/http.js";
-import { crearProductoAutorizado, editarProducto, esCategoriaRegulada, listarProductos, productosAutorizados } from "./productos.js";
+import { crearProductoAutorizado, editarProducto, esCategoriaRegulada, IngredienteActivoRequeridoError, listarProductos, productosAutorizados } from "./productos.js";
 
 export const productosRouter = Router();
 productosRouter.use(requireAuth);
@@ -39,8 +39,16 @@ productosRouter.post("/", requirePermission("almacen", "capturar"), async (req, 
   const puedeAutorizar = await tienePermiso(req.usuario!.rol, moduloAutoriza, "autoriza");
 
   if (puedeAutorizar) {
-    const producto = await crearProductoAutorizado(parsed.data, req.usuario!.usuarioId);
-    res.status(201).json(producto);
+    try {
+      const producto = await crearProductoAutorizado(parsed.data, req.usuario!.usuarioId);
+      res.status(201).json(producto);
+    } catch (err) {
+      if (err instanceof IngredienteActivoRequeridoError) {
+        res.status(409).json({ error: err.message });
+        return;
+      }
+      throw err;
+    }
     return;
   }
 
@@ -73,7 +81,15 @@ productosRouter.patch("/:id", requirePermission("almacen", "editar"), async (req
       return;
     }
   }
-  res.json(await editarProducto(producto.id, parsed.data));
+  try {
+    res.json(await editarProducto(producto.id, parsed.data));
+  } catch (err) {
+    if (err instanceof IngredienteActivoRequeridoError) {
+      res.status(409).json({ error: err.message });
+      return;
+    }
+    throw err;
+  }
 });
 
 const activoSchema = z.object({ activo: z.boolean() });
