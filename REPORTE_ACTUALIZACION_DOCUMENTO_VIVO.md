@@ -1,60 +1,44 @@
-# Reporte — actualización del documento vivo (3-sep-2026, parte 2 / 4-sep-2026)
+# Reporte — actualización del documento vivo (4/5-sep-2026)
 
-Continuación de la sesión del 3-sep: prompts `CBF_ERP_Reestructura_Completa_03092026_V12.docx` y `V13.docx`, más un incidente de despliegue resuelto el 4-sep. Commit `54f33ca` sobre `8bfebef`, rama `main`, ya subido.
+Prompt `CBF_ERP_Reestructura_Completa_03-09-2026_V16.docx`, tras una prueba de ciclo completo en producción (programar → comprar → recibir → aplicar → nómina). 7 prioridades, cada una con causa raíz investigada antes de tocar código, reportada y verificada en vivo antes de seguir con la siguiente. Commits `38e38ab` → `26b40f9` sobre `9ebd4fd`, rama `main`, ya subidos (uno por prioridad).
 
-## V12 — Prioridad 1: Programar/Recetario solo Ingrediente Activo, nunca marca
+## Prioridad 1 — URGENTE: cantidad no se precargaba redondeada a presentación completa
 
-El selector de "producto" en Granular Programar, Fertirriego Programar, Aplicaciones Programar y Aplicaciones Recetario ya no muestra marcas comerciales — solo Ingrediente Activo. Internamente se resuelve al Producto preferido configurado en Almacén → Preferido/Sustitutos (patrón "resolver temprano" al productoId existente, evitando una migración de esquema mucho más invasiva sobre 5 tablas de producto).
+Ya había generado una orden real mal dimensionada (Folio 23: 0.2 L en vez de 25 L). Causa raíz: la presentación de cada cotización nunca viajaba hasta la pantalla de Órdenes de Compra — solo el Comparador la tenía, así que ahí sí calculaba bien "Cantidad comprada" redondeada, pero al asignar en Órdenes de Compra se precargaba el pendiente crudo sin redondear. Se agregó `presentacionCantidad` a `LineaOrigenCotizacion` y la asignación ahora redondea igual que el Comparador (`Math.ceil` a presentaciones completas). Probado reproduciendo el caso exacto (0.2 pendiente, presentación 25) contra el backend real: antes precargaba 0.2, ahora 25.
 
-Se encontró y corrigió un hueco de datos real en el camino: los 11 Ingredientes Activos autorizados no tenían Producto preferido configurado — sin eso, Programar habría quedado inutilizable de inmediato. Verificado que cada uno tenía exactamente 1 producto candidato (sin ambigüedad) antes de hacer el backfill.
+## Prioridad 2 — Cambio de fondo: Presentación deja de ser fija por Producto Comercial
 
-Compras/Comparador y Almacén quedaron sin tocar, tal como pedía el prompt.
+Un mismo Producto Comercial puede llegar en presentaciones distintas entre compras. Se quitó Contenedor/Cantidad de Producto (solo queda su Unidad base) y se movió la captura a 2 momentos: cotizar (Comparador, ya con Contenedor incluido) y recibir (Almacén → En Camino, formato "X Contenedores de Y Cantidad", total calculado solo). Cada lote guarda su propia Presentación — un mismo producto en presentaciones distintas ya no se suma ciego. Inventario nuevo: tarjeta principal agrupada por Ingrediente Activo (decisión de Diego, mismo criterio "Ingrediente Activo, nunca marca"), con detalle desglosado por Nombre + Marca + Presentación.
 
-## V12 — Prioridad 2: Zona del proveedor
+**Antes de este cambio**, a petición de Diego, se tomó un respaldo completo de la base (`ops/backups/`) y se vació el historial de Aplicaciones/Fertilizaciones/Compras/Inventario para empezar de cero con la arquitectura correcta — catálogos de Producto/Proveedor/Huerta quedaron intactos.
 
-Se agregó el campo Zona al alta/edición de Proveedores, reutilizando el mismo catálogo abierto de Zonas que ya usaba el Comparador (no uno nuevo). Al cotizar con un Proveedor, la Zona se precarga sola desde la que tiene guardada — sigue siendo editable por cotización específica.
+Probado de punta a punta: un Producto recibido en 2 presentaciones distintas (4 Sacos de 25 kg + 10 Costales de 10 kg) suma 200 kg correcto en Inventario, con las 2 líneas separadas en el detalle.
 
-A petición directa de Diego en el chat: se agregó también un panel "Zonas (flete)" en Proveedores con lista completa administrable (crear, editar, activar/desactivar) — antes solo existía un alta rápida dentro del Comparador.
+## Prioridad 3 — Categoría con check "¿Requiere Ingrediente Activo?"
 
-## V13 — Prioridad 1: 2 bugs reales de Fertirriego
+La regla vieja (`categoria === "agroquimico" || "fertilizante"`) quedó desactualizada desde que se reemplazó "Agroquímico" genérico por tipos específicos — un insecticida de extracto natural no podía llevar Ingrediente Activo. Cada Categoría ahora decide esto al darse de alta, validado también en el backend (no solo ocultando el campo en la UI). Backfill de las 7 categorías existentes: fertilizante/agroquimico/Insecticida → Sí (confirmado con Diego que "agroquimico" genérico, con 2 productos reales, se queda en Sí por ahora), el resto → No.
 
-**Causa raíz encontrada con evidencia real** (no adivinada): se cruzó el log de producción (`ops/logs/backend.log`, que sí tenía el stack trace exacto del segundo bug) con una reproducción limpia contra la base de datos real usando las funciones del backend directamente. Ambos bugs venían de la misma falla: al reducir lo que necesita una programación (Fertirriego, y por extensión Aplicaciones/Granular que comparten la función), el sistema asumía que *todo* lo que se pedía original ya estaba comprometido como stock real — pero si Almacén no tenía suficiente al programar, lo que se generó fue una compra automática pendiente, nunca una reserva real. Al reducir, intentaba "regresar" a un lote que nunca existió.
+## Prioridad 4 — Confirmar entrega en Aplicaciones
 
-Se encontró además, en la base de datos real, la programación específica de la sesión de pruebas de Diego que se había quedado atorada en "programada" desde el 3-sep por este mismo bug — 9 de sus 10 productos tenían un movimiento de compromiso real en el historial pero su lote ya no existía.
+Investigado primero: el mecanismo completo (reservar en Almacén Central → botón → mueve a Local → avance descuenta de Local) ya existía en Aplicaciones, casi idéntico a Fertirriego — no era el bug reportado. El problema real, aclarado por Diego: el Supervisor de Huerta y otros roles que programan Aplicaciones/Fertilizantes no siempre tienen acceso a Almacén como módulo aparte, y "Confirmar entrega" en los 3 módulos exigía exclusivamente `almacen.capturar`. Confirmado que el gap es real hoy (Asistente Técnico, Capturista, Ayudante de Supervisor y hasta el Gerente Técnico de Producción están en ese caso) — los 3 endpoints ahora también aceptan el permiso del propio módulo.
 
-**Corrección** en `almacen/movimientos.ts` (compartida por Aplicaciones/Granular/Fertirriego): ahora solo libera lo que de verdad estaba comprometido (verificado contra el historial de movimientos); lo que nunca se comprometió reduce/cancela la compra automática pendiente en vez de intentar liberar stock inexistente. Si el compromiso fue real pero el lote se perdió (el caso de la programación atorada), se recrea el lote en vez de tronar — mismo patrón que ya usa una entrada normal de compra.
+## Prioridad 5 — 2 bugs reales de Compras
 
-**Probado:** reproducción exacta del bug 1 (Almacén vacío, programar 6 semanas, reducir a 5) contra la base real — confirmado el error antes del fix, confirmado que desaparece después, y confirmado que la compra automática pendiente se ajusta proporcionalmente sin crear stock fantasma. La programación atorada real se liberó de verdad: quedó "vencida", sus 10 compras automáticas se cancelaron, y el stock comprometido se devolvió a Almacén.
+- Columna Zona vacía en la tabla de Proveedores aunque sí estaba guardada: la consulta `?todas=true` no traía la relación `zona`, solo el `zonaId` crudo — por eso se veía bien al editar (usa `zonaId` directo) pero no en la tabla.
+- "Ir a Órdenes de Compra" desde el Comparador decía "Sin necesidades pendientes cotizadas" la primera vez: el `useEffect` que resuelve el deep-link solo ponía el estado de "cuál programación" pero nunca llamaba a la función que de verdad carga las líneas. Cambiar de pestaña "arreglaba" el síntoma solo porque reiniciaba el estado y forzaba a elegir la tarjeta de nuevo a mano.
 
-## V13 — Prioridad 2: Producto Comercial reemplaza texto libre en el Comparador
+## Prioridad 6 — Pestaña "Catálogos" centralizada en Configuración del sistema
 
-Se quitó el campo de texto libre "Nombre Comercial" de las cotizaciones — ahora es un selector que solo ofrece el Producto Comercial preferido y los sustitutos autorizados de Almacén para el Ingrediente Activo que se está cotizando (reutilizando `opcionesRecepcionDeProducto`, el mismo mecanismo que ya usaba Compras al recibir). Cada opción se ve como "Nombre + Marca". El selector también se precarga si ya se cotizó ese mismo Ingrediente Activo con ese mismo Proveedor antes — editable en ambos casos.
+Un solo lugar para los 8 catálogos abiertos del sistema. El "+" para agregar se queda donde ya vivía en cada módulo; editar nombre o desactivar/reactivar un valor ya existente se centraliza aquí, exclusivo de Director General/Encargado de Sistemas (decisión de Diego: incluye a Encargado de Sistemas, la cuenta técnica) — reforzado también en el backend con un middleware nuevo, no solo ocultando el botón. El panel de Zonas salió de Proveedores.tsx y se movió aquí. Grupos de Pago (más rico, con miembros y sin campo "activo") se quedó administrándose completo en Nómina — aquí solo hay un acceso directo. Probado: un rol sin ser Director/Sistemas recibe 403 al intentar editar; Director General sí puede.
 
-Se aprovechó para confirmar y corregir 2.6: Preferido/Sustitutos en Almacén no mostraba la Marca — se agregó.
+## Prioridad 7 — Mejoras de UI (7 puntos)
 
-**Cambio de esquema:** `ComparacionCotizacion.nombreComercial` (texto libre) se reemplazó por `productoComercialId` (FK a Producto). Solo 1 fila existente en producción — se respaldó con el productoId de su propia Comparación antes de aplicar la migración.
-
-**Probado:** cotización real de un producto con 2 Proveedores distintos contra la base de datos — selector, marca y precarga verificados correctos; limpieza completa después.
-
-## V13 — Prioridad 3: bug real — "Generar orden de compra" no mostraba nada
-
-Causa raíz: al reabrir "Cotizar" sobre una orden que ya tenía una Comparación existente, el backend (`obtenerComparacionDeOrden`) regresaba la fila cruda de Prisma en vez de pasarla por el mismo cálculo que arma `ordenesGeneradas`/`cantidadComprada`/etc. — de ahí el error exacto que reportó Diego (`undefined is not an object`). La orden de compra en realidad sí se generaba bien (folio incluido); la pantalla se rompía antes de poder mostrarlo o descargar el PDF.
-
-**Probado:** reproducción completa (generar una orden real con folio) contra la base real — confirmado que antes tronaba con el mismo error y ahora no. Esa prueba consumió el folio real #22 (salto normal en la numeración, sin efecto).
-
-## V13 — Prioridad 4: la recepción se mueve de Compras a Almacén
-
-Nueva pestaña "En Camino" en Almacén — mismo espejo de solo lectura que ya existía en Compras, pero aquí sí se confirma la recepción física (cantidad real, lote/caducidad). El botón "Recibir" se quitó de Compras; el permiso también se reforzó en el backend (`/recibir` ya solo acepta `almacen.capturar`, no `compras.capturar`). Las pestañas "En Camino"/"Recibidas" de Compras pasaron a ser de solo lectura. Se agregó un aviso en el centro de Notificaciones para que Compras se entere cuando Almacén confirma una recepción (ventana de 3 días, mismo criterio que otras alertas por tiempo del sistema).
-
-**Probado:** simulación completa (orden en camino → recibida como lo haría Bodega) contra la base real — confirmado que aparece correctamente en "Recibidas" de Compras y que la notificación le llega a Compras.
-
-## Incidente de despliegue (4-sep, resuelto)
-
-Después de estos cambios, el backend en vivo quedó corriendo con un proceso que nunca se reinició correctamente — ni con el primer reinicio de la PC (confirmado con `CreationDate` del proceso: seguía siendo el del 3-sep 12:15 pm). Causó "Ruta de API no encontrada" en la pantalla nueva de Almacén. Diagnosticado con una prueba autenticada real (una prueba anterior sin sesión daba un falso positivo) y resuelto terminando el proceso viejo a mano — el sistema quedó sirviendo la versión correcta, verificado con una petición autenticada real después del reinicio.
+"+ Tipo nuevo" en Programar Aplicaciones ya no está siempre expandido; Fecha inicio/fin van juntas; el Recetario (Aplicaciones y Fertirriego) dejó de ser un acordeón que empuja la lista hacia abajo y ahora es su propia pantalla completa; las etiquetas "Mejor Global"/"Mejor Local" del Comparador también se ven en Órdenes de Compra; el campo de Precio aclara la Presentación completa (ej. "Precio del Saco de 25"); al generar una orden aparece un botón de "Descargar PDF" directo ahí mismo, sin tener que ir a buscarlo después. (7.7 ya había quedado resuelto en la Prioridad 2.)
 
 ## Estado técnico
 
-- Backend y web sin errores de TypeScript; build de producción limpio en ambos.
-- 2 migraciones de Prisma: `20260903175501_proveedor_zona` (aditiva) y `20260903221644_comparador_producto_comercial` (reemplaza `nombreComercial` por `productoComercialId`, con backfill de la única fila existente).
-- Todo probado con scripts contra el backend real (sin credenciales de sesión de Diego), datos de prueba creados y borrados en cada caso, verificado con conteos antes/después — dos excepciones reales que se dejaron aplicadas a propósito: la liberación de la programación de Fertirriego atorada, y la recepción real que confirmó el flujo completo (ambas fueron el objeto mismo de la prueba, no efectos secundarios).
-- Ya subido a GitHub — commit `54f33ca` sobre `8bfebef`, rama `main`.
+- Backend y web sin errores de TypeScript en cada uno de los 7 pasos; build de producción limpio en ambos cada vez.
+- 3 migraciones de Prisma: `presentacion_no_fija_por_producto` (Prioridad 2, con respaldo previo de la base), `categoria_requiere_ingrediente_activo` (Prioridad 3, aditiva).
+- Todo probado con scripts contra el backend real (sin credenciales de sesión de Diego), datos de prueba creados y borrados en cada caso — excepción real y a propósito: la Prioridad 2 sí vació el historial de producción, con respaldo tomado antes.
+- Incidente de despliegue recurrente: el proceso de Node en el servidor no se cae solo al detener la tarea programada (proceso "huérfano" con privilegios elevados) — cada una de las 7 prioridades necesitó que Diego terminara `node.exe` manualmente desde el Administrador de Tareas para quedar activa. Verificado cada vez con `CreationDate` del proceso y una petición autenticada real (no solo sin sesión, que puede dar falsos positivos — lección de la sesión anterior).
+- Ya subido a GitHub — commits `38e38ab`, `8586037`, `36021b6`, `6575970`, `9ebd4fd`, `7f35916`, `26b40f9` sobre `9ebd4fd` (el primero de la tanda), rama `main`.
