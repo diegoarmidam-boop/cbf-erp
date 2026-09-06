@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { api, ApiError } from "../../lib/api";
+import { api, ApiError, getToken } from "../../lib/api";
 import type {
   GrupoPendienteProgramacion,
   LineaOrigenNecesidad,
+  OrdenCompra,
   PendienteIngredienteActivo,
   Proveedor,
   VistaPreviaProveedor,
@@ -46,6 +47,9 @@ export default function OrdenesDeCompra({ ordenCompraIdInicial }: { ordenCompraI
   const [cargandoPreview, setCargandoPreview] = useState(false);
   const [generando, setGenerando] = useState(false);
   const [mensajeExito, setMensajeExito] = useState<string | null>(null);
+  // Prioridad 7.6 (4-sep-2026): el PDF se descarga directo aquí mismo, sin
+  // tener que ir a buscarlo a "En Camino" reabriendo la cotización.
+  const [ordenesGeneradas, setOrdenesGeneradas] = useState<OrdenCompra[]>([]);
 
   useEffect(() => {
     api.get<Proveedor[]>("/compras/proveedores").then(setProveedores);
@@ -177,13 +181,28 @@ export default function OrdenesDeCompra({ ordenCompraIdInicial }: { ordenCompraI
     }
   }
 
+  function descargarPdf(id: string, numero: number | null) {
+    const token = getToken();
+    fetch(`${api.apiUrl}/compras/ordenes/${id}/orden-compra.pdf`, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+      .then((r) => r.blob())
+      .then((blob) => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `orden-compra-${numero ?? id}.pdf`;
+        a.click();
+        URL.revokeObjectURL(url);
+      });
+  }
+
   async function generar() {
     setError(null);
     setGenerando(true);
     try {
-      await api.post("/compras/ordenes-generacion/generar", { asignaciones: asignacionesArray });
+      const ordenes = await api.post<OrdenCompra[]>("/compras/ordenes-generacion/generar", { asignaciones: asignacionesArray });
+      setOrdenesGeneradas(ordenes);
       setMensajeExito(
-        `Generado${vistaPrevia && vistaPrevia.length !== 1 ? "s" : ""}: ${vistaPrevia?.length ?? 0} orden${vistaPrevia && vistaPrevia.length !== 1 ? "es" : ""} de compra (una por Proveedor). Descárgalas desde "En Camino".`
+        `Orden generada: ${vistaPrevia?.length ?? 0} orden${vistaPrevia && vistaPrevia.length !== 1 ? "es" : ""} de compra (una por Proveedor) — descarga el PDF abajo.`
       );
       setAsignaciones({});
       setVistaPrevia(null);
@@ -218,7 +237,22 @@ export default function OrdenesDeCompra({ ordenCompraIdInicial }: { ordenCompraI
       </div>
 
       {error && <div className="tag tag-danger" style={{ display: "block", padding: "8px 12px", marginBottom: 12 }}>{error}</div>}
-      {mensajeExito && <div className="tag tag-success" style={{ display: "block", padding: "8px 12px", marginBottom: 12 }}>{mensajeExito}</div>}
+      {mensajeExito && (
+        <div className="card" style={{ marginBottom: 12, borderColor: "var(--success, #2e7d32)" }}>
+          <div className="tag tag-success" style={{ display: "block", padding: "8px 12px", marginBottom: ordenesGeneradas.length > 0 ? 10 : 0 }}>
+            {mensajeExito}
+          </div>
+          {ordenesGeneradas.length > 0 && (
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {[...new Map(ordenesGeneradas.map((o) => [o.numero ?? o.id, o])).values()].map((o) => (
+                <button key={o.id} className="btn-secondary" onClick={() => descargarPdf(o.id, o.numero)}>
+                  Descargar PDF {o.numero != null ? `— Folio ${o.numero}` : ""}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {modo === "proveedor" && (
         <label className="field" style={{ maxWidth: 320, marginBottom: 16 }}>
@@ -333,6 +367,19 @@ export default function OrdenesDeCompra({ ordenCompraIdInicial }: { ordenCompraI
                               {c.proveedorNombre}
                               {c.esPreferido && <span className="tag tag-success" style={{ marginLeft: 6 }}>Preferido</span>}
                               {c.esSustituto && <span className="tag tag-neutral" style={{ marginLeft: 6 }}>Sustituto</span>}
+                              {c.esMejorGlobal && (
+                                <span className="tag tag-success" style={{ marginLeft: 6 }}>
+                                  Mejor Global
+                                </span>
+                              )}
+                              {c.esMejorLocal && !c.esMejorGlobal && (
+                                <span className="tag tag-success" style={{ marginLeft: 6 }}>
+                                  Mejor Local
+                                </span>
+                              )}
+                              {c.esMejorGlobal && (
+                                <div style={{ fontSize: 10.5, color: "var(--pink)", fontWeight: 600 }}>(mejor precio)</div>
+                              )}
                             </td>
                             <td>{c.nombreComercial}</td>
                             <td>{formatearNumero(c.presentacionCantidad)} {l.unidad}</td>

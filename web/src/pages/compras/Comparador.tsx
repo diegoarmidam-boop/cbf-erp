@@ -720,6 +720,29 @@ function LineaCotizacionForm({
         </select>
       </label>
       <label className="field">
+        Contenedor
+        <select value={c.contenedor} onChange={(e) => onChange({ contenedor: e.target.value })} required>
+          <option value="">Selecciona…</option>
+          {contenedores.items.map((ct) => (
+            <option key={ct.id} value={ct.nombre}>
+              {ct.nombre}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="field">
+        Presentación (cantidad por contenedor)
+        <input
+          type="number"
+          min={0}
+          step="0.001"
+          value={c.presentacionCantidad}
+          onChange={(e) => onChange({ presentacionCantidad: e.target.value })}
+          required
+          style={{ width: 120 }}
+        />
+      </label>
+      <label className="field">
         Moneda
         <select value={c.moneda} onChange={(e) => onChange({ moneda: e.target.value as MonedaCotizacion })}>
           <option value="MXN">MXN</option>
@@ -727,7 +750,11 @@ function LineaCotizacionForm({
         </select>
       </label>
       <label className="field">
-        Precio {c.moneda === "USD" ? "(USD)" : "(MXN)"}
+        {/* Aclara que es el precio de la Presentación COMPLETA (Prioridad
+            7.5, 4-sep-2026), no por unidad suelta — ej. "Precio del Saco
+            de 25 kg (MXN)" en vez de solo "Precio (MXN)". */}
+        Precio {c.contenedor && c.presentacionCantidad ? `del ${c.contenedor} de ${c.presentacionCantidad}` : "de la presentación"}{" "}
+        {c.moneda === "USD" ? "(USD)" : "(MXN)"}
         <input
           type="number"
           min={0}
@@ -752,29 +779,6 @@ function LineaCotizacionForm({
           />
         </label>
       )}
-      <label className="field">
-        Contenedor
-        <select value={c.contenedor} onChange={(e) => onChange({ contenedor: e.target.value })} required>
-          <option value="">Selecciona…</option>
-          {contenedores.items.map((ct) => (
-            <option key={ct.id} value={ct.nombre}>
-              {ct.nombre}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label className="field">
-        Presentación (cantidad por contenedor)
-        <input
-          type="number"
-          min={0}
-          step="0.001"
-          value={c.presentacionCantidad}
-          onChange={(e) => onChange({ presentacionCantidad: e.target.value })}
-          required
-          style={{ width: 120 }}
-        />
-      </label>
       <label className="field" style={{ display: "flex", alignItems: "center", flexDirection: "row", gap: 4 }}>
         <input
           type="checkbox"

@@ -244,24 +244,35 @@ export default function Fertirriego() {
     }
   }
 
+  // Recetario como su propia pantalla (Prioridad 7.3, 4-sep-2026) — antes
+  // era un acordeón que se abría encima de la lista de programaciones,
+  // empujándola hacia abajo. Ahora reemplaza la pantalla completa, con su
+  // propio "← Volver", como ya hace Inventario con el detalle de un Producto.
+  if (mostrarRecetario) {
+    return (
+      <div>
+        <button className="btn-secondary" onClick={() => setMostrarRecetario(false)} style={{ marginBottom: 14 }}>
+          ← Volver a Fertirriego
+        </button>
+        <RecetarioFertirriegoPanel ingredientes={ingredientes} recetas={recetas} cargando={cargandoRecetas} refetch={refetchRecetas} />
+      </div>
+    );
+  }
+
   return (
     <div>
       <div style={{ marginBottom: 14, display: "flex", gap: 10 }}>
         <button className="btn-primary" onClick={() => (mostrarForm ? limpiarFormProgramar() : setMostrarForm(true))}>
           {mostrarForm ? "Cancelar" : "+ Programar fertirriego"}
         </button>
-        <button className="btn-secondary" onClick={() => setMostrarRecetario((v) => !v)}>
-          {mostrarRecetario ? "Ocultar Recetario" : "Recetario"}
+        <button className="btn-secondary" onClick={() => setMostrarRecetario(true)}>
+          Recetario
         </button>
         <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "var(--ink-soft)" }}>
           <input type="checkbox" checked={mostrarCerradas} onChange={(e) => setMostrarCerradas(e.target.checked)} />
           Mostrar vencidas/canceladas
         </label>
       </div>
-
-      {mostrarRecetario && (
-        <RecetarioFertirriegoPanel ingredientes={ingredientes} recetas={recetas} cargando={cargandoRecetas} refetch={refetchRecetas} />
-      )}
 
       <p style={{ fontSize: 12, color: "var(--ink-soft)", marginBottom: 14 }}>
         La ejecución diaria (¿se metió hoy?, ¿cuánto?) se registra desde Riego una vez entregado.

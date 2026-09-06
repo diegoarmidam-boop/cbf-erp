@@ -35,6 +35,10 @@ export interface LineaOrigenCotizacion {
   cantidadYaUsada: number;
   esPreferido: boolean;
   esSustituto: boolean;
+  // Etiquetas del Comparador (Prioridad 7.4, 4-sep-2026) — para que se
+  // vean también aquí, no solo allá, al momento de asignar.
+  esMejorGlobal: boolean;
+  esMejorLocal: boolean;
 }
 
 export interface LineaOrigenNecesidad {
@@ -173,6 +177,8 @@ async function armarLineasDeNecesidades(ordenIds: string[]): Promise<LineaOrigen
         cantidadYaUsada: yaUsadaPorCotizacion.get(cot.id) ?? 0,
         esPreferido: pref?.preferidoId === necesidad.productoId,
         esSustituto: pref?.sustitutoIds.has(necesidad.productoId) ?? false,
+        esMejorGlobal: cot.esMejorGlobal,
+        esMejorLocal: cot.esMejorLocal,
       })),
     });
   }

@@ -195,6 +195,7 @@ export default function Aplicaciones() {
   const { items: tiposAplicacion, agregar: agregarTipoAplicacion } = useCatalogoAbierto("/tipos-aplicacion");
   const [tipoAplicacionId, setTipoAplicacionId] = useState("");
   const [nuevoTipoAplicacion, setNuevoTipoAplicacion] = useState("");
+  const [mostrarNuevoTipoAplicacion, setMostrarNuevoTipoAplicacion] = useState(false);
 
   // ---- Orden de Aplicación (25-ago-2026) ----
   const [verOrdenId, setVerOrdenId] = useState<string | null>(null);
@@ -297,6 +298,7 @@ export default function Aplicaciones() {
     const creado = await agregarTipoAplicacion(nuevoTipoAplicacion.trim());
     setTipoAplicacionId(creado.id);
     setNuevoTipoAplicacion("");
+    setMostrarNuevoTipoAplicacion(false);
   }
 
   // ¿La dosis actual del formulario ya no coincide con la receta elegida?
@@ -548,6 +550,22 @@ export default function Aplicaciones() {
     }
   }
 
+  // Recetario como su propia pantalla (Prioridad 7.3, 4-sep-2026) — antes
+  // era un acordeón que se abría encima de la lista de programaciones,
+  // empujándola hacia abajo. Ahora reemplaza la pantalla completa, con su
+  // propio "← Volver", como ya hace Inventario con el detalle de un Producto.
+  if (mostrarRecetario) {
+    return (
+      <div>
+        <h2 style={{ marginBottom: 16 }}>Aplicaciones</h2>
+        <button className="btn-secondary" onClick={() => setMostrarRecetario(false)} style={{ marginBottom: 14 }}>
+          ← Volver a Aplicaciones
+        </button>
+        <RecetarioPanel modulo="aplicaciones" ingredientes={ingredientes} recetas={recetas} cargando={cargandoRecetas} refetch={refetchRecetas} />
+      </div>
+    );
+  }
+
   return (
     <div>
       <h2 style={{ marginBottom: 16 }}>Aplicaciones</h2>
@@ -567,18 +585,14 @@ export default function Aplicaciones() {
         >
           {mostrarForm ? "Cancelar" : "+ Programar aplicación"}
         </button>
-        <button className="btn-secondary" onClick={() => setMostrarRecetario((v) => !v)}>
-          {mostrarRecetario ? "Ocultar Recetario" : "Recetario"}
+        <button className="btn-secondary" onClick={() => setMostrarRecetario(true)}>
+          Recetario
         </button>
         <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "var(--ink-soft)" }}>
           <input type="checkbox" checked={mostrarCerradas} onChange={(e) => setMostrarCerradas(e.target.checked)} />
           Mostrar vencidas/canceladas
         </label>
       </div>
-
-      {mostrarRecetario && (
-        <RecetarioPanel modulo="aplicaciones" ingredientes={ingredientes} recetas={recetas} cargando={cargandoRecetas} refetch={refetchRecetas} />
-      )}
 
       {mostrarForm && (
         <form onSubmit={programar} className="card" style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 18 }}>
@@ -739,23 +753,45 @@ export default function Aplicaciones() {
                 ))}
               </select>
             </label>
-            <label className="field">
-              + Tipo nuevo
-              <div style={{ display: "flex", gap: 4 }}>
-                <input value={nuevoTipoAplicacion} onChange={(e) => setNuevoTipoAplicacion(e.target.value)} placeholder="ej. Drench" style={{ width: 120 }} />
-                <button type="button" className="btn-secondary" onClick={agregarTipoAplicacionNuevo} disabled={!nuevoTipoAplicacion.trim()}>
-                  +
-                </button>
-              </div>
-            </label>
-            <label className="field">
-              Fecha inicio
-              <FechaInput value={fechaInicio} onChange={setFechaInicio} required />
-            </label>
-            <label className="field">
-              Fecha fin
-              <FechaInput value={fechaFin} onChange={setFechaFin} required />
-            </label>
+            {!mostrarNuevoTipoAplicacion ? (
+              <button
+                type="button"
+                className="btn-secondary"
+                style={{ fontSize: 11, padding: "4px 8px", alignSelf: "flex-end" }}
+                onClick={() => setMostrarNuevoTipoAplicacion(true)}
+              >
+                + Tipo nuevo
+              </button>
+            ) : (
+              <label className="field">
+                + Tipo nuevo
+                <div style={{ display: "flex", gap: 4 }}>
+                  <input
+                    value={nuevoTipoAplicacion}
+                    onChange={(e) => setNuevoTipoAplicacion(e.target.value)}
+                    placeholder="ej. Drench"
+                    style={{ width: 120 }}
+                    autoFocus
+                  />
+                  <button type="button" className="btn-secondary" onClick={agregarTipoAplicacionNuevo} disabled={!nuevoTipoAplicacion.trim()}>
+                    +
+                  </button>
+                  <button type="button" className="btn-secondary" onClick={() => setMostrarNuevoTipoAplicacion(false)}>
+                    Cancelar
+                  </button>
+                </div>
+              </label>
+            )}
+            <div style={{ display: "flex", gap: 10 }}>
+              <label className="field">
+                Fecha inicio
+                <FechaInput value={fechaInicio} onChange={setFechaInicio} required />
+              </label>
+              <label className="field">
+                Fecha fin
+                <FechaInput value={fechaFin} onChange={setFechaFin} required />
+              </label>
+            </div>
             <button className="btn-primary" type="submit">
               {editandoProgramadaId ? "Guardar cambios" : "Programar"}
             </button>

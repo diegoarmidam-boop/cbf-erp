@@ -741,6 +741,8 @@ export interface LineaOrigenCotizacion {
   cantidadYaUsada: number;
   esPreferido: boolean;
   esSustituto: boolean;
+  esMejorGlobal: boolean;
+  esMejorLocal: boolean;
 }
 
 export interface LineaOrigenNecesidad {
