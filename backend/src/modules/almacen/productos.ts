@@ -1,9 +1,43 @@
 import { prisma } from "../../core/db.js";
 
-export const CATEGORIAS_REGULADAS = ["agroquimico", "fertilizante"] as const;
+/**
+ * Bug real corregido (8-sep-2026): esto comparaba `categoria` contra un
+ * arreglo fijo `["agroquimico", "fertilizante"]` en minúsculas. Cuando la
+ * Categoría se borró y se recreó con otro nombre ("Fertilizante" con
+ * mayúscula, vía la pantalla de Catálogos), la comparación dejó de calzar
+ * — el regulado dejó de exigir el permiso "almacen_regulado" para
+ * autorizar/editar/desactivar, un hueco real de autorización. Ahora
+ * consulta las banderas `esFertilizante`/`esAgroquimico` de la Categoría
+ * viva (mismo criterio que `requiereIngredienteActivo`, Prioridad 3,
+ * 6-sep-2026) — sobreviven a que la Categoría se renombre.
+ */
+export async function esCategoriaRegulada(categoriaNombre: string): Promise<boolean> {
+  const categoria = await prisma.categoriaProducto.findUnique({ where: { nombre: categoriaNombre } });
+  return (categoria?.esFertilizante || categoria?.esAgroquimico) ?? false;
+}
 
-export function esCategoriaRegulada(categoria: string): boolean {
-  return (CATEGORIAS_REGULADAS as readonly string[]).includes(categoria);
+/** ¿Esta Categoría es de Fertilizante? — usado por Fertirriego/Fertilización Granular para exigir que el producto programado sea uno (mismo bug/corrección de esCategoriaRegulada arriba). */
+export async function categoriaEsFertilizante(categoriaNombre: string): Promise<boolean> {
+  const categoria = await prisma.categoriaProducto.findUnique({ where: { nombre: categoriaNombre } });
+  return categoria?.esFertilizante ?? false;
+}
+
+/** ¿Esta Categoría es de Agroquímico? — usado por Aplicaciones para exigir que el producto programado sea uno. */
+export async function categoriaEsAgroquimico(categoriaNombre: string): Promise<boolean> {
+  const categoria = await prisma.categoriaProducto.findUnique({ where: { nombre: categoriaNombre } });
+  return categoria?.esAgroquimico ?? false;
+}
+
+/** Nombres de TODAS las Categorías vivas marcadas Fertilizante — para filtrar por lista, no por un solo nombre fijo (ver ingredientesAutorizados). */
+export async function nombresCategoriasFertilizante(): Promise<string[]> {
+  const categorias = await prisma.categoriaProducto.findMany({ where: { esFertilizante: true } });
+  return categorias.map((c) => c.nombre);
+}
+
+/** Nombres de TODAS las Categorías vivas marcadas Agroquímico. */
+export async function nombresCategoriasAgroquimico(): Promise<string[]> {
+  const categorias = await prisma.categoriaProducto.findMany({ where: { esAgroquimico: true } });
+  return categorias.map((c) => c.nombre);
 }
 
 export interface AltaProductoInput {

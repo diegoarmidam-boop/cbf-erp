@@ -11,6 +11,7 @@ import {
 } from "../almacen/movimientos.js";
 import { listarEquipos } from "../equipos/equipos.js";
 import { ingredientesAutorizados, resolverProductoPreferidoPorNombre } from "../almacen/preferencias.js";
+import { categoriaEsFertilizante, nombresCategoriasFertilizante } from "../almacen/productos.js";
 import { obtenerVersionVigente } from "../unidades-produccion/cuadros.js";
 import { obtenerConfigNomina } from "../nomina/config.js";
 import { aActividadCalc } from "../nomina/util.js";
@@ -112,7 +113,7 @@ export async function programarGranular(input: ProgramarGranularInput, creadoPor
   const productosResueltos = await resolverIngredientesGranular(input.productos);
   const productos = await prisma.producto.findMany({ where: { id: { in: productosResueltos.map((p) => p.productoId) } } });
   for (const p of productos) {
-    if (p.categoria !== "fertilizante" || !p.autorizado) {
+    if (!(await categoriaEsFertilizante(p.categoria)) || !p.autorizado) {
       throw new ProductoNoAutorizadoFertilizanteError();
     }
   }
@@ -214,7 +215,7 @@ export async function editarGranularProgramada(id: string, input: Omit<Programar
   const productosResueltos = await resolverIngredientesGranular(input.productos);
   const productosNuevos = await prisma.producto.findMany({ where: { id: { in: productosResueltos.map((p) => p.productoId) } } });
   for (const p of productosNuevos) {
-    if (p.categoria !== "fertilizante" || !p.autorizado) throw new ProductoNoAutorizadoFertilizanteError();
+    if (!(await categoriaEsFertilizante(p.categoria)) || !p.autorizado) throw new ProductoNoAutorizadoFertilizanteError();
   }
 
   let hectareasTotales = 0;
@@ -777,8 +778,8 @@ export async function listarCancelacionesPendientesConfirmarGranular() {
 }
 
 /** Catálogo de fertilizantes ya autorizados — lo único elegible al programar (9.5). */
-export function productosParaFertilizacion() {
-  return ingredientesAutorizados("fertilizante");
+export async function productosParaFertilizacion() {
+  return ingredientesAutorizados(await nombresCategoriasFertilizante());
 }
 
 /** Implementos elegibles cuando el recurso es "Con implemento" (9.5/9.13). */

@@ -138,9 +138,17 @@ export interface IngredienteAutorizado {
  * mostrar una marca — "efectivamente" un catálogo de Ingredientes Activos
  * autorizados por categoría, tal como pidió Diego.
  */
-export async function ingredientesAutorizados(categoria?: string): Promise<IngredienteAutorizado[]> {
+// Recibe una LISTA de nombres de Categoría, no una sola (8-sep-2026, bug
+// real): antes filtraba por un solo nombre fijo ("fertilizante"/
+// "agroquimico" en minúsculas) — al borrarse/recrearse esas Categorías con
+// otro nombre ("Fertilizante"), el filtro dejaba de calzar con CUALQUIER
+// producto y el selector de Ingrediente Activo salía vacío. Los llamadores
+// resuelven la lista vigente vía nombresCategoriasFertilizante/
+// nombresCategoriasAgroquimico (productos.ts) en vez de escribir el nombre
+// a mano.
+export async function ingredientesAutorizados(categorias?: string[]): Promise<IngredienteAutorizado[]> {
   const productos = await prisma.producto.findMany({
-    where: { autorizado: true, activo: true, ingredienteActivo: { not: null }, ...(categoria ? { categoria } : {}) },
+    where: { autorizado: true, activo: true, ingredienteActivo: { not: null }, ...(categorias?.length ? { categoria: { in: categorias } } : {}) },
     select: { ingredienteActivo: true, categoria: true },
   });
   const categoriaPorNombre = new Map<string, string>();

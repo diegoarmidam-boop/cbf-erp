@@ -858,7 +858,18 @@ model CategoriaProducto {
   id                        String  @id @default(uuid())
   nombre                    String  @unique
   requiereIngredienteActivo Boolean @default(false)
-  activo                    Boolean @default(true)
+  // Bug real corregido (8-sep-2026): Fertirriego/Fertilización Granular y
+  // Aplicaciones exigían `producto.categoria === "fertilizante"` /
+  // "agroquimico" como texto fijo en el código. Cuando la Categoría se
+  // borró y se recreó con otro nombre ("Fertilizante" con mayúscula), la
+  // comparación dejó de calzar y bloqueó programar casi cualquier
+  // producto — Producto.categoria es texto libre (no una FK), así que un
+  // renombrado/recreación de la Categoría nunca se propaga sola. Estas dos
+  // banderas reemplazan el texto fijo, mismo criterio que
+  // requiereIngredienteActivo (Prioridad 3, 6-sep-2026).
+  esFertilizante Boolean @default(false)
+  esAgroquimico  Boolean @default(false)
+  activo         Boolean @default(true)
 }
 
 model IngredienteActivo {

@@ -34,7 +34,7 @@ productosRouter.post("/", requirePermission("almacen", "capturar"), async (req, 
     res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
     return;
   }
-  const regulado = esCategoriaRegulada(parsed.data.categoria);
+  const regulado = await esCategoriaRegulada(parsed.data.categoria);
   const moduloAutoriza = regulado ? "almacen_regulado" : "almacen";
   const puedeAutorizar = await tienePermiso(req.usuario!.rol, moduloAutoriza, "autoriza");
 
@@ -72,8 +72,8 @@ productosRouter.patch("/:id", requirePermission("almacen", "editar"), async (req
     return;
   }
   const producto = await prisma.producto.findUniqueOrThrow({ where: { id: unoSolo(req.params.id) } });
-  const reguladoAntes = esCategoriaRegulada(producto.categoria);
-  const reguladoDespues = esCategoriaRegulada(parsed.data.categoria);
+  const reguladoAntes = await esCategoriaRegulada(producto.categoria);
+  const reguladoDespues = await esCategoriaRegulada(parsed.data.categoria);
   if (reguladoAntes || reguladoDespues) {
     const puedeAutorizar = await tienePermiso(req.usuario!.rol, "almacen_regulado", "autoriza");
     if (!puedeAutorizar) {
@@ -105,7 +105,7 @@ productosRouter.patch("/:id/activo", requirePermission("almacen", "capturar"), a
     return;
   }
   const producto = await prisma.producto.findUniqueOrThrow({ where: { id: unoSolo(req.params.id) } });
-  const regulado = esCategoriaRegulada(producto.categoria);
+  const regulado = await esCategoriaRegulada(producto.categoria);
   const moduloAutoriza = regulado ? "almacen_regulado" : "almacen";
   const puedeAutorizar = await tienePermiso(req.usuario!.rol, moduloAutoriza, "autoriza");
   if (!puedeAutorizar) {

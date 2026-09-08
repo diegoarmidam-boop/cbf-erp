@@ -17,6 +17,7 @@ import {
   stockTotalProductoTx,
 } from "../almacen/movimientos.js";
 import { obtenerVersionVigente } from "../unidades-produccion/cuadros.js";
+import { categoriaEsFertilizante } from "../almacen/productos.js";
 import { ProductoNoAutorizadoFertilizanteError, StockNoComprometidoError, TransicionFertilizacionInvalidaError } from "./granular.js";
 import { actualizarDosisProductoEnRecetaFertirriego, obtenerRecetaFertirriego, ROLES_RECETAS_FERTIRRIEGO } from "./recetario-fertirriego.js";
 import { cancelarOrdenesDeReferencia } from "../compras/ordenes.js";
@@ -129,7 +130,7 @@ export async function programarFertirriego(input: ProgramarFertirriegoInput, cre
   const productosResueltos = await resolverIngredientesFertirriego(input.productos);
   const productos = await prisma.producto.findMany({ where: { id: { in: productosResueltos.map((p) => p.productoId) } } });
   for (const p of productos) {
-    if (p.categoria !== "fertilizante" || !p.autorizado) {
+    if (!(await categoriaEsFertilizante(p.categoria)) || !p.autorizado) {
       throw new ProductoNoAutorizadoFertilizanteError();
     }
   }
@@ -242,7 +243,7 @@ export async function editarFertirriegoProgramada(id: string, input: Omit<Progra
   const productosResueltos = await resolverIngredientesFertirriego(input.productos);
   const productosNuevos = await prisma.producto.findMany({ where: { id: { in: productosResueltos.map((p) => p.productoId) } } });
   for (const p of productosNuevos) {
-    if (p.categoria !== "fertilizante" || !p.autorizado) {
+    if (!(await categoriaEsFertilizante(p.categoria)) || !p.autorizado) {
       throw new ProductoNoAutorizadoFertilizanteError();
     }
   }
