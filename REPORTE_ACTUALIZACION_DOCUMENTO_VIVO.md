@@ -1,44 +1,59 @@
-# Reporte — actualización del documento vivo (4/5-sep-2026)
+# Reporte — actualización del documento vivo (8-sep-2026)
 
-Prompt `CBF_ERP_Reestructura_Completa_03-09-2026_V16.docx`, tras una prueba de ciclo completo en producción (programar → comprar → recibir → aplicar → nómina). 7 prioridades, cada una con causa raíz investigada antes de tocar código, reportada y verificada en vivo antes de seguir con la siguiente. Commits `38e38ab` → `26b40f9` sobre `9ebd4fd`, rama `main`, ya subidos (uno por prioridad).
+Prompt `CBF_ERP_Reestructura_Completa_04-09-2026_V23.docx`, tras otra ronda de pruebas en producción. 7 prioridades, cada una con causa raíz investigada antes de tocar código (2 de ellas resultaron ser causas distintas a lo que decía el prompt — se confirmó con Diego antes de corregir). Commits `747da5e` → `960b95d` sobre `27ae527`, rama `main`, ya subidos.
 
-## Prioridad 1 — URGENTE: cantidad no se precargaba redondeada a presentación completa
+## Prioridad 1 — Producto generado al 100% seguía en Pendientes de Compras
 
-Ya había generado una orden real mal dimensionada (Folio 23: 0.2 L en vez de 25 L). Causa raíz: la presentación de cada cotización nunca viajaba hasta la pantalla de Órdenes de Compra — solo el Comparador la tenía, así que ahí sí calculaba bien "Cantidad comprada" redondeada, pero al asignar en Órdenes de Compra se precargaba el pendiente crudo sin redondear. Se agregó `presentacionCantidad` a `LineaOrigenCotizacion` y la asignación ahora redondea igual que el Comparador (`Math.ceil` a presentaciones completas). Probado reproduciendo el caso exacto (0.2 pendiente, presentación 25) contra el backend real: antes precargaba 0.2, ahora 25.
+Causa raíz confirmada con una reproducción real: `listarPendientesPorIngredienteActivo` y `listarPendientesPorProgramacion` incluían el estado `"generada"` en su filtro de necesidades — pero ese estado nunca pertenece a la necesidad misma, solo a la orden real que se crea aparte al cotizar/generar. Esa orden real (sin la relación `comparacionOrigen`, que solo existe en la necesidad original) se colaba y se contaba con su cantidad completa sin restar nada.
 
-## Prioridad 2 — Cambio de fondo: Presentación deja de ser fija por Producto Comercial
+**Probado**: creé una necesidad de 100 kg, la coticé y generé la orden real por el 100% — antes seguía apareciendo en Pendientes con 100 kg; después del fix, desaparece de inmediato. Repetí con cobertura parcial (40 de 100, comprando un sustituto autorizado, no el preferido) y confirmé 60 kg pendientes correctos, emparejado por Ingrediente Activo.
 
-Un mismo Producto Comercial puede llegar en presentaciones distintas entre compras. Se quitó Contenedor/Cantidad de Producto (solo queda su Unidad base) y se movió la captura a 2 momentos: cotizar (Comparador, ya con Contenedor incluido) y recibir (Almacén → En Camino, formato "X Contenedores de Y Cantidad", total calculado solo). Cada lote guarda su propia Presentación — un mismo producto en presentaciones distintas ya no se suma ciego. Inventario nuevo: tarjeta principal agrupada por Ingrediente Activo (decisión de Diego, mismo criterio "Ingrediente Activo, nunca marca"), con detalle desglosado por Nombre + Marca + Presentación.
+## Prioridad 2 — Tope de asignación validaba contra Pendiente, no contra Disponible
 
-**Antes de este cambio**, a petición de Diego, se tomó un respaldo completo de la base (`ops/backups/`) y se vació el historial de Aplicaciones/Fertilizaciones/Compras/Inventario para empezar de cero con la arquitectura correcta — catálogos de Producto/Proveedor/Huerta quedaron intactos.
+En `validarYAgruparAsignaciones` había un segundo tope redundante que comparaba la cantidad asignada contra `cantidadPendiente` de la necesidad, en vez de contra `cantidadDisponible` del Proveedor (que ya se valida aparte y no bloquea nada si es "Toda"). Se quitó ese segundo tope.
 
-Probado de punta a punta: un Producto recibido en 2 presentaciones distintas (4 Sacos de 25 kg + 10 Costales de 10 kg) suma 200 kg correcto en Inventario, con las 2 líneas separadas en el detalle.
+**Probado**: necesidad de 100 kg con Proveedor "Toda disponible" — asigné 150 (más de lo pendiente) y ya no se bloquea; la orden se genera por 150.
 
-## Prioridad 3 — Categoría con check "¿Requiere Ingrediente Activo?"
+## Prioridad 3 — Migración de recetas viejas: el diagnóstico no era correcto
 
-La regla vieja (`categoria === "agroquimico" || "fertilizante"`) quedó desactualizada desde que se reemplazó "Agroquímico" genérico por tipos específicos — un insecticida de extracto natural no podía llevar Ingrediente Activo. Cada Categoría ahora decide esto al darse de alta, validado también en el backend (no solo ocultando el campo en la UI). Backfill de las 7 categorías existentes: fertilizante/agroquimico/Insecticida → Sí (confirmado con Diego que "agroquimico" genérico, con 2 productos reales, se queda en Sí por ahora), el resto → No.
+Antes de escribir el script de migración, probé con la propia receta "TM Riego Papaya 1" (de antes del 3-sep) y confirmé que **no había ningún dato viejo que migrar** — el Ingrediente Activo vive en el catálogo de Producto, no en la receta, y ya estaba bien puesto en recetas viejas y nuevas por igual. La causa real: la tarjeta "Por Programación" en Compras mostraba siempre "Nombre Comercial (Ingrediente Activo)", para cualquier receta, vieja o nueva. Se lo planteé a Diego, confirmó quitar el Nombre Comercial de esa tarjeta — ahora muestra solo Ingrediente Activo (con respaldo al nombre comercial en productos sin uno, como Combustible).
 
-## Prioridad 4 — Confirmar entrega en Aplicaciones
+## Prioridad 4 — Solicitud manual: Título obligatorio y varios productos
 
-Investigado primero: el mecanismo completo (reservar en Almacén Central → botón → mueve a Local → avance descuenta de Local) ya existía en Aplicaciones, casi idéntico a Fertirriego — no era el bug reportado. El problema real, aclarado por Diego: el Supervisor de Huerta y otros roles que programan Aplicaciones/Fertilizantes no siempre tienen acceso a Almacén como módulo aparte, y "Confirmar entrega" en los 3 módulos exigía exclusivamente `almacen.capturar`. Confirmado que el gap es real hoy (Asistente Técnico, Capturista, Ayudante de Supervisor y hasta el Gerente Técnico de Producción están en ese caso) — los 3 endpoints ahora también aceptan el permiso del propio módulo.
+Se agregó `titulo`/`solicitudManualId` a `OrdenCompra` (migración) — el Título reemplaza el genérico "Solicitud manual" en las tarjetas de Pendientes y Órdenes de Compra, y ahora se puede pedir uno o varios productos en la misma solicitud (mismo patrón "+ Otro producto" de Aplicaciones/Fertirriego), agrupados en una sola tarjeta por `solicitudManualId`.
 
-## Prioridad 5 — 2 bugs reales de Compras
+**Probado**: creé una solicitud "Refacciones bomba de riego" con 2 productos distintos — confirmé que quedan en la misma tarjeta, con el título correcto y ambas líneas intactas.
 
-- Columna Zona vacía en la tabla de Proveedores aunque sí estaba guardada: la consulta `?todas=true` no traía la relación `zona`, solo el `zonaId` crudo — por eso se veía bien al editar (usa `zonaId` directo) pero no en la tabla.
-- "Ir a Órdenes de Compra" desde el Comparador decía "Sin necesidades pendientes cotizadas" la primera vez: el `useEffect` que resuelve el deep-link solo ponía el estado de "cuál programación" pero nunca llamaba a la función que de verdad carga las líneas. Cambiar de pestaña "arreglaba" el síntoma solo porque reiniciaba el estado y forzaba a elegir la tarjeta de nuevo a mano.
+## Prioridad 5 — Nueva Frecuencia "Días específicos de la semana" en Fertirriego
 
-## Prioridad 6 — Pestaña "Catálogos" centralizada en Configuración del sistema
+Checkboxes Lunes a Domingo (mínimo 1), conviven con las 4 Frecuencias existentes. Riegos en la semana = número de días marcados (constante); campaña completa = fechas reales del rango que caen en esos días. El PDF y el recordatorio diario de Riego usan el mismo cálculo, y el recordatorio ya solo se dispara los días marcados.
 
-Un solo lugar para los 8 catálogos abiertos del sistema. El "+" para agregar se queda donde ya vivía en cada módulo; editar nombre o desactivar/reactivar un valor ya existente se centraliza aquí, exclusivo de Director General/Encargado de Sistemas (decisión de Diego: incluye a Encargado de Sistemas, la cuenta técnica) — reforzado también en el backend con un middleware nuevo, no solo ocultando el botón. El panel de Zonas salió de Proveedores.tsx y se movió aquí. Grupos de Pago (más rico, con miembros y sin campo "activo") se quedó administrándose completo en Nómina — aquí solo hay un acceso directo. Probado: un rol sin ser Director/Sistemas recibe 403 al intentar editar; Director General sí puede.
+**Encontrado de paso y corregido**: un bug real de zona horaria — `Date.getDay()` sobre una fecha `@db.Date` corría el día calculado un día completo en Campeche (UTC-6), confirmado con `new Date('2026-08-31').getDay()` dando Domingo en vez de Lunes. Mismo problema que `semanaDeFecha` ya resolvía en otro lado con el truco de anclar a mediodía — se aplicó aquí también.
 
-## Prioridad 7 — Mejoras de UI (7 puntos)
+**Probado**: Fertirriego con Lun/Mié/Vie del 31-ago (Lunes) al 6-sep (Domingo) — 3 riegos en campaña correctos (31, 2 y 4-sep), recordatorio activo en Lunes y Miércoles, inactivo en Martes, PDF muestra "Lunes, Miércoles, Viernes" con 3 riegos en semana y 3 en campaña.
 
-"+ Tipo nuevo" en Programar Aplicaciones ya no está siempre expandido; Fecha inicio/fin van juntas; el Recetario (Aplicaciones y Fertirriego) dejó de ser un acordeón que empuja la lista hacia abajo y ahora es su propia pantalla completa; las etiquetas "Mejor Global"/"Mejor Local" del Comparador también se ven en Órdenes de Compra; el campo de Precio aclara la Presentación completa (ej. "Precio del Saco de 25"); al generar una orden aparece un botón de "Descargar PDF" directo ahí mismo, sin tener que ir a buscarlo después. (7.7 ya había quedado resuelto en la Prioridad 2.)
+## Bug adicional encontrado y corregido (no estaba en el prompt): Categoría huérfana bloqueaba casi todo
+
+Al probar la Prioridad 5 encontré que `Producto.categoria` (texto libre, no una relación) seguía comparándose en 8 lugares del código contra los nombres viejos en minúscula ("fertilizante"/"agroquimico"), escritos a mano. Al borrarse y recrearse esas Categorías con otro nombre ("Fertilizante", con mayúscula) desde la pantalla de Catálogos, la comparación dejó de calzar: bloqueaba programar casi cualquier producto en Fertirriego/Fertilización Granular, dejaba vacío el selector de Ingrediente Activo en Aplicaciones, y abría un hueco real de autorización (`esCategoriaRegulada` ya no exigía el permiso especial para autorizar/editar/desactivar agroquímicos/fertilizantes). Se lo planteé a Diego, confirmó corregirlo de inmediato.
+
+Se agregaron banderas `esFertilizante`/`esAgroquimico` a Categoría (mismo criterio que "¿Requiere Ingrediente Activo?", Prioridad 3 de la sesión anterior) en vez de comparar contra un nombre fijo, y se repararon los 5 Productos cuyo `categoria` había quedado apuntando a una Categoría ya borrada.
+
+**Probado**: confirmé que el selector de Ingrediente Activo pasó de 1 opción (Fosfonitrato, por casualidad) a 10 para Fertirriego, que `esCategoriaRegulada` vuelve a proteger correctamente, y programé un Fertirriego con Manganeso (que antes fallaba).
+
+## Prioridad 6 — Rediseño de Inventario para escalar
+
+6.1 corregido: la columna Existencia de la tabla quedaba en blanco para cualquier producto sin una entrada registrada — ahora siempre muestra un número real. 6.2: espacio reservado para Alertas de reorden hasta arriba de todo — no existía ninguna lógica de "stock bajo" en el sistema (búsqueda completa, cero resultados); Diego confirmó dejar el espacio sin inventar el cálculo. 6.3: filtro por Categoría en chips horizontales (los 8 que pidió Diego + Pieza/General/Insecticida que ya existían + Todos) — se crearon las 4 Categorías que faltaban (Empaque/Herramientas/Oficina/Laboratorio). 6.4: "Existencia por Ingrediente Activo" ahora colapsable y contextual (se oculta sola en categorías sin Ingrediente Activo, usando la misma bandera de la Prioridad 3). 6.5: la tabla queda filtrada por el chip elegido.
+
+## Prioridad 7 — Lineamientos de interfaz (Bloque 11) — parcial, resto pendiente
+
+Es una guía permanente para toda pantalla nueva, no una pantalla propia. Se aplicó 7.5 (esquinas muy redondeadas) de inmediato vía los tokens de diseño globales, cascadeando a toda la app sin riesgo (verificado en vivo: inputs de 10px a 16px de radio). Los otros 4 puntos quedaron pendientes por decisión de Diego:
+- **7.1** (teclado numérico propio): se mostró un mockup interactivo con la paleta de CBF para su aprobación antes de construir el componente real — sigue pendiente de que lo confirme.
+- **7.2/7.3/7.4** (números grandes, chips en vez de campos, iconos por categoría): Diego confirmó que aplican solo a pantallas nuevas de aquí en adelante, no a un barrido retroactivo de toda la app existente — eso queda como tarea aparte para otra sesión si se decide hacerlo.
 
 ## Estado técnico
 
-- Backend y web sin errores de TypeScript en cada uno de los 7 pasos; build de producción limpio en ambos cada vez.
-- 3 migraciones de Prisma: `presentacion_no_fija_por_producto` (Prioridad 2, con respaldo previo de la base), `categoria_requiere_ingrediente_activo` (Prioridad 3, aditiva).
-- Todo probado con scripts contra el backend real (sin credenciales de sesión de Diego), datos de prueba creados y borrados en cada caso — excepción real y a propósito: la Prioridad 2 sí vació el historial de producción, con respaldo tomado antes.
-- Incidente de despliegue recurrente: el proceso de Node en el servidor no se cae solo al detener la tarea programada (proceso "huérfano" con privilegios elevados) — cada una de las 7 prioridades necesitó que Diego terminara `node.exe` manualmente desde el Administrador de Tareas para quedar activa. Verificado cada vez con `CreationDate` del proceso y una petición autenticada real (no solo sin sesión, que puede dar falsos positivos — lección de la sesión anterior).
-- Ya subido a GitHub — commits `38e38ab`, `8586037`, `36021b6`, `6575970`, `9ebd4fd`, `7f35916`, `26b40f9` sobre `9ebd4fd` (el primero de la tanda), rama `main`.
+- Backend y web sin errores de TypeScript en cada paso; build de producción limpio en ambos cada vez.
+- 3 migraciones de Prisma: `solicitud_manual_titulo_multiproducto` (Prioridad 4), `fertirriego_dias_semana` (Prioridad 5), `categoria_es_fertilizante_agroquimico` (bug adicional, con reparación de datos de 5 Productos).
+- Todo probado con scripts contra el backend real (funciones reales, no HTTP simulado), datos de prueba creados y borrados en cada caso.
+- No se pudo verificar visualmente en el navegador por falta de credenciales de acceso — las Prioridades 3, 4 y 6 (cambios de pantalla) se verificaron por código y build limpio; la 7.5 sí se verificó en vivo porque no requiere sesión (pantalla de login).
+- Ya subido a GitHub — commits `747da5e`, `bcb1acd`, `ce8995a`, `598a977`, `197c2cf`, `789992b`, `27ae527`, `960b95d`, rama `main`.
