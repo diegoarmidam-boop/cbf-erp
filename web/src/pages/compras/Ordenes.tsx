@@ -593,8 +593,7 @@ export default function Ordenes() {
                         {g.lineas.map((l) => (
                           <div key={l.ordenId} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12.5, gap: 8 }}>
                             <span>
-                              {l.nombreComercial}
-                              {l.ingredienteActivo && ` (${l.ingredienteActivo})`} — {formatearNumero(l.cantidadPendiente)} {l.unidad}{" "}
+                              {l.ingredienteActivo ?? l.nombreComercial} — {formatearNumero(l.cantidadPendiente)} {l.unidad}{" "}
                               <span className={`tag ${tagLineaPendiente(l.estado)}`}>{ETIQUETAS_LINEA_PENDIENTE[l.estado]}</span>
                             </span>
                             {l.estadoOrden === "pendiente_cotizar" && (
