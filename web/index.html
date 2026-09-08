@@ -2,8 +2,19 @@
 <html lang="es-MX">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>Chula ERP</title>
+    <meta name="theme-color" content="#e6127a" />
+
+    <!-- PWA en iOS (8-sep-2026): Safari históricamente no siempre respeta
+         bien el manifest, así que estas etiquetas van aparte para que al
+         abrir desde el ícono de la pantalla de inicio se vea sin barra de
+         Safari, como app real (mismo criterio que la app "Vida"). -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Chula ERP" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
   </head>
