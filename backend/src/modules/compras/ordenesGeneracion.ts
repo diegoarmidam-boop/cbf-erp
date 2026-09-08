@@ -313,22 +313,13 @@ export async function validarYAgruparAsignaciones(asignaciones: AsignacionInput[
   }
   if (excedidas.length > 0) throw new TopeDisponibleExcedidoError(excedidas);
 
-  // Tope contra lo pendiente de cada necesidad de origen (por si se
-  // reparte la misma necesidad entre 2+ cotizaciones distintas).
-  const necesidadIds = [...new Set(asignaciones.map((a) => a.ordenCompraId))];
-  const comparacionesPorNecesidad = new Map(cotizaciones.map((c) => [c.comparacion.ordenCompra?.id, c.comparacion]));
-  for (const necesidadId of necesidadIds) {
-    const comparacion = comparacionesPorNecesidad.get(necesidadId);
-    if (!comparacion) continue;
-    const calc = await obtenerComparacionCalculada(comparacion.id);
-    if (!calc) continue;
-    const pedidoDeEstaNecesidad = asignaciones.filter((a) => a.ordenCompraId === necesidadId).reduce((s, a) => s + a.cantidad, 0);
-    if (pedidoDeEstaNecesidad > calc.cantidadPendiente + 0.0001) {
-      throw new AsignacionInvalidaError(
-        `${calc.producto.nombreComercial}: se está asignando ${pedidoDeEstaNecesidad.toFixed(3)} ${calc.unidad} pero solo hay ${calc.cantidadPendiente.toFixed(3)} pendiente.`
-      );
-    }
-  }
+  // Bug real corregido (Prioridad 2, 7-sep-2026): aquí había un segundo tope
+  // que validaba contra `cantidadPendiente` de la necesidad de origen (ej.
+  // "solo hay 664.8 kg pendiente") en vez de contra el Disponible real del
+  // Proveedor (ya validado arriba) — bloqueaba comprar de más a propósito
+  // por buen precio, que sí está permitido. El único tope real es el
+  // Disponible del Proveedor: si marcó "Toda", no debe bloquear nada sin
+  // importar cuánto sea lo pendiente.
 
   // Agrupación automática por Proveedor resultante (1.2).
   const porProveedor = new Map<string, VistaPreviaProveedor>();
