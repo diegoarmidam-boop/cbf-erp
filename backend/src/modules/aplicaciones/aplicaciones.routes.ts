@@ -282,6 +282,7 @@ const realizadaSchema = z.object({
   fechaReal: z.string(),
   cuadros: z.array(cuadroAvanceSchema).min(1),
   lineas: z.array(lineaRealizadaSchema).min(1),
+  comentario: z.string().optional(),
 });
 
 // Se acepta "aplicaciones:capturar" (Supervisor/Ayudante, el caso normal) O
@@ -333,6 +334,7 @@ aplicacionesRouter.post("/:id/realizada", requirePermissionAny(["aplicaciones", 
 const editarRealizadaSchema = z.object({
   cuadros: z.array(cuadroAvanceSchema).min(1),
   lineas: z.array(lineaRealizadaSchema).min(1),
+  comentario: z.string().optional(),
 });
 
 aplicacionesRouter.patch("/realizada/:realizadaId", requirePermission("aplicaciones", "capturar"), async (req, res) => {

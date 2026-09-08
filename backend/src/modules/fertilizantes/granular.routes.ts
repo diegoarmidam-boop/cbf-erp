@@ -177,6 +177,7 @@ const realizadaSchema = z.object({
   horas: z.number().positive(),
   fechaReal: z.string(),
   cuadros: z.array(cuadroAvanceSchema).min(1),
+  comentario: z.string().optional(),
 });
 
 // Se acepta "fertilizantes:capturar" (Supervisor, el caso normal) O
@@ -226,6 +227,7 @@ const editarRealizadaSchema = z.object({
   grupoId: z.string().optional(),
   horas: z.number().positive(),
   cuadros: z.array(cuadroAvanceSchema).min(1),
+  comentario: z.string().optional(),
 });
 
 granularRouter.patch("/realizada/:realizadaId", requirePermission("fertilizantes", "capturar"), async (req, res) => {

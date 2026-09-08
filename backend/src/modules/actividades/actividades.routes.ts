@@ -129,6 +129,7 @@ const avanceSchema = z.object({
   fechaReal: z.string(),
   cuadros: z.array(cuadroAvanceSchema).min(1),
   lineas: z.array(lineaActividadSchema).min(1),
+  comentario: z.string().optional(),
 });
 
 // Se acepta "actividades:capturar" (Supervisor/Capturista, el caso normal) O
@@ -181,6 +182,7 @@ actividadesRouter.post("/:id/avance", requirePermissionAny(["actividades", "capt
 const editarAvanceSchema = z.object({
   cuadros: z.array(cuadroAvanceSchema).min(1),
   lineas: z.array(lineaActividadSchema).min(1),
+  comentario: z.string().optional(),
 });
 
 actividadesRouter.patch("/avance/:realizadaId", requirePermission("actividades", "capturar"), async (req, res) => {

@@ -264,6 +264,7 @@ export interface RegistrarAvanceActividadInput {
   cuadros: CuadroAvanceInput[];
   lineas: LineaActividadInput[];
   casoExtraordinario?: boolean;
+  comentario?: string;
 }
 
 /** Validación de forma de las líneas — mismo criterio que Aplicaciones (9.7), adaptado a los 3 tipos de Actividades. */
@@ -416,6 +417,7 @@ export async function registrarAvanceActividad(actividadProgramadaId: string, in
         actividadProgramadaId,
         fechaReal: fecha,
         registradoPorId,
+        comentario: input.comentario,
         cuadros: { create: input.cuadros.map((c) => ({ cuadroId: c.cuadroId, hectareas: c.hectareas })) },
       },
     });
@@ -432,6 +434,7 @@ export async function registrarAvanceActividad(actividadProgramadaId: string, in
 export interface EditarAvanceActividadInput {
   cuadros: CuadroAvanceInput[];
   lineas: LineaActividadInput[];
+  comentario?: string;
 }
 
 /**
@@ -468,6 +471,7 @@ export async function editarAvanceActividad(realizadaId: string, input: EditarAv
     await tx.actividadRealizadaCuadro.createMany({
       data: input.cuadros.map((c) => ({ realizadaId, cuadroId: c.cuadroId, hectareas: c.hectareas })),
     });
+    await tx.actividadRealizada.update({ where: { id: realizadaId }, data: { comentario: input.comentario } });
 
     await borrarUsoDiarioDeLineasTx(tx, lineaIdsAnteriores);
     await tx.registroNomina.deleteMany({ where: { origen: "automatico_actividad", referenciaOrigenId: realizadaId } });

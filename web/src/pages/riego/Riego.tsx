@@ -21,6 +21,9 @@ interface FilaEdit {
   // (RiegoRegistroDiario), así que basta con no mandarlo en el payload.
   omitidos: Record<string, boolean>;
   motivoNoAplicado: string;
+  // Comentario libre (8-sep-2026) — a diferencia de motivoNoAplicado, existe
+  // cualquier día, se haya metido el fertirriego o no.
+  comentario: string;
 }
 
 export default function Riego() {
@@ -63,6 +66,7 @@ export default function Riego() {
               cantidades,
               omitidos,
               motivoNoAplicado: fila.registro?.motivoNoAplicado ?? "",
+              comentario: fila.registro?.comentario ?? "",
             };
           }
         }
@@ -80,7 +84,7 @@ export default function Riego() {
     yaHizoScroll.current = true;
   }, [huertaResaltadaId, datos]);
 
-  function actualizarFila(seccionId: string, campo: "horas" | "fertirriegoConfirmado" | "motivoNoAplicado", valor: string | boolean) {
+  function actualizarFila(seccionId: string, campo: "horas" | "fertirriegoConfirmado" | "motivoNoAplicado" | "comentario", valor: string | boolean) {
     setEdiciones((prev) => ({ ...prev, [seccionId]: { ...prev[seccionId]!, [campo]: valor } }));
   }
 
@@ -115,6 +119,7 @@ export default function Riego() {
           ? productoIdsAplicados.map((productoId) => ({ productoId, cantidadAplicada: Number(fila.cantidades[productoId] ?? 0) }))
           : undefined,
         motivoNoAplicado: !fila.fertirriegoConfirmado ? fila.motivoNoAplicado || undefined : undefined,
+        comentario: fila.comentario.trim() || undefined,
       });
       cargar();
     } catch (err) {
@@ -154,6 +159,7 @@ export default function Riego() {
                       <th>Sección</th>
                       <th>Horas regadas</th>
                       <th>Fertirriego</th>
+                      <th>Comentario</th>
                       <th></th>
                     </tr>
                   </thead>
@@ -222,6 +228,14 @@ export default function Riego() {
                             ) : (
                               <span style={{ fontSize: 11.5, color: "var(--ink-soft)" }}>Sin fertirriego programado hoy</span>
                             )}
+                          </td>
+                          <td>
+                            <input
+                              placeholder="Observación (opcional)"
+                              style={{ width: 160 }}
+                              value={fila.comentario}
+                              onChange={(e) => actualizarFila(seccion.id, "comentario", e.target.value)}
+                            />
                           </td>
                           <td>
                             <button

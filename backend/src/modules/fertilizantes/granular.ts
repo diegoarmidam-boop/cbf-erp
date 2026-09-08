@@ -403,6 +403,7 @@ export interface RegistrarRealizadaGranularInput {
   fechaReal: string;
   cuadros: CuadroAvanceInput[];
   casoExtraordinario?: boolean;
+  comentario?: string;
 }
 
 export class DiaCerradoRequiereCasoExtraordinarioError extends Error {
@@ -503,6 +504,7 @@ export async function registrarRealizadaGranular(id: string, input: RegistrarRea
         horas: input.horas,
         fechaReal: new Date(input.fechaReal),
         registradoPorId,
+        comentario: input.comentario,
         cuadros: { create: input.cuadros.map((c) => ({ cuadroId: c.cuadroId, hectareas: c.hectareas })) },
       },
       include: { cuadros: true },
@@ -547,6 +549,7 @@ export interface EditarRealizadaGranularInput {
   grupoId?: string;
   horas: number;
   cuadros: CuadroAvanceInput[];
+  comentario?: string;
 }
 
 /** Historial de reportes editable por separado, sujeto al mismo candado de consistencia con Nómina que Aplicaciones (9.5/9.7/9.11). */
@@ -579,7 +582,7 @@ export async function editarRealizadaGranular(realizadaId: string, input: Editar
     });
     await tx.fertilizacionGranularRealizada.update({
       where: { id: realizadaId },
-      data: { personalId: input.personalId, grupoId: input.grupoId, horas: input.horas },
+      data: { personalId: input.personalId, grupoId: input.grupoId, horas: input.horas, comentario: input.comentario },
     });
     await tx.registroNomina.updateMany({
       where: { origen: "automatico_fertilizacion", referenciaOrigenId: realizadaId },

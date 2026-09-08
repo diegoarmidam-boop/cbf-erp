@@ -885,6 +885,7 @@ export interface ActividadRealizada {
   actividadProgramadaId: string;
   fechaReal: string;
   registradoPorId: string;
+  comentario: string | null;
   cuadros: ActividadRealizadaCuadro[];
   lineas: ActividadRealizadaLinea[];
 }
@@ -948,6 +949,7 @@ export interface AplicacionRealizada {
   aplicacionId: string;
   fechaReal: string;
   registradoPorId: string;
+  comentario: string | null;
   cuadros: RealizadaCuadro[];
   lineas: AplicacionRealizadaLinea[];
 }
@@ -1060,6 +1062,7 @@ export interface FertilizacionGranularRealizada {
   horas: string;
   fechaReal: string;
   registradoPorId: string;
+  comentario: string | null;
   cuadros: RealizadaCuadro[];
 }
 
@@ -1117,6 +1120,7 @@ export interface RiegoRegistroDiario {
   fertirriegoConfirmado: boolean;
   productos: RiegoRegistroDiarioProducto[];
   motivoNoAplicado: string | null;
+  comentario: string | null;
   capturadoPorId: string;
 }
 

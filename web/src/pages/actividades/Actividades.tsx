@@ -120,11 +120,13 @@ export default function Actividades() {
   const [fechaReal, setFechaReal] = useState(hoyISO());
   const [avanceCuadros, setAvanceCuadros] = useState<Record<string, string>>({});
   const [lineas, setLineas] = useState<LineaForm[]>([lineaVacia("gente")]);
+  const [comentario, setComentario] = useState("");
 
   // ---- Editar reporte existente ----
   const [editando, setEditando] = useState<string | null>(null);
   const [editAvanceCuadros, setEditAvanceCuadros] = useState<Record<string, string>>({});
   const [editLineas, setEditLineas] = useState<LineaForm[]>([]);
+  const [editComentario, setEditComentario] = useState("");
 
   function cargar() {
     setCargando(true);
@@ -186,6 +188,7 @@ export default function Actividades() {
     setRegistrando(a.id);
     setFechaReal(hoyISO());
     setAvanceCuadros({});
+    setComentario("");
     const ultimo = a.realizadas[0];
     setLineas(ultimo ? lineasDesdeExistentes(ultimo.lineas) : [lineaVacia(a.actividad.tipoRecurso === "mixta" ? "gente" : a.actividad.tipoRecurso)]);
   }
@@ -228,7 +231,7 @@ export default function Actividades() {
     if (resumen && !confirm(resumen)) return;
 
     try {
-      await api.post(`/actividades/${a.id}/avance`, { fechaReal, cuadros, lineas: lineasParaEnviar(lineas) });
+      await api.post(`/actividades/${a.id}/avance`, { fechaReal, cuadros, lineas: lineasParaEnviar(lineas), comentario: comentario.trim() || undefined });
       setRegistrando(null);
       cargar();
     } catch (err) {
@@ -242,6 +245,7 @@ export default function Actividades() {
     for (const c of r.cuadros) mapa[c.cuadroId] = c.hectareas;
     setEditAvanceCuadros(mapa);
     setEditLineas(lineasDesdeExistentes(r.lineas));
+    setEditComentario(r.comentario ?? "");
   }
 
   async function confirmarEditar(a: ActividadProgramada, realizadaId: string) {
@@ -257,7 +261,7 @@ export default function Actividades() {
       return;
     }
     try {
-      await api.patch(`/actividades/avance/${realizadaId}`, { cuadros, lineas: lineasParaEnviar(editLineas) });
+      await api.patch(`/actividades/avance/${realizadaId}`, { cuadros, lineas: lineasParaEnviar(editLineas), comentario: editComentario.trim() || undefined });
       setEditando(null);
       cargar();
     } catch (err) {
@@ -424,6 +428,16 @@ export default function Actividades() {
                     personal={personal}
                   />
 
+                  <label className="field" style={{ marginTop: 10 }}>
+                    Comentario (opcional)
+                    <textarea
+                      rows={2}
+                      value={comentario}
+                      onChange={(e) => setComentario(e.target.value)}
+                      placeholder="Alguna observación de este reporte…"
+                    />
+                  </label>
+
                   <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
                     <button className="btn-primary" onClick={() => confirmarRegistrar(a)}>
                       Guardar
@@ -444,6 +458,7 @@ export default function Actividades() {
                         <th>Fecha</th>
                         <th>Líneas</th>
                         <th>Cuadros avanzados</th>
+                        <th>Comentario</th>
                         <th></th>
                       </tr>
                     </thead>
@@ -482,6 +497,7 @@ export default function Actividades() {
                               )}
                             </td>
                             <td>{r.cuadros.map((c) => `${c.cuadro.nombre} (${c.hectareas} ha)`).join(", ") || "—"}</td>
+                            <td>{r.comentario || "—"}</td>
                             <td>
                               {editando !== r.id && (
                                 <button className="btn-secondary" onClick={() => abrirEditar(r)}>
@@ -492,7 +508,7 @@ export default function Actividades() {
                           </tr>
                           {editando === r.id && (
                             <tr>
-                              <td colSpan={4}>
+                              <td colSpan={5}>
                                 <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 8 }}>
                                   {a.cuadros.map(({ cuadro }) => {
                                     const restan = a.restantesPorCuadro?.[cuadro.id];
@@ -535,6 +551,11 @@ export default function Actividades() {
                                   implementos={implementos}
                                   personal={personal}
                                 />
+
+                                <label className="field" style={{ marginTop: 10 }}>
+                                  Comentario (opcional)
+                                  <textarea rows={2} value={editComentario} onChange={(e) => setEditComentario(e.target.value)} />
+                                </label>
 
                                 <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
                                   <button className="btn-primary" onClick={() => confirmarEditar(a, r.id)}>

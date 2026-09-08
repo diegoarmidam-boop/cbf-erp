@@ -600,6 +600,7 @@ export interface RegistrarRealizadaInput {
   cuadros: CuadroAvanceInput[];
   lineas: LineaRealizadaInput[];
   casoExtraordinario?: boolean;
+  comentario?: string;
 }
 
 /**
@@ -743,6 +744,7 @@ export async function registrarRealizada(aplicacionId: string, input: RegistrarR
         aplicacionId,
         fechaReal: new Date(input.fechaReal),
         registradoPorId,
+        comentario: input.comentario,
         cuadros: { create: input.cuadros.map((c) => ({ cuadroId: c.cuadroId, hectareas: c.hectareas })) },
       },
     });
@@ -822,6 +824,7 @@ async function crearLineasYNomina(
 export interface EditarRealizadaInput {
   cuadros: CuadroAvanceInput[];
   lineas: LineaRealizadaInput[];
+  comentario?: string;
 }
 
 /**
@@ -866,6 +869,7 @@ export async function editarRealizada(realizadaId: string, input: EditarRealizad
     await tx.aplicacionRealizadaCuadro.createMany({
       data: input.cuadros.map((c) => ({ realizadaId, cuadroId: c.cuadroId, hectareas: c.hectareas })),
     });
+    await tx.aplicacionRealizada.update({ where: { id: realizadaId }, data: { comentario: input.comentario } });
 
     await borrarUsoDiarioDeLineasTx(tx, lineaIdsAnteriores);
     await tx.registroNomina.deleteMany({ where: { origen: "automatico_aplicacion", referenciaOrigenId: realizadaId } });

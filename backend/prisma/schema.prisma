@@ -1375,6 +1375,10 @@ model ActividadRealizada {
   actividadProgramada   ActividadProgramada @relation(fields: [actividadProgramadaId], references: [id])
   fechaReal             DateTime            @db.Date
   registradoPorId       String
+  // Comentario libre por reporte (8-sep-2026) — nunca obligatorio, lo
+  // captura quien reporta el avance. Editable junto con el resto del
+  // reporte (mismo endpoint de editar).
+  comentario            String?             @db.Text
 
   cuadros ActividadRealizadaCuadro[]
   lineas  ActividadRealizadaLinea[]
@@ -1600,6 +1604,8 @@ model AplicacionRealizada {
   aplicacion      Aplicacion @relation(fields: [aplicacionId], references: [id])
   fechaReal       DateTime   @db.Date
   registradoPorId String
+  // Comentario libre por reporte (8-sep-2026) — ver ActividadRealizada.comentario.
+  comentario      String?    @db.Text
 
   cuadros AplicacionRealizadaCuadro[]
   lineas  AplicacionRealizadaLinea[]
@@ -1726,6 +1732,8 @@ model FertilizacionGranularRealizada {
   horas           Decimal               @db.Decimal(6, 2)
   fechaReal       DateTime              @db.Date
   registradoPorId String
+  // Comentario libre por reporte (8-sep-2026) — ver ActividadRealizada.comentario.
+  comentario      String?               @db.Text
 
   cuadros FertilizacionGranularRealizadaCuadro[]
 
@@ -1878,6 +1886,10 @@ model RiegoRegistroDiario {
   // medidor/inyector, ver RiegoRegistroDiarioProducto.
   fertirriegoConfirmado Boolean      @default(false)
   motivoNoAplicado      String? // obligatorio si había fertirriego programado/entregado ese día y no se metió (9.6)
+  // Comentario libre (8-sep-2026) — separado a propósito de motivoNoAplicado:
+  // ese es una justificación obligatoria de una excepción, este es una nota
+  // opcional que puede existir cualquier día, se haya metido o no el fertirriego.
+  comentario            String?      @db.Text
   capturadoPorId        String
 
   productos RiegoRegistroDiarioProducto[]

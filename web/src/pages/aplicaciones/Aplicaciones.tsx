@@ -210,11 +210,13 @@ export default function Aplicaciones() {
   const [fechaReal, setFechaReal] = useState(hoyISO());
   const [avanceCuadros, setAvanceCuadros] = useState<Record<string, string>>({});
   const [lineas, setLineas] = useState<LineaForm[]>([lineaVacia()]);
+  const [comentario, setComentario] = useState("");
 
   // ---- Editar reporte existente ----
   const [editando, setEditando] = useState<string | null>(null);
   const [editAvanceCuadros, setEditAvanceCuadros] = useState<Record<string, string>>({});
   const [editLineas, setEditLineas] = useState<LineaForm[]>([]);
+  const [editComentario, setEditComentario] = useState("");
 
   // Las "vencida" (liberadas) y "cancelada" no se muestran por default —
   // se quedaban en la lista para siempre (31-ago-2026, reportado por
@@ -439,6 +441,7 @@ export default function Aplicaciones() {
     setRegistrando(a.id);
     setFechaReal(hoyISO());
     setAvanceCuadros({});
+    setComentario("");
     const ultimo = a.realizadas[0];
     setLineas(ultimo ? lineasDesdeExistentes(ultimo.lineas) : [lineaVacia()]);
   }
@@ -492,7 +495,7 @@ export default function Aplicaciones() {
     if (resumen && !confirm(resumen)) return;
 
     try {
-      await api.post(`/aplicaciones/${a.id}/realizada`, { fechaReal, cuadros, lineas: lineasParaEnviar(lineas) });
+      await api.post(`/aplicaciones/${a.id}/realizada`, { fechaReal, cuadros, lineas: lineasParaEnviar(lineas), comentario: comentario.trim() || undefined });
       setRegistrando(null);
       cargar();
     } catch (err) {
@@ -506,6 +509,7 @@ export default function Aplicaciones() {
     for (const c of r.cuadros) mapa[c.cuadroId] = c.hectareas;
     setEditAvanceCuadros(mapa);
     setEditLineas(lineasDesdeExistentes(r.lineas));
+    setEditComentario(r.comentario ?? "");
     void a;
   }
 
@@ -522,7 +526,7 @@ export default function Aplicaciones() {
       return;
     }
     try {
-      await api.patch(`/aplicaciones/realizada/${realizadaId}`, { cuadros, lineas: lineasParaEnviar(editLineas) });
+      await api.patch(`/aplicaciones/realizada/${realizadaId}`, { cuadros, lineas: lineasParaEnviar(editLineas), comentario: editComentario.trim() || undefined });
       setEditando(null);
       cargar();
     } catch (err) {
@@ -982,6 +986,16 @@ export default function Aplicaciones() {
 
                   <LineasEditor lineas={lineas} setLineas={setLineas} tractores={tractores} implementos={implementos} personal={personal} />
 
+                  <label className="field" style={{ marginTop: 10 }}>
+                    Comentario (opcional)
+                    <textarea
+                      rows={2}
+                      value={comentario}
+                      onChange={(e) => setComentario(e.target.value)}
+                      placeholder="Alguna observación de este reporte…"
+                    />
+                  </label>
+
                   <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
                     <button className="btn-primary" onClick={() => confirmarRegistrar(a)}>
                       Guardar
@@ -1002,6 +1016,7 @@ export default function Aplicaciones() {
                         <th>Fecha</th>
                         <th>Líneas</th>
                         <th>Cuadros avanzados</th>
+                        <th>Comentario</th>
                         <th></th>
                       </tr>
                     </thead>
@@ -1021,6 +1036,7 @@ export default function Aplicaciones() {
                                 .join(" + ") || "—"}
                             </td>
                             <td>{r.cuadros.map((c) => `${c.cuadro.nombre} (${c.hectareas} ha)`).join(", ") || "—"}</td>
+                            <td>{r.comentario || "—"}</td>
                             <td>
                               {editando !== r.id && (
                                 <button className="btn-secondary" onClick={() => abrirEditar(a, r)}>
@@ -1031,7 +1047,7 @@ export default function Aplicaciones() {
                           </tr>
                           {editando === r.id && (
                             <tr>
-                              <td colSpan={4}>
+                              <td colSpan={5}>
                                 <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 8 }}>
                                   {a.cuadros.map(({ cuadro }) => {
                                     const restan = a.restantesPorCuadro?.[cuadro.id];
@@ -1067,6 +1083,11 @@ export default function Aplicaciones() {
                                 </div>
 
                                 <LineasEditor lineas={editLineas} setLineas={setEditLineas} tractores={tractores} implementos={implementos} personal={personal} />
+
+                                <label className="field" style={{ marginTop: 10 }}>
+                                  Comentario (opcional)
+                                  <textarea rows={2} value={editComentario} onChange={(e) => setEditComentario(e.target.value)} />
+                                </label>
 
                                 <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
                                   <button className="btn-primary" onClick={() => confirmarEditar(a, r.id)}>

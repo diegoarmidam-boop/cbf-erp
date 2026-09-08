@@ -72,6 +72,7 @@ const registrarSchema = z.object({
   fertirriegoConfirmado: z.boolean(),
   cantidadesAplicadas: z.array(cantidadProductoSchema).optional(),
   motivoNoAplicado: z.string().optional(),
+  comentario: z.string().optional(),
 });
 
 riegoRouter.post("/:seccionId/:fecha", requirePermission("riego", "capturar"), async (req, res) => {

@@ -71,6 +71,10 @@ export interface RegistrarRiegoInput {
   fertirriegoConfirmado: boolean;
   cantidadesAplicadas?: CantidadProductoInput[];
   motivoNoAplicado?: string;
+  // Comentario libre (8-sep-2026) — separado de motivoNoAplicado a propósito:
+  // ese es obligatorio solo cuando no se metió el fertirriego, este puede
+  // existir cualquier día, se haya aplicado o no.
+  comentario?: string;
 }
 
 /**
@@ -134,6 +138,7 @@ export async function registrarRiegoDiario(seccionId: string, fecha: string, inp
         horas: input.horas,
         fertirriegoConfirmado: input.fertirriegoConfirmado,
         motivoNoAplicado: motivoNoAplicado ?? null,
+        comentario: input.comentario,
         capturadoPorId,
       },
       create: {
@@ -142,6 +147,7 @@ export async function registrarRiegoDiario(seccionId: string, fecha: string, inp
         horas: input.horas,
         fertirriegoConfirmado: input.fertirriegoConfirmado,
         motivoNoAplicado,
+        comentario: input.comentario,
         capturadoPorId,
       },
     });

@@ -78,11 +78,13 @@ export default function Granular() {
   const [horas, setHoras] = useState("");
   const [fechaReal, setFechaReal] = useState(hoyISO());
   const [avanceCuadros, setAvanceCuadros] = useState<Record<string, string>>({});
+  const [comentario, setComentario] = useState("");
 
   const [editando, setEditando] = useState<string | null>(null);
   const [editQuien, setEditQuien] = useState("");
   const [editHoras, setEditHoras] = useState("");
   const [editAvanceCuadros, setEditAvanceCuadros] = useState<Record<string, string>>({});
+  const [editComentario, setEditComentario] = useState("");
 
   // Las "vencida" (liberadas) y "cancelada" no se muestran por default —
   // se quedaban en la lista para siempre (31-ago-2026, reportado por
@@ -212,6 +214,7 @@ export default function Granular() {
     setHoras(ultimo ? ultimo.horas : "");
     setFechaReal(hoyISO());
     setAvanceCuadros({});
+    setComentario("");
     const grupos = await api.get<GrupoPago[]>("/fertilizantes/granular/grupos");
     setGruposHuerta(grupos);
   }
@@ -241,6 +244,7 @@ export default function Granular() {
         horas: Number(horas),
         fechaReal,
         cuadros,
+        comentario: comentario.trim() || undefined,
       });
       setRegistrando(null);
       cargar();
@@ -256,6 +260,7 @@ export default function Granular() {
     const mapa: Record<string, string> = {};
     for (const c of r.cuadros) mapa[c.cuadroId] = c.hectareas;
     setEditAvanceCuadros(mapa);
+    setEditComentario(r.comentario ?? "");
   }
 
   async function confirmarEditar(realizadaId: string) {
@@ -276,6 +281,7 @@ export default function Granular() {
         grupoId: tipo === "g" ? refId : undefined,
         horas: Number(editHoras),
         cuadros,
+        comentario: editComentario.trim() || undefined,
       });
       setEditando(null);
       cargar();
@@ -609,6 +615,15 @@ export default function Granular() {
                       </label>
                     ))}
                   </div>
+                  <label className="field" style={{ marginBottom: 10 }}>
+                    Comentario (opcional)
+                    <textarea
+                      rows={2}
+                      value={comentario}
+                      onChange={(e) => setComentario(e.target.value)}
+                      placeholder="Alguna observación de este reporte…"
+                    />
+                  </label>
                   <div style={{ display: "flex", gap: 8 }}>
                     <button className="btn-primary" onClick={() => confirmarRegistrar(f.id)}>
                       Guardar
@@ -629,6 +644,7 @@ export default function Granular() {
                         <th>Fecha</th>
                         <th>Horas</th>
                         <th>Cuadros avanzados</th>
+                        <th>Comentario</th>
                         <th></th>
                       </tr>
                     </thead>
@@ -639,6 +655,7 @@ export default function Granular() {
                             <td>{formatearFecha(r.fechaReal)}</td>
                             <td>{r.horas}</td>
                             <td>{r.cuadros.map((c) => `${c.cuadro.nombre} (${c.hectareas} ha)`).join(", ") || "—"}</td>
+                            <td>{r.comentario || "—"}</td>
                             <td>
                               {editando !== r.id && (
                                 <button className="btn-secondary" onClick={() => abrirEditar(r)}>
@@ -649,7 +666,7 @@ export default function Granular() {
                           </tr>
                           {editando === r.id && (
                             <tr>
-                              <td colSpan={4}>
+                              <td colSpan={5}>
                                 <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap", marginBottom: 8 }}>
                                   <label className="field">
                                     Quién la hizo
@@ -706,6 +723,10 @@ export default function Granular() {
                                     </label>
                                   ))}
                                 </div>
+                                <label className="field" style={{ marginBottom: 8 }}>
+                                  Comentario (opcional)
+                                  <textarea rows={2} value={editComentario} onChange={(e) => setEditComentario(e.target.value)} />
+                                </label>
                                 <div style={{ display: "flex", gap: 8 }}>
                                   <button className="btn-primary" onClick={() => confirmarEditar(r.id)}>
                                     Guardar cambios
