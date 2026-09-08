@@ -2,10 +2,12 @@ import {
   calcularCantidadTotalFertirriego,
   formatearCantidadProductoFertirriego,
   ordenarPorNombreNumerico,
+  riegosEnRangoDiasSemana,
   riegosEnVentana,
   type ModoDosisFertirriego,
 } from "@cbf/shared";
-import type { FrecuenciaFertirriego, Prisma, Rol } from "@prisma/client";
+import { Prisma } from "@prisma/client";
+import type { FrecuenciaFertirriego, Rol } from "@prisma/client";
 import { prisma } from "../../core/db.js";
 import {
   ajustarCantidadProducto,
@@ -57,13 +59,22 @@ export interface ProgramarFertirriegoInput {
   huertaId: string;
   seccionIds: string[];
   productos: ProductoFertirriegoInput[];
-  frecuencia: "diario" | "cada_2_dias" | "cada_3_dias" | "patron_2_1";
+  frecuencia: "diario" | "cada_2_dias" | "cada_3_dias" | "patron_2_1" | "dias_semana";
+  // Solo cuando frecuencia = "dias_semana" (Prioridad 5, 7-sep-2026):
+  // 0=Domingo..6=Sábado, mínimo 1 día marcado.
+  diasSemana?: number[];
   fechaInicio: string;
   fechaFin: string;
   // Recetario de Fertirriego (20-ago-2026, corregido 27-ago-2026 — modelo
   // propio RecetaFertirriego, ya no el Receta compartido de Aplicaciones).
   recetaId?: string;
   actualizarRecetaOriginal?: boolean;
+}
+
+export class DiasSemanaVacioError extends Error {
+  constructor() {
+    super('Frecuencia "Días específicos de la semana": marca al menos un día.');
+  }
 }
 
 export class RolNoPuedeAjustarRecetaFertirriegoError extends Error {
@@ -112,6 +123,9 @@ export async function programarFertirriego(input: ProgramarFertirriegoInput, cre
   if (!input.productos || input.productos.length === 0) {
     throw new Error("Elige al menos un producto.");
   }
+  if (input.frecuencia === "dias_semana" && (!input.diasSemana || input.diasSemana.length === 0)) {
+    throw new DiasSemanaVacioError();
+  }
   const productosResueltos = await resolverIngredientesFertirriego(input.productos);
   const productos = await prisma.producto.findMany({ where: { id: { in: productosResueltos.map((p) => p.productoId) } } });
   for (const p of productos) {
@@ -145,7 +159,7 @@ export async function programarFertirriego(input: ProgramarFertirriegoInput, cre
   // "por ocasión" (`cantidadTotalCalculada`) se sigue guardando tal cual,
   // solo cambia para qué se usa: guía de cuánto va en el tanque cada
   // riego (Riego 9.6, Orden de Fertirriego), ya no para comprometer stock.
-  const riegosCampania = calcularRiegosEnCampania({ frecuencia: input.frecuencia, fechaInicio: fechaRef, fechaFin: fechaFinRef });
+  const riegosCampania = calcularRiegosEnCampania({ frecuencia: input.frecuencia, diasSemana: input.diasSemana ?? null, fechaInicio: fechaRef, fechaFin: fechaFinRef });
 
   return prisma.$transaction(async (tx) => {
     const fertirriego = await tx.fertirriegoProgramacion.create({
@@ -153,6 +167,7 @@ export async function programarFertirriego(input: ProgramarFertirriegoInput, cre
         huertaId: input.huertaId,
         recetaId: input.recetaId,
         frecuencia: input.frecuencia,
+        diasSemana: input.frecuencia === "dias_semana" ? input.diasSemana : undefined,
         fechaInicio: fechaRef,
         fechaFin: fechaFinRef,
         creadoPorId,
@@ -208,6 +223,9 @@ export async function editarFertirriegoProgramada(id: string, input: Omit<Progra
   if (!input.productos || input.productos.length === 0) {
     throw new Error("Elige al menos un producto.");
   }
+  if (input.frecuencia === "dias_semana" && (!input.diasSemana || input.diasSemana.length === 0)) {
+    throw new DiasSemanaVacioError();
+  }
 
   const fertirriego = await prisma.fertirriegoProgramacion.findUniqueOrThrow({
     where: { id },
@@ -251,7 +269,7 @@ export async function editarFertirriegoProgramada(id: string, input: Omit<Progra
   // riegos ANTES del cambio (por si frecuencia/fechas también cambiaron) y
   // el de DESPUÉS, para comparar campaña completa contra campaña completa.
   const riegosCampaniaAnterior = calcularRiegosEnCampania(fertirriego);
-  const riegosCampaniaNueva = calcularRiegosEnCampania({ frecuencia: input.frecuencia, fechaInicio: fechaRef, fechaFin: fechaFinRef });
+  const riegosCampaniaNueva = calcularRiegosEnCampania({ frecuencia: input.frecuencia, diasSemana: input.diasSemana ?? null, fechaInicio: fechaRef, fechaFin: fechaFinRef });
 
   return prisma.$transaction(async (tx) => {
     const productosAnteriores = new Map(fertirriego.productos.map((p) => [p.productoId, p]));
@@ -292,6 +310,7 @@ export async function editarFertirriegoProgramada(id: string, input: Omit<Progra
       data: {
         recetaId: input.recetaId ?? null,
         frecuencia: input.frecuencia,
+        diasSemana: input.frecuencia === "dias_semana" ? input.diasSemana : Prisma.JsonNull,
         fechaInicio: fechaRef,
         fechaFin: fechaFinRef,
       },
@@ -306,6 +325,7 @@ type FertirriegoBase = {
   estado: string;
   fechaCreacion: Date;
   frecuencia: FrecuenciaFertirriego;
+  diasSemana: Prisma.JsonValue;
   fechaInicio: Date;
   fechaFin: Date;
   secciones: { seccionId: string }[];
@@ -337,7 +357,12 @@ async function fertirriegoTieneAvanceRegistrado(seccionIds: string[], fechaInici
  * es la base real de cuánto se compromete/pide a Almacén y cuánto se
  * entrega, no solo lo que se muestra en pantalla).
  */
-export function calcularRiegosEnCampania(fertirriego: Pick<FertirriegoBase, "frecuencia" | "fechaInicio" | "fechaFin">): number {
+export function calcularRiegosEnCampania(fertirriego: Pick<FertirriegoBase, "frecuencia" | "diasSemana" | "fechaInicio" | "fechaFin">): number {
+  // "Días específicos de la semana" (Prioridad 5, 7-sep-2026) no es un
+  // offset parejo — se cuenta por fecha real, no por riegosEnVentana.
+  if (fertirriego.frecuencia === "dias_semana") {
+    return riegosEnRangoDiasSemana(fertirriego.fechaInicio, fertirriego.fechaFin, (fertirriego.diasSemana as number[] | null) ?? []);
+  }
   const diasCampania = Math.round((fertirriego.fechaFin.getTime() - fertirriego.fechaInicio.getTime()) / 86_400_000) + 1;
   return riegosEnVentana(fertirriego.frecuencia, diasCampania);
 }

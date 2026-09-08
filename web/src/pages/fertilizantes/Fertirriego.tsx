@@ -23,7 +23,30 @@ const ETIQUETAS_FRECUENCIA: Record<FrecuenciaFertirriego, string> = {
   cada_2_dias: "Cada 2 días",
   cada_3_dias: "Cada 3 días",
   patron_2_1: "2 sí, 1 no",
+  dias_semana: "Días específicos de la semana",
 };
+
+// 0=Domingo..6=Sábado (Prioridad 5, 7-sep-2026).
+const DIAS_SEMANA_CHECKBOX: { valor: number; etiqueta: string }[] = [
+  { valor: 1, etiqueta: "Lunes" },
+  { valor: 2, etiqueta: "Martes" },
+  { valor: 3, etiqueta: "Miércoles" },
+  { valor: 4, etiqueta: "Jueves" },
+  { valor: 5, etiqueta: "Viernes" },
+  { valor: 6, etiqueta: "Sábado" },
+  { valor: 0, etiqueta: "Domingo" },
+];
+
+function etiquetaFrecuencia(f: FertirriegoProgramacion): string {
+  if (f.frecuencia === "dias_semana" && f.diasSemana) {
+    return f.diasSemana
+      .slice()
+      .sort((a, b) => a - b)
+      .map((d) => DIAS_SEMANA_CHECKBOX.find((c) => c.valor === d)?.etiqueta ?? d)
+      .join(", ");
+  }
+  return ETIQUETAS_FRECUENCIA[f.frecuencia];
+}
 
 function tagEstado(estado: string) {
   if (estado === "entregada") return "tag-success";
@@ -67,6 +90,8 @@ export default function Fertirriego() {
   // — ya no hay litros de agua/ha compartidos, ver Fertilizantes 9.5).
   const [productosForm, setProductosForm] = useState<ProductoFertirriegoForm[]>([productoFertirriegoFormVacio()]);
   const [frecuencia, setFrecuencia] = useState<FrecuenciaFertirriego>("diario");
+  // "Días específicos de la semana" (Prioridad 5, 7-sep-2026) — 0=Domingo..6=Sábado.
+  const [diasSemana, setDiasSemana] = useState<number[]>([]);
   const [fechaInicio, setFechaInicio] = useState(hoyISO());
   const [fechaFin, setFechaFin] = useState(hoyISO());
   // Editar programación ya guardada (1.9, 31-ago-2026): permitido mientras
@@ -174,6 +199,11 @@ export default function Fertirriego() {
     setFechaInicio(hoyISO());
     setFechaFin(hoyISO());
     setRecetaId("");
+    setDiasSemana([]);
+  }
+
+  function alternarDiaSemana(dia: number) {
+    setDiasSemana((prev) => (prev.includes(dia) ? prev.filter((d) => d !== dia) : [...prev, dia]));
   }
 
   async function enviarProgramacion(actualizarRecetaOriginal?: boolean) {
@@ -183,6 +213,7 @@ export default function Fertirriego() {
       seccionIds,
       productos: productosForm.map((p) => ({ ingredienteActivoNombre: p.ingredienteActivoNombre, dosisValor: Number(p.dosisValor), dosisUnidad: p.dosisUnidad })),
       frecuencia,
+      diasSemana: frecuencia === "dias_semana" ? diasSemana : undefined,
       fechaInicio,
       fechaFin,
       recetaId: recetaId || undefined,
@@ -204,6 +235,10 @@ export default function Fertirriego() {
 
   function programar(e: FormEvent) {
     e.preventDefault();
+    if (frecuencia === "dias_semana" && diasSemana.length === 0) {
+      setError('Frecuencia "Días específicos de la semana": marca al menos un día.');
+      return;
+    }
     if (recetaId && puedeAjustarReceta && huboDesvioDeReceta()) {
       setConfirmandoDesvioReceta(true);
       return;
@@ -217,6 +252,7 @@ export default function Fertirriego() {
     setSeccionIds(f.secciones.map((s) => s.seccion.id));
     setProductosForm(f.productos.map((p) => ({ ingredienteActivoNombre: p.producto.ingredienteActivo ?? "", dosisValor: p.dosisValor, dosisUnidad: p.dosisUnidad })));
     setFrecuencia(f.frecuencia);
+    setDiasSemana(f.diasSemana ?? []);
     setFechaInicio(f.fechaInicio.slice(0, 10));
     setFechaFin(f.fechaFin.slice(0, 10));
     setRecetaId(f.recetaId ?? "");
@@ -408,6 +444,16 @@ export default function Fertirriego() {
               </select>
             </label>
           </div>
+          {frecuencia === "dias_semana" && (
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              {DIAS_SEMANA_CHECKBOX.map((d) => (
+                <label key={d.valor} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 13 }}>
+                  <input type="checkbox" checked={diasSemana.includes(d.valor)} onChange={() => alternarDiaSemana(d.valor)} />
+                  {d.etiqueta}
+                </label>
+              ))}
+            </div>
+          )}
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
             <label className="field">
               Fecha inicio
@@ -476,7 +522,7 @@ export default function Fertirriego() {
                     </div>
                   ))}
                   <div style={{ fontSize: 12, color: "var(--ink-soft)" }}>
-                    {ETIQUETAS_FRECUENCIA[f.frecuencia]} · {formatearFecha(f.fechaInicio)} a {formatearFecha(f.fechaFin)}
+                    {etiquetaFrecuencia(f)} · {formatearFecha(f.fechaInicio)} a {formatearFecha(f.fechaFin)}
                     {f.riegosEnCampania != null && ` · ${f.riegosEnCampania} riegos en la campaña`}
                   </div>
                 </div>

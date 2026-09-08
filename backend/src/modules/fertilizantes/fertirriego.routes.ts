@@ -176,7 +176,9 @@ const programarSchema = z.object({
   huertaId: z.string().min(1),
   seccionIds: z.array(z.string().min(1)).min(1),
   productos: z.array(productoFertirriegoSchema).min(1),
-  frecuencia: z.enum(["diario", "cada_2_dias", "cada_3_dias", "patron_2_1"]),
+  frecuencia: z.enum(["diario", "cada_2_dias", "cada_3_dias", "patron_2_1", "dias_semana"]),
+  // Solo cuando frecuencia = "dias_semana" (Prioridad 5, 7-sep-2026): 0=Domingo..6=Sábado.
+  diasSemana: z.array(z.number().int().min(0).max(6)).min(1).optional(),
   fechaInicio: z.string(),
   fechaFin: z.string(),
   recetaId: z.string().optional(),

@@ -1738,6 +1738,7 @@ enum FrecuenciaFertirriego {
   cada_2_dias
   cada_3_dias
   patron_2_1
+  dias_semana // Prioridad 5, 7-sep-2026 — ver FertirriegoProgramacion.diasSemana
 }
 
 enum ModoDosisFertirriego {
@@ -1792,6 +1793,10 @@ model FertirriegoProgramacion {
   recetaId      String?
   receta        RecetaFertirriego?    @relation(fields: [recetaId], references: [id])
   frecuencia    FrecuenciaFertirriego
+  // Solo cuando frecuencia = dias_semana (Prioridad 5, 7-sep-2026): arreglo
+  // de días marcados, mismo criterio que Date.getDay() nativo de JS
+  // (0=Domingo..6=Sábado). Null en las demás Frecuencias.
+  diasSemana    Json?
   fechaInicio   DateTime              @db.Date
   fechaFin      DateTime              @db.Date
   estado        EstadoAplicacion      @default(programada)

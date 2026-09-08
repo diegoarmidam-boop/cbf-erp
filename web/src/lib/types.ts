@@ -1101,7 +1101,7 @@ export interface FertilizacionGranular {
   porcentajeAvance?: number;
 }
 
-export type FrecuenciaFertirriego = "diario" | "cada_2_dias" | "cada_3_dias" | "patron_2_1";
+export type FrecuenciaFertirriego = "diario" | "cada_2_dias" | "cada_3_dias" | "patron_2_1" | "dias_semana";
 
 export interface RiegoRegistroDiarioProducto {
   id: string;
@@ -1193,6 +1193,8 @@ export interface FertirriegoProgramacion {
   recetaId: string | null;
   receta: RecetaFertirriego | null;
   frecuencia: FrecuenciaFertirriego;
+  // Solo cuando frecuencia = "dias_semana" (Prioridad 5, 7-sep-2026): 0=Domingo..6=Sábado.
+  diasSemana: number[] | null;
   fechaInicio: string;
   fechaFin: string;
   estado: EstadoAplicacion;

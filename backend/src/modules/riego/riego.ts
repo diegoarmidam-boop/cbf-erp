@@ -1,4 +1,4 @@
-import { ordenarPorNombreNumerico } from "@cbf/shared";
+import { diaMarcadoDiasSemana, ordenarPorNombreNumerico } from "@cbf/shared";
 import { prisma } from "../../core/db.js";
 import type { TransactionClient } from "../../core/db.js";
 
@@ -30,7 +30,17 @@ async function fertirriegoVigente(tx: TransactionClient | typeof prisma, seccion
     include: { fertirriego: { include: { productos: { include: { producto: true } } } } },
     orderBy: { fertirriego: { fechaCreacion: "desc" } },
   });
-  return vinculo?.fertirriego ?? null;
+  const fertirriego = vinculo?.fertirriego ?? null;
+  if (!fertirriego) return null;
+  // "Días específicos de la semana" (Prioridad 5.4, 7-sep-2026): el
+  // recordatorio/candado de Riego solo se dispara en los días marcados, no
+  // todos los días del rango — a diferencia de las demás Frecuencias, que
+  // siguen sin filtrar por día (conviven, no se tocó ese comportamiento).
+  if (fertirriego.frecuencia === "dias_semana") {
+    const diasSemana = (fertirriego.diasSemana as number[] | null) ?? [];
+    if (!diaMarcadoDiasSemana(fecha, diasSemana)) return null;
+  }
+  return fertirriego;
 }
 
 /** Para que la pantalla sepa si ofrecer la casilla "¿se metió el fertirriego?" (9.6), y con qué producto(s). */

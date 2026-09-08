@@ -6,7 +6,9 @@ import {
   formatearCantidadProductoFertirriego,
   mlSolucionPorPlanta,
   plantasTotalesCuadro,
+  riegosEnRangoDiasSemana,
   riegosEnSemana,
+  riegosEnSemanaDiasSemana,
   riegosEnVentana,
   semanaDeFecha,
 } from "@cbf/shared";
@@ -22,6 +24,8 @@ const ETIQUETA_FRECUENCIA: Record<string, string> = {
   cada_3_dias: "Cada 3 días",
   patron_2_1: "2 sí, 1 no",
 };
+// 0=Domingo..6=Sábado, mismo criterio que Date.getDay() (Prioridad 5, 7-sep-2026).
+const NOMBRES_DIA_SEMANA = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
 const ETIQUETA_UNIDAD_DOSIS: Record<string, string> = { ml_l: "mL/L", g_l: "g/L", kg_l: "kg/L" };
 const ETIQUETA_UNIDAD_DOSIS_FERTIRRIEGO: Record<string, string> = { kg_ha: "kg/ha", l_ha: "L/ha", g_ha: "g/ha" };
 
@@ -165,9 +169,22 @@ export async function construirOrdenFertirriego(fertirriegoId: string) {
   valvulas.sort((a, b) => compararNombreNumerico(a.nombre, b.nombre));
   const hectareasTotales = valvulas.reduce((s, v) => s + v.hectareas, 0);
 
-  const riegos = riegosEnSemana(fertirriego.frecuencia as "diario" | "cada_2_dias" | "cada_3_dias" | "patron_2_1");
-  const diasCampania = Math.round((fertirriego.fechaFin.getTime() - fertirriego.fechaInicio.getTime()) / 86_400_000) + 1;
-  const riegosCampania = riegosEnVentana(fertirriego.frecuencia as "diario" | "cada_2_dias" | "cada_3_dias" | "patron_2_1", diasCampania);
+  // "Días específicos de la semana" (Prioridad 5, 7-sep-2026) no es un
+  // offset parejo — mismo cálculo que calcularRiegosEnCampania (fertirriego.ts).
+  const diasSemana = (fertirriego.diasSemana as number[] | null) ?? [];
+  const riegos = fertirriego.frecuencia === "dias_semana" ? riegosEnSemanaDiasSemana(diasSemana) : riegosEnSemana(fertirriego.frecuencia);
+  const riegosCampania =
+    fertirriego.frecuencia === "dias_semana"
+      ? riegosEnRangoDiasSemana(fertirriego.fechaInicio, fertirriego.fechaFin, diasSemana)
+      : riegosEnVentana(fertirriego.frecuencia, Math.round((fertirriego.fechaFin.getTime() - fertirriego.fechaInicio.getTime()) / 86_400_000) + 1);
+  const frecuenciaLabel =
+    fertirriego.frecuencia === "dias_semana"
+      ? diasSemana
+          .slice()
+          .sort((a, b) => a - b)
+          .map((d) => NOMBRES_DIA_SEMANA[d])
+          .join(", ")
+      : (ETIQUETA_FRECUENCIA[fertirriego.frecuencia] ?? fertirriego.frecuencia);
 
   // Cantidad de cada producto por válvula: dosis del producto × hectáreas
   // de esa válvula específica (misma fórmula que el total, aplicada con
@@ -199,7 +216,7 @@ export async function construirOrdenFertirriego(fertirriegoId: string) {
       fecha: fechaInicioISO,
       valvulasDelLote: valvulas.length,
       receta: fertirriego.receta?.nombre ?? null,
-      frecuencia: ETIQUETA_FRECUENCIA[fertirriego.frecuencia] ?? fertirriego.frecuencia,
+      frecuencia: frecuenciaLabel,
       riegosEnLaSemana: riegos,
       riegosEnCampania: riegosCampania,
       fechaFinCampania: fertirriego.fechaFin.toISOString().slice(0, 10),
