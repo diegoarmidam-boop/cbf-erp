@@ -33,14 +33,19 @@ const ETIQUETAS_MOVIMIENTO: Record<TipoMovimientoAlmacenCentral, string> = {
   consumo_maquinaria: "Consumo de maquinaria",
 };
 
-type Columna = "categoria" | "ingredienteActivo" | "estado" | "autorizado";
+type Columna = "ingredienteActivo" | "estado" | "autorizado";
 
 const COLUMNAS: { value: Columna; label: string }[] = [
-  { value: "categoria", label: "Categoría" },
   { value: "ingredienteActivo", label: "Ingrediente activo" },
   { value: "estado", label: "Estado" },
   { value: "autorizado", label: "Autorizado" },
 ];
+
+// Chips de Categoría (Prioridad 6.3, 8-sep-2026) — orden fijo pedido por
+// Diego, con etiqueta de despliegue distinta al nombre guardado en el
+// catálogo en 2 casos (mismo registro, solo cambia cómo se ve aquí).
+const ORDEN_CHIPS_CATEGORIA = ["Fertilizante", "Agroquimico", "Combustible", "Refaccion", "Empaque", "Herramientas", "Oficina", "Laboratorio"];
+const ETIQUETA_CHIP_CATEGORIA: Record<string, string> = { Agroquimico: "Agroquímico", Refaccion: "Refacciones" };
 
 interface Filtro {
   columna: Columna;
@@ -115,8 +120,13 @@ export default function Inventario() {
   const [busqueda, setBusqueda] = useState("");
   const [mostrarFiltros, setMostrarFiltros] = useState(false);
   const [filtros, setFiltros] = useState<Filtro[]>([]);
-  const [nuevaColumna, setNuevaColumna] = useState<Columna>("categoria");
+  const [nuevaColumna, setNuevaColumna] = useState<Columna>("ingredienteActivo");
   const [nuevoValor, setNuevoValor] = useState("");
+
+  // Chips de Categoría (6.3/6.5) — filtro principal, siempre visible, no
+  // detrás del botón "Filtros". "" = Todos.
+  const [categoriaChip, setCategoriaChip] = useState("");
+  const [mostrarExistenciaIA, setMostrarExistenciaIA] = useState(true);
 
   const [productoDetalleId, setProductoDetalleId] = useState<string | null>(null);
   const [editandoId, setEditandoId] = useState<string | null>(null);
@@ -178,7 +188,6 @@ export default function Inventario() {
   }
 
   function valoresDeColumna(columna: Columna): string[] {
-    if (columna === "categoria") return listaCategorias.map((c) => c.nombre);
     if (columna === "ingredienteActivo") return ingredientes.items.map((i) => i.nombre);
     if (columna === "estado") return ["activo", "inactivo"];
     return ["si", "no"];
@@ -191,7 +200,6 @@ export default function Inventario() {
   }
 
   function coincideFiltro(p: Producto, f: Filtro): boolean {
-    if (f.columna === "categoria") return p.categoria === f.valor;
     if (f.columna === "ingredienteActivo") return (p.ingredienteActivo ?? "") === f.valor;
     if (f.columna === "estado") return (f.valor === "activo") === p.activo;
     return (f.valor === "si") === p.autorizado;
@@ -200,15 +208,21 @@ export default function Inventario() {
   const productosFiltrados = useMemo(() => {
     const texto = busqueda.trim().toLowerCase();
     return productos.filter((p) => {
+      const coincideCategoria = !categoriaChip || p.categoria === categoriaChip;
       const coincideBusqueda =
         !texto ||
         p.nombreComercial.toLowerCase().includes(texto) ||
         (p.ingredienteActivo ?? "").toLowerCase().includes(texto) ||
         p.categoria.toLowerCase().includes(texto);
       const coincideFiltros = filtros.every((f) => coincideFiltro(p, f));
-      return coincideBusqueda && coincideFiltros;
+      return coincideCategoria && coincideBusqueda && coincideFiltros;
     });
-  }, [productos, busqueda, filtros]);
+  }, [productos, busqueda, filtros, categoriaChip]);
+
+  // Contextual (6.4): la categoría elegida decide si tiene sentido mostrar
+  // el resumen por Ingrediente Activo — "Todos" (sin chip) siempre lo
+  // muestra, ya que agrupa varias categorías, algunas con IA y otras no.
+  const categoriaChipRequiereIA = !categoriaChip || (listaCategorias.find((c) => c.nombre === categoriaChip)?.requiereIngredienteActivo ?? false);
 
   const [grupoDetalle, setGrupoDetalle] = useState<GrupoInventario | null>(null);
 
@@ -222,7 +236,26 @@ export default function Inventario() {
 
   return (
     <div>
-      <ExistenciaAgrupada onVerDetalle={setGrupoDetalle} />
+      {/* Alertas de reorden (6.2) — hasta arriba de todo, antes de cualquier
+          otra cosa. Diego confirmó (8-sep-2026) que "Alertas de reorden
+          inteligentes" todavía no existen en el sistema — se deja el
+          espacio reservado, sin inventar la lógica de stock mínimo/punto de
+          reorden hasta que se defina cómo calcularla. */}
+      <div className="card" style={{ marginBottom: 18, borderStyle: "dashed" }}>
+        <div style={{ fontSize: 13, fontWeight: 700 }}>Alertas de reorden</div>
+        <p style={{ fontSize: 12.5, color: "var(--ink-soft)", margin: "4px 0 0" }}>
+          Todavía no está definido cómo calcular "stock bajo" — este espacio queda reservado para cuando se defina.
+        </p>
+      </div>
+
+      {categoriaChipRequiereIA && (
+        <div style={{ marginBottom: 10 }}>
+          <button className="btn-secondary" onClick={() => setMostrarExistenciaIA((v) => !v)}>
+            {mostrarExistenciaIA ? "Ocultar" : "Mostrar"} Existencia por Ingrediente Activo
+          </button>
+        </div>
+      )}
+      {categoriaChipRequiereIA && mostrarExistenciaIA && <ExistenciaAgrupada onVerDetalle={setGrupoDetalle} />}
 
       {cancelacionesPendientes.length > 0 && (
         <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
@@ -314,6 +347,37 @@ export default function Inventario() {
 
       {error && <div className="tag tag-danger" style={{ display: "block", padding: "8px 12px", marginBottom: 12 }}>{error}</div>}
       {mensaje && <div className="tag tag-success" style={{ display: "block", padding: "8px 12px", marginBottom: 12 }}>{mensaje}</div>}
+
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
+        <button
+          type="button"
+          className={!categoriaChip ? "btn-primary" : "btn-secondary"}
+          style={{ borderRadius: 999, padding: "4px 12px", fontSize: 12.5 }}
+          onClick={() => setCategoriaChip("")}
+        >
+          Todos
+        </button>
+        {[...listaCategorias]
+          .sort((a, b) => {
+            const ia = ORDEN_CHIPS_CATEGORIA.indexOf(a.nombre);
+            const ib = ORDEN_CHIPS_CATEGORIA.indexOf(b.nombre);
+            if (ia === -1 && ib === -1) return a.nombre.localeCompare(b.nombre, "es");
+            if (ia === -1) return 1;
+            if (ib === -1) return -1;
+            return ia - ib;
+          })
+          .map((c) => (
+            <button
+              key={c.id}
+              type="button"
+              className={categoriaChip === c.nombre ? "btn-primary" : "btn-secondary"}
+              style={{ borderRadius: 999, padding: "4px 12px", fontSize: 12.5 }}
+              onClick={() => setCategoriaChip(c.nombre)}
+            >
+              {ETIQUETA_CHIP_CATEGORIA[c.nombre] ?? c.nombre}
+            </button>
+          ))}
+      </div>
 
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 14 }}>
         <label className="field" style={{ maxWidth: 320 }}>
@@ -408,7 +472,7 @@ export default function Inventario() {
                 <td>{p.ingredienteActivo ?? "—"}</td>
                 <td>{p.categoria}</td>
                 <td>
-                  {stock[p.id] != null ? `${formatearNumero(stock[p.id]!)} ${p.unidad}` : "—"}
+                  {formatearNumero(stock[p.id] ?? 0)} {p.unidad}
                   {!!comprometido[p.id] && (
                     <div style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 2 }}>
                       + {formatearNumero(comprometido[p.id]!)} {p.unidad} comprometido
