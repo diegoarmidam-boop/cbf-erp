@@ -6,6 +6,7 @@ import { useCatalogoAbierto } from "../../lib/useCatalogoAbierto";
 import { useHuertas } from "../../lib/useHuertas";
 import type { EstadoLineaPendiente, GrupoPendienteProgramacion, OrdenCompra, PendienteIngredienteActivo, Producto } from "../../lib/types";
 import FechaInput from "../../components/FechaInput";
+import CampoNumerico from "../../components/CampoNumerico";
 import { formatearFecha, formatearInstante } from "../../lib/fecha";
 import { formatearDinero, formatearNumero } from "../../lib/numero";
 import { nombreConMarca } from "../../lib/producto";
@@ -499,16 +500,7 @@ export default function Ordenes() {
                     ))}
                   </select>
                 </label>
-                <label className="field">
-                  Cantidad
-                  <input
-                    type="number"
-                    step="0.001"
-                    value={p.cantidad}
-                    onChange={(e) => actualizarProductoSolicitud(i, { cantidad: e.target.value })}
-                    required
-                  />
-                </label>
+                <CampoNumerico label="Cantidad" value={p.cantidad} onChange={(v) => actualizarProductoSolicitud(i, { cantidad: v })} />
                 {productosSolicitud.length > 1 && (
                   <button type="button" className="btn-secondary" onClick={() => quitarProductoSolicitud(i)}>
                     Quitar
