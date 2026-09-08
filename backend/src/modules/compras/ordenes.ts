@@ -124,8 +124,17 @@ export interface OrigenPendienteIngredienteActivo {
  * confirmar si esta etiqueta es la que quiere o si prefiere otra cosa.
  */
 export async function listarPendientesPorIngredienteActivo() {
+  // "generada" NUNCA es un estado de la necesidad misma (solo pasa por
+  // pendiente_autorizar/pendiente_cotizar/cubierta) — es el estado de la
+  // orden REAL que generarOrdenesDesdeAsignaciones crea aparte al cotizar
+  // (Prioridad 1, 7-sep-2026). Incluirlo aquí colaba esa orden real como si
+  // fuera su propia "necesidad" pendiente: como no tiene `comparacionOrigen`
+  // (esa relación solo existe en la necesidad original), se contaba con su
+  // cantidad completa sin restar nada — bug real, el producto seguía
+  // apareciendo en Pendientes con el 100% aunque ya se hubiera generado la
+  // orden de compra completa.
   const ordenes = await prisma.ordenCompra.findMany({
-    where: { estado: { in: ["pendiente_autorizar", "pendiente_cotizar", "generada", "cubierta"] } },
+    where: { estado: { in: ["pendiente_autorizar", "pendiente_cotizar", "cubierta"] } },
     include: {
       producto: true,
       comparacionOrigen: { include: { cotizaciones: true } },
@@ -346,8 +355,11 @@ export async function resolverProgramacion(referenciaAplicacionId: string | null
  * vistas (por orden, por Ingrediente Activo), no las reemplaza.
  */
 export async function listarPendientesPorProgramacion(): Promise<GrupoPendienteProgramacion[]> {
+  // Mismo bug/corrección que listarPendientesPorIngredienteActivo (Prioridad
+  // 1, 7-sep-2026) — "generada" es exclusivo de la orden real, nunca de la
+  // necesidad.
   const ordenes = await prisma.ordenCompra.findMany({
-    where: { estado: { in: ["pendiente_autorizar", "pendiente_cotizar", "generada", "cubierta"] } },
+    where: { estado: { in: ["pendiente_autorizar", "pendiente_cotizar", "cubierta"] } },
     include: { producto: true, comparacionOrigen: true, centroCosto: true, huertaDestino: true },
     orderBy: { fechaCreacion: "desc" },
   });
