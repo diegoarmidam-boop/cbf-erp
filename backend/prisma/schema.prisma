@@ -1148,8 +1148,19 @@ model OrdenCompra {
   huertaDestinoId String?
   huertaDestino   Huerta?      @relation("OrdenCompraHuertaDestino", fields: [huertaDestinoId], references: [id])
 
+  // Título + multi-producto de Solicitudes manuales (Prioridad 4, 7-sep-2026)
+  // — reemplaza el genérico "Solicitud manual" en las tarjetas de
+  // Pendientes/Órdenes de Compra. Null en automáticas y en manuales
+  // creadas antes de este cambio. Varios productos de la misma solicitud
+  // comparten el mismo `solicitudManualId` (generado una vez por
+  // "Enviar solicitud") — es lo que agrupa sus líneas en una sola tarjeta,
+  // igual que `referenciaAplicacionId` agrupa las automáticas.
+  titulo            String?
+  solicitudManualId String?
+
   @@index([estado])
   @@index([numero])
+  @@index([solicitudManualId])
 }
 
 // Catálogo abierto de Centros de Costo (4.1, 2-sep-2026, Bloque 3 del

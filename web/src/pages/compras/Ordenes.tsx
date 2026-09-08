@@ -76,6 +76,17 @@ function huertaIdDeOrden(o: OrdenCompra): string | null {
   return o.huertaDestino?.id ?? o.huertaOrigen?.id ?? null;
 }
 
+// Título + multi-producto (Prioridad 4, 7-sep-2026) — mismo patrón "+ Otro
+// producto" que Aplicaciones/Fertirriego.
+interface ProductoSolicitudForm {
+  productoId: string;
+  cantidad: string;
+}
+
+function productoSolicitudVacio(): ProductoSolicitudForm {
+  return { productoId: "", cantidad: "" };
+}
+
 /**
  * Reestructura de Compras → Órdenes (Bloque 1-3, 2-sep-2026): 4 pestañas de
  * primer nivel por estado (Pendientes por default, con 3 sub-vistas adentro;
@@ -131,8 +142,8 @@ export default function Ordenes() {
   const idResaltado = searchParams.get("id");
   const refResaltada = useRef<HTMLDivElement>(null);
   const [mostrarForm, setMostrarForm] = useState(false);
-  const [productoId, setProductoId] = useState("");
-  const [cantidadSolicitada, setCantidadSolicitada] = useState("");
+  const [titulo, setTitulo] = useState("");
+  const [productosSolicitud, setProductosSolicitud] = useState<ProductoSolicitudForm[]>([productoSolicitudVacio()]);
 
   // Destino (4.1, 2-sep-2026) — obligatorio en solicitudes manuales: un
   // Centro de Costo del catálogo abierto, o una Huerta específica.
@@ -187,6 +198,18 @@ export default function Ordenes() {
     if (searchParams.get("tab") === "ordenes_de_compra") setTab("ordenes_de_compra");
   }, [searchParams]);
 
+  function actualizarProductoSolicitud(index: number, cambios: Partial<ProductoSolicitudForm>) {
+    setProductosSolicitud((prev) => prev.map((p, i) => (i !== index ? p : { ...p, ...cambios })));
+  }
+
+  function agregarProductoSolicitud() {
+    setProductosSolicitud((prev) => [...prev, productoSolicitudVacio()]);
+  }
+
+  function quitarProductoSolicitud(index: number) {
+    setProductosSolicitud((prev) => (prev.length === 1 ? prev : prev.filter((_, i) => i !== index)));
+  }
+
   async function crearOrden(e: FormEvent) {
     e.preventDefault();
     setError(null);
@@ -194,15 +217,19 @@ export default function Ordenes() {
       setError("Elige un Destino para la solicitud.");
       return;
     }
+    if (productosSolicitud.some((p) => !p.productoId || !p.cantidad)) {
+      setError("Completa producto y cantidad en cada línea (o quítala).");
+      return;
+    }
     try {
       await api.post("/compras/ordenes", {
-        productoId,
-        cantidadSolicitada: Number(cantidadSolicitada),
+        titulo,
+        productos: productosSolicitud.map((p) => ({ productoId: p.productoId, cantidadSolicitada: Number(p.cantidad) })),
         centroCostoId: destinoTipo === "centro_costo" ? centroCostoId : undefined,
         huertaDestinoId: destinoTipo === "huerta" ? huertaDestinoId : undefined,
       });
-      setProductoId("");
-      setCantidadSolicitada("");
+      setTitulo("");
+      setProductosSolicitud([productoSolicitudVacio()]);
       setDestinoTipo("");
       setCentroCostoId("");
       setHuertaDestinoId("");
@@ -446,90 +473,124 @@ export default function Ordenes() {
       </div>
 
       {mostrarForm && (
-        <form onSubmit={crearOrden} className="card" style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap", marginBottom: 18 }}>
+        <form onSubmit={crearOrden} className="card" style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 18 }}>
           <label className="field">
-            Producto (autorizado)
-            <select value={productoId} onChange={(e) => setProductoId(e.target.value)} required>
-              <option value="">Selecciona…</option>
-              {productos.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {nombreConMarca(p)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="field">
-            Cantidad
-            <input type="number" step="0.001" value={cantidadSolicitada} onChange={(e) => setCantidadSolicitada(e.target.value)} required />
-          </label>
-          <label className="field">
-            Destino
-            <select
-              value={destinoTipo}
-              onChange={(e) => {
-                setDestinoTipo(e.target.value as "" | "centro_costo" | "huerta");
-                setCentroCostoId("");
-                setHuertaDestinoId("");
-              }}
+            Título
+            <input
+              value={titulo}
+              onChange={(e) => setTitulo(e.target.value)}
+              placeholder="Ej. Refacciones bomba de riego"
               required
-            >
-              <option value="">Selecciona…</option>
-              <option value="centro_costo">Centro de Costo</option>
-              <option value="huerta">Huerta</option>
-            </select>
+              style={{ minWidth: 280 }}
+            />
           </label>
-          {destinoTipo === "centro_costo" && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {productosSolicitud.map((p, i) => (
+              <div key={i} style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
+                <label className="field">
+                  Producto (autorizado)
+                  <select value={p.productoId} onChange={(e) => actualizarProductoSolicitud(i, { productoId: e.target.value })} required>
+                    <option value="">Selecciona…</option>
+                    {productos.map((prod) => (
+                      <option key={prod.id} value={prod.id}>
+                        {nombreConMarca(prod)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field">
+                  Cantidad
+                  <input
+                    type="number"
+                    step="0.001"
+                    value={p.cantidad}
+                    onChange={(e) => actualizarProductoSolicitud(i, { cantidad: e.target.value })}
+                    required
+                  />
+                </label>
+                {productosSolicitud.length > 1 && (
+                  <button type="button" className="btn-secondary" onClick={() => quitarProductoSolicitud(i)}>
+                    Quitar
+                  </button>
+                )}
+              </div>
+            ))}
+            <button type="button" className="btn-secondary" style={{ width: "fit-content" }} onClick={agregarProductoSolicitud}>
+              + Otro producto
+            </button>
+          </div>
+
+          <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
+            <label className="field">
+              Destino
+              <select
+                value={destinoTipo}
+                onChange={(e) => {
+                  setDestinoTipo(e.target.value as "" | "centro_costo" | "huerta");
+                  setCentroCostoId("");
+                  setHuertaDestinoId("");
+                }}
+                required
+              >
+                <option value="">Selecciona…</option>
+                <option value="centro_costo">Centro de Costo</option>
+                <option value="huerta">Huerta</option>
+              </select>
+            </label>
+            {destinoTipo === "centro_costo" && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                <label className="field">
+                  Centro de Costo
+                  <select value={centroCostoId} onChange={(e) => setCentroCostoId(e.target.value)} required>
+                    <option value="">Selecciona…</option>
+                    {centrosCosto.items.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.nombre}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {!mostrarNuevoCentroCosto ? (
+                  <button type="button" className="btn-secondary" style={{ fontSize: 11, padding: "4px 8px" }} onClick={() => setMostrarNuevoCentroCosto(true)}>
+                    + Nuevo Centro de Costo
+                  </button>
+                ) : (
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <input
+                      style={{ width: 140 }}
+                      value={nuevoCentroCostoNombre}
+                      onChange={(e) => setNuevoCentroCostoNombre(e.target.value)}
+                      placeholder="Nombre…"
+                      autoFocus
+                    />
+                    <button type="button" className="btn-secondary" style={{ fontSize: 11, padding: "4px 8px" }} onClick={guardarNuevoCentroCosto}>
+                      Guardar
+                    </button>
+                    <button type="button" className="btn-secondary" style={{ fontSize: 11, padding: "4px 8px" }} onClick={() => setMostrarNuevoCentroCosto(false)}>
+                      Cancelar
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+            {destinoTipo === "huerta" && (
               <label className="field">
-                Centro de Costo
-                <select value={centroCostoId} onChange={(e) => setCentroCostoId(e.target.value)} required>
+                Huerta
+                <select value={huertaDestinoId} onChange={(e) => setHuertaDestinoId(e.target.value)} required>
                   <option value="">Selecciona…</option>
-                  {centrosCosto.items.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.nombre}
+                  {huertas.map((h) => (
+                    <option key={h.id} value={h.id}>
+                      {h.nombre}
                     </option>
                   ))}
                 </select>
               </label>
-              {!mostrarNuevoCentroCosto ? (
-                <button type="button" className="btn-secondary" style={{ fontSize: 11, padding: "4px 8px" }} onClick={() => setMostrarNuevoCentroCosto(true)}>
-                  + Nuevo Centro de Costo
-                </button>
-              ) : (
-                <div style={{ display: "flex", gap: 6 }}>
-                  <input
-                    style={{ width: 140 }}
-                    value={nuevoCentroCostoNombre}
-                    onChange={(e) => setNuevoCentroCostoNombre(e.target.value)}
-                    placeholder="Nombre…"
-                    autoFocus
-                  />
-                  <button type="button" className="btn-secondary" style={{ fontSize: 11, padding: "4px 8px" }} onClick={guardarNuevoCentroCosto}>
-                    Guardar
-                  </button>
-                  <button type="button" className="btn-secondary" style={{ fontSize: 11, padding: "4px 8px" }} onClick={() => setMostrarNuevoCentroCosto(false)}>
-                    Cancelar
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
-          {destinoTipo === "huerta" && (
-            <label className="field">
-              Huerta
-              <select value={huertaDestinoId} onChange={(e) => setHuertaDestinoId(e.target.value)} required>
-                <option value="">Selecciona…</option>
-                {huertas.map((h) => (
-                  <option key={h.id} value={h.id}>
-                    {h.nombre}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
-          <button className="btn-primary" type="submit">
-            Enviar solicitud
-          </button>
+            )}
+            <button className="btn-primary" type="submit">
+              Enviar solicitud
+            </button>
+          </div>
         </form>
       )}
 
@@ -570,7 +631,7 @@ export default function Ordenes() {
                       onClick={() => alternarTarjeta(g.clave)}
                     >
                       <div style={{ fontSize: 14, fontWeight: 700 }}>
-                        {TIPO_PROGRAMACION_LABEL[g.tipo]}
+                        {g.titulo ?? TIPO_PROGRAMACION_LABEL[g.tipo]}
                         {g.huertaNombre && ` — ${g.huertaNombre}`}
                         {g.tipoAplicacionNombre && <span className="tag tag-neutral" style={{ marginLeft: 6 }}>{g.tipoAplicacionNombre}</span>}
                         {g.fechaInicio && g.fechaFin && (

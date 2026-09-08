@@ -6,7 +6,7 @@ import { prisma } from "../../core/db.js";
 import { opcionesRecepcionDeProducto } from "../almacen/preferencias.js";
 import {
   autorizarOrden,
-  crearOrdenManual,
+  crearSolicitudManual,
   DestinoManualInvalidoError,
   listarOrdenes,
   listarPendientesPorIngredienteActivo,
@@ -15,6 +15,7 @@ import {
   ProductoNoAutorizadoError,
   recibirOrden,
   rechazarOrden,
+  SolicitudManualSinProductosError,
   SolicitudYaResueltaOrdenError,
   TransicionInvalidaError,
 } from "./ordenes.js";
@@ -45,8 +46,8 @@ ordenesRouter.get("/en-camino", requirePermissionAny(["compras", "ver"], ["almac
 });
 
 const crearSchema = z.object({
-  productoId: z.string().min(1),
-  cantidadSolicitada: z.number().positive(),
+  titulo: z.string().min(1),
+  productos: z.array(z.object({ productoId: z.string().min(1), cantidadSolicitada: z.number().positive() })).min(1),
   centroCostoId: z.string().min(1).optional(),
   huertaDestinoId: z.string().min(1).optional(),
 });
@@ -58,13 +59,13 @@ ordenesRouter.post("/", requirePermission("compras", "capturar"), async (req, re
     return;
   }
   try {
-    const orden = await crearOrdenManual(parsed.data.productoId, parsed.data.cantidadSolicitada, req.usuario!.usuarioId, {
+    const ordenes = await crearSolicitudManual(parsed.data.titulo, parsed.data.productos, req.usuario!.usuarioId, {
       centroCostoId: parsed.data.centroCostoId,
       huertaDestinoId: parsed.data.huertaDestinoId,
     });
-    res.status(201).json(orden);
+    res.status(201).json(ordenes);
   } catch (err) {
-    if (err instanceof ProductoNoAutorizadoError || err instanceof DestinoManualInvalidoError) {
+    if (err instanceof ProductoNoAutorizadoError || err instanceof DestinoManualInvalidoError || err instanceof SolicitudManualSinProductosError) {
       res.status(409).json({ error: err.message });
       return;
     }

@@ -624,6 +624,7 @@ export interface GrupoPendienteProgramacion {
   solicitanteNombre: string;
   fecha: string;
   destino: DestinoPendienteProgramacion | null;
+  titulo: string | null;
   lineas: LineaPendienteProgramacion[];
 }
 

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { prisma } from "../../core/db.js";
 import type { TransactionClient } from "../../core/db.js";
 import { intentarComprometer, registrarEntradaTx } from "../almacen/movimientos.js";
@@ -247,6 +248,10 @@ export interface GrupoPendienteProgramacion {
   solicitanteNombre: string;
   fecha: string;
   destino: DestinoPendienteProgramacion | null;
+  // Título de la Solicitud manual (Prioridad 4, 7-sep-2026) — reemplaza el
+  // genérico "Solicitud manual" en la tarjeta; null en automáticas y en
+  // manuales creadas antes de este cambio (esas siguen mostrando el genérico).
+  titulo: string | null;
   lineas: LineaPendienteProgramacion[];
 }
 
@@ -381,7 +386,12 @@ export async function listarPendientesPorProgramacion(): Promise<GrupoPendienteP
     }
     if (cantidadPendiente <= 0) continue;
 
-    const clave = orden.referenciaAplicacionId ?? `manual:${orden.id}`;
+    // Título + multi-producto (Prioridad 4, 7-sep-2026): varias líneas de la
+    // misma Solicitud manual comparten `solicitudManualId` — eso es lo que
+    // las agrupa en una tarjeta en vez de una por producto. Una manual vieja
+    // sin `solicitudManualId` (de antes de este cambio) sigue agrupándose
+    // sola, como siempre.
+    const clave = orden.referenciaAplicacionId ?? (orden.solicitudManualId ? `manual-grupo:${orden.solicitudManualId}` : `manual:${orden.id}`);
     let grupo = grupos.get(clave);
     if (!grupo) {
       const base = await resolverProgramacion(orden.referenciaAplicacionId);
@@ -404,6 +414,7 @@ export async function listarPendientesPorProgramacion(): Promise<GrupoPendienteP
         solicitanteNombre: nombresUsuarios.get(orden.creadoPorId) ?? "—",
         fecha: base.fechaInicio ?? orden.fechaCreacion.toISOString(),
         destino,
+        titulo: orden.titulo,
         lineas: [],
       };
       grupos.set(clave, grupo);
@@ -436,6 +447,17 @@ export interface DestinoManualInput {
   huertaDestinoId?: string;
 }
 
+export interface ProductoSolicitudManualInput {
+  productoId: string;
+  cantidadSolicitada: number;
+}
+
+export class SolicitudManualSinProductosError extends Error {
+  constructor() {
+    super("Agrega al menos un producto a la solicitud.");
+  }
+}
+
 /**
  * Solicitud manual (9.14) — nunca ligada a una Aplicación (eso son las
  * automáticas, que llegan cuando exista Aplicaciones/Fertilizantes).
@@ -447,25 +469,45 @@ export interface DestinoManualInput {
  * gasto se debe cargar directo a una Huerta, no a un centro de costo
  * general). Las órdenes automáticas no pasan por aquí — su destino ya está
  * implícito en la Huerta de la programación que las generó.
+ *
+ * Título + multi-producto (Prioridad 4, 7-sep-2026): una solicitud puede
+ * pedir varios productos a la vez, cada uno con su propia cantidad — mismo
+ * patrón "+ Otro producto" que Aplicaciones/Fertirriego. Cada producto
+ * sigue siendo su propia fila de OrdenCompra (así ya funciona todo el resto
+ * del sistema: cotizar/generar/recibir es por producto), pero todas
+ * comparten un `solicitudManualId` generado aquí una sola vez — eso es lo
+ * que las agrupa en una sola tarjeta con el Título en vez del genérico
+ * "Solicitud manual" (ver listarPendientesPorProgramacion).
  */
-export async function crearOrdenManual(productoId: string, cantidadSolicitada: number, creadoPorId: string, destino: DestinoManualInput) {
-  const producto = await prisma.producto.findUniqueOrThrow({ where: { id: productoId } });
-  if (!producto.autorizado) throw new ProductoNoAutorizadoError();
+export async function crearSolicitudManual(titulo: string, productosInput: ProductoSolicitudManualInput[], creadoPorId: string, destino: DestinoManualInput) {
+  if (productosInput.length === 0) throw new SolicitudManualSinProductosError();
   const tieneCentroCosto = !!destino.centroCostoId;
   const tieneHuerta = !!destino.huertaDestinoId;
   if (tieneCentroCosto === tieneHuerta) throw new DestinoManualInvalidoError();
 
-  return prisma.ordenCompra.create({
-    data: {
-      origen: "manual",
-      productoId,
-      cantidadSolicitada,
-      estado: "pendiente_autorizar",
-      creadoPorId,
-      centroCostoId: destino.centroCostoId,
-      huertaDestinoId: destino.huertaDestinoId,
-    },
-  });
+  const productos = await prisma.producto.findMany({ where: { id: { in: productosInput.map((p) => p.productoId) } } });
+  for (const p of productos) {
+    if (!p.autorizado) throw new ProductoNoAutorizadoError();
+  }
+
+  const solicitudManualId = randomUUID();
+  return prisma.$transaction(
+    productosInput.map((p) =>
+      prisma.ordenCompra.create({
+        data: {
+          origen: "manual",
+          productoId: p.productoId,
+          cantidadSolicitada: p.cantidadSolicitada,
+          estado: "pendiente_autorizar",
+          creadoPorId,
+          centroCostoId: destino.centroCostoId,
+          huertaDestinoId: destino.huertaDestinoId,
+          titulo,
+          solicitudManualId,
+        },
+      })
+    )
+  );
 }
 
 /** "Primero en llegar gana" (bloque 4) — igual que el resto de autorizaciones del sistema. */

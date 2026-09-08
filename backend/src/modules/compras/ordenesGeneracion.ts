@@ -151,7 +151,10 @@ async function armarLineasDeNecesidades(ordenIds: string[]): Promise<LineaOrigen
     if (!calc || calc.cantidadPendiente <= 0) continue;
 
     const contexto = await resolverProgramacion(necesidad.referenciaAplicacionId);
-    const origenLabel = contexto.tipo === "manual" ? "(Solicitud manual)" : `${contexto.huertaNombre ?? "?"} — ${TIPO_LABEL[contexto.tipo]}`;
+    // Título de Solicitud manual (Prioridad 4, 7-sep-2026) — reemplaza el
+    // genérico "(Solicitud manual)" aquí también, no solo en Pendientes.
+    const origenLabel =
+      contexto.tipo === "manual" ? `(${necesidad.titulo ?? "Solicitud manual"})` : `${contexto.huertaNombre ?? "?"} — ${TIPO_LABEL[contexto.tipo]}`;
     const pref = necesidad.producto.ingredienteActivo ? preferencias.get(necesidad.producto.ingredienteActivo) : undefined;
 
     lineas.push({
