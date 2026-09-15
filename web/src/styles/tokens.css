@@ -57,6 +57,10 @@
      rosa/guinda"): azul de agua, no usado por ningún otro módulo. */
   --mod-riego-bg: #eaf2fe;
   --mod-riego-fg: #3b82f6;
+  /* Vivero (Prioridad 5, 14-sep-2026) — mismo criterio que Riego: pastel
+     nuevo, distinto de Nómina (verde) y Fertilización (verde-azulado). */
+  --mod-vivero-bg: #f1f8e2;
+  --mod-vivero-fg: #65a30d;
 }
 
 * {

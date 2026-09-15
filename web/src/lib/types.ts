@@ -56,6 +56,10 @@ export interface Ciclo {
   // Litros de agua aplicados por riego (Prioridad 4, 14-sep-2026) — L/m/hora,
   // se re-confirma cada Ciclo nuevo. null hasta que se capture.
   gastoCintillaLHoraM: string | null;
+  // Vivero (Prioridad 5, 14-sep-2026) — tipo de charola y cavidades, se
+  // confirman una sola vez al iniciar el Ciclo y quedan constantes.
+  tipoCharola: string | null;
+  cavidadesPorCharola: number | null;
   variedades: CicloVariedad[];
 }
 
@@ -1299,4 +1303,76 @@ export interface OrdenFertirriego {
   };
   valvulas: { seccionId: string; nombre: string; hectareas: number }[];
   productos: OrdenFertirriegoProducto[];
+}
+
+// ============================================================
+// VIVERO (9.3, Prioridad 5, 14-sep-2026)
+// ============================================================
+
+export interface ViveroCharola {
+  id: string;
+  loteId: string;
+  codigo: string;
+  muertas: number;
+  fechaConteo: string | null;
+}
+
+export interface ViveroLote {
+  id: string;
+  cicloId: string;
+  variedad: string;
+  fechaRemojo: string | null;
+  fechaCalentar: string | null;
+  fechaSiembraCharolas: string;
+  fechaTapado: string | null;
+  fechaSalidaVivero: string | null;
+  charolas: ViveroCharola[];
+}
+
+export interface ViveroRiego {
+  id: string;
+  loteId: string;
+  fecha: string;
+}
+
+export interface ViveroConteoCampo {
+  id: string;
+  traspasoId: string;
+  fecha: string;
+  prendieron: number;
+  murieron: number;
+}
+
+export interface ViveroTraspaso {
+  id: string;
+  loteId: string;
+  cantidadCharolas: number;
+  huertaId: string;
+  cuadroId: string | null;
+  fecha: string;
+  huerta: Huerta;
+  cuadro: Cuadro | null;
+  conteos: ViveroConteoCampo[];
+}
+
+export interface ViveroLoteDetalle extends ViveroLote {
+  riegos: ViveroRiego[];
+  traspasos: ViveroTraspaso[];
+}
+
+export interface ViveroSobrevivenciaVariedad {
+  variedad: string;
+  cavidadesTotales: number;
+  vivas: number;
+  muertas: number;
+  porcentajeSobrevivencia: number;
+}
+
+export interface ViveroPresupuestoSemilla {
+  id: string;
+  cicloId: string;
+  variedad: string;
+  productoId: string;
+  cantidadNecesaria: string;
+  producto: Producto;
 }

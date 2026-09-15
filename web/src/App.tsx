@@ -50,6 +50,7 @@ import Fertirriego from "./pages/fertilizantes/Fertirriego";
 import RiegoLayout from "./pages/riego/RiegoLayout";
 import Riego from "./pages/riego/Riego";
 import HistorialSemanal from "./pages/riego/HistorialSemanal";
+import Vivero from "./pages/vivero/Vivero";
 
 function RutaProtegida({ children }: { children: React.ReactNode }) {
   const { autenticado } = useAuth();
@@ -147,6 +148,8 @@ export default function App() {
               <Route path="captura" element={<Riego />} />
               <Route path="historial" element={<HistorialSemanal />} />
             </Route>
+
+            <Route path="/vivero" element={<Vivero />} />
           </Route>
         </Routes>
       </AuthProvider>

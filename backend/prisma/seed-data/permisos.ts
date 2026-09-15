@@ -107,4 +107,14 @@ export const PERMISOS_SEED: PermisoSeed[] = [
   { rol: "regador", modulo: "riego", ver: true, capturar: true },
   { rol: "supervisor_huerta", modulo: "riego", ver: true },
   { rol: "gerente_tecnico_produccion", modulo: "riego", ver: true },
+
+  // ---- Vivero (9.3, Prioridad 5, 14-sep-2026) ----
+  // El documento deja pendiente cerrar exactamente quién siembra/cuenta/
+  // autoriza (5.8) — criterio razonable por ahora, mismo patrón que
+  // Aplicaciones/Fertilizantes: Supervisor de Huerta y Asistentes de
+  // Producción capturan, Gerente Técnico de Producción autoriza (además de
+  // ver/capturar/editar). Confirmar con Diego, ver reporte final.
+  { rol: "gerente_tecnico_produccion", modulo: "vivero", ver: true, capturar: true, editar: true, autoriza: true },
+  { rol: "asistente_tecnico_produccion", modulo: "vivero", ver: true, capturar: true },
+  { rol: "supervisor_huerta", modulo: "vivero", ver: true, capturar: true },
 ];
