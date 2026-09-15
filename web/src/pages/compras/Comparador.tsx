@@ -259,6 +259,7 @@ export default function Comparador() {
           {c.excedente.toFixed(3)} ({c.porcentajeExcedente.toFixed(1)}%)
           {c.alertaExcedente && <span className="tag tag-danger" style={{ marginLeft: 4 }}>REVISAR</span>}
         </td>
+        <td>{formatearDinero(c.precioTotalPresentaciones)}</td>
         <td>{formatearDinero(c.fleteTotal)}</td>
         <td style={{ fontWeight: 700 }}>{formatearDinero(c.totalConFlete)}</td>
         <td>
@@ -364,6 +365,7 @@ export default function Comparador() {
                   <th>Unidades a pedir</th>
                   <th>Cantidad comprada</th>
                   <th>Excedente</th>
+                  <th>Total sin flete</th>
                   <th>Flete</th>
                   <th>Total con flete</th>
                   <th></th>
@@ -758,7 +760,7 @@ function LineaCotizacionForm({
         <input
           type="number"
           min={0}
-          step="0.01"
+          step="0.0001"
           value={c.precioValor}
           onChange={(e) => onChange({ precioValor: e.target.value })}
           required

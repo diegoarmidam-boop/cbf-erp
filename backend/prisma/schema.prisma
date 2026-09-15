@@ -1111,7 +1111,13 @@ model OrdenCompra {
   estado                 EstadoOrdenCompra
   proveedorId            String?
   proveedor              Proveedor?        @relation(fields: [proveedorId], references: [id])
-  precioUnitario         Decimal?          @db.Decimal(10, 2)
+  // Prioridad 2 (14-sep-2026): ampliado de Decimal(10,2) a (12,4) — este es
+  // un valor INTERMEDIO (se multiplica después por cantidadSolicitada para
+  // Cuentas por Pagar y para valorizar Almacén), no el número final que se
+  // muestra en pantalla — truncarlo aquí a 2 decimales antes de esa
+  // multiplicación fue la segunda causa (más chica) del mismo descuadre de
+  // ~$300 MXN. Se guarda igual que llega de calcularCotizacion(), sin redondear.
+  precioUnitario         Decimal?          @db.Decimal(12, 4)
   fechaEsperada          DateTime?         @db.Date
   referenciaAplicacionId String? // liga a Aplicacion/FertilizacionGranular/Fertirriego que la generó
   autorizadoPorId        String?
@@ -1281,7 +1287,12 @@ model ComparacionCotizacion {
   // — si moneda=USD, se convierte con `tipoCambio` (capturado a mano cada
   // vez, no un valor compartido del sistema: cada proveedor puede manejar
   // un tipo de cambio distinto ese día).
-  precioValor          Decimal          @db.Decimal(10, 2)
+  // Prioridad 2 (14-sep-2026): ampliado de Decimal(10,2) a (12,4) — un precio
+  // capturado con solo 2 decimales (ej. $0.72 en vez de $0.716) generó casi
+  // $300 MXN de diferencia real contra la factura del proveedor al
+  // multiplicarse por miles de kg. Mínimo 4 decimales al capturar, sin
+  // truncar — mismo criterio de precisión que tipoCambio, abajo.
+  precioValor          Decimal          @db.Decimal(12, 4)
   tipoCambio           Decimal?         @db.Decimal(10, 4)
   // Presentación de esta cotización (Prioridad 2, 4-sep-2026: `contenedor`
   // se agrega — el tamaño solo ya existía) — en la misma unidad del
