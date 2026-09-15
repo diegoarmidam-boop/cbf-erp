@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { api, ApiError } from "../../lib/api";
 import type { RiegoHuertaTodasUPs } from "../../lib/types";
 import FechaInput from "../../components/FechaInput";
+import CampoNumerico from "../../components/CampoNumerico";
 
 function hoyISO(): string {
   const d = new Date();
@@ -171,14 +172,7 @@ export default function Riego() {
                         <tr key={seccion.id}>
                           <td>{seccion.nombre}</td>
                           <td>
-                            <input
-                              type="number"
-                              step="0.25"
-                              min={0}
-                              style={{ width: 80 }}
-                              value={fila.horas}
-                              onChange={(e) => actualizarFila(seccion.id, "horas", e.target.value)}
-                            />
+                            <CampoNumerico value={fila.horas} onChange={(v) => actualizarFila(seccion.id, "horas", v)} />
                           </td>
                           <td>
                             {fertirriegoActivo ? (

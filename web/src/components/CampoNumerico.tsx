@@ -16,11 +16,12 @@ export interface CampoNumericoProps {
   onChange: (value: string) => void;
   placeholder?: string;
   permiteDecimales?: boolean;
+  disabled?: boolean;
 }
 
 const TECLAS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", ".", "0", "⌫"];
 
-export default function CampoNumerico({ label, value, onChange, placeholder, permiteDecimales = true }: CampoNumericoProps) {
+export default function CampoNumerico({ label, value, onChange, placeholder, permiteDecimales = true, disabled = false }: CampoNumericoProps) {
   const [abierto, setAbierto] = useState(false);
 
   function teclear(t: string) {
@@ -38,17 +39,18 @@ export default function CampoNumerico({ label, value, onChange, placeholder, per
       {label}
       <button
         type="button"
+        disabled={disabled}
         onClick={() => setAbierto((v) => !v)}
         style={{
           textAlign: "left",
-          background: "var(--surface)",
+          background: disabled ? "var(--surface-soft, #f2f2f2)" : "var(--surface)",
           border: "1px solid var(--border)",
           borderRadius: "var(--radius-sm)",
           padding: "8px 10px",
           fontSize: 16,
           fontFamily: "var(--font-body)",
           color: value ? "var(--ink)" : "var(--ink-faint)",
-          cursor: "pointer",
+          cursor: disabled ? "not-allowed" : "pointer",
         }}
       >
         {value || placeholder || "0"}
