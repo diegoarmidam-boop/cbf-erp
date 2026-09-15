@@ -20,11 +20,13 @@ export interface PermisoSeed {
 // consulta con huertaIdDeAlcance() en cada ruta, no aquí.
 export const PERMISOS_SEED: PermisoSeed[] = [
   // ---- Unidades de Producción (9.1) ----
+  // Corrección auditoría 10-sep-2026: Gerente Administrativo NO tiene acceso
+  // a este módulo (fila quitada por completo, no solo apagada); Técnico de
+  // Producción (Asistentes) sí captura y edita, no solo ve.
   { rol: "gerente_tecnico_produccion", modulo: "unidades_produccion", ver: true, capturar: true, editar: true },
-  { rol: "gerente_administrativo", modulo: "unidades_produccion", ver: true, editar: true },
   { rol: "supervisor_huerta", modulo: "unidades_produccion", ver: true },
   { rol: "contador", modulo: "unidades_produccion", ver: true },
-  { rol: "asistente_tecnico_produccion", modulo: "unidades_produccion", ver: true },
+  { rol: "asistente_tecnico_produccion", modulo: "unidades_produccion", ver: true, capturar: true, editar: true },
 
   // ---- Recursos Humanos (9.12) ----
   { rol: "recursos_humanos", modulo: "rh", ver: true, capturar: true, editar: true, autoriza: true },

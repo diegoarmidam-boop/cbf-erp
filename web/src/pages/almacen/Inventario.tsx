@@ -43,9 +43,16 @@ const COLUMNAS: { value: Columna; label: string }[] = [
 
 // Chips de Categoría (Prioridad 6.3, 8-sep-2026) — orden fijo pedido por
 // Diego, con etiqueta de despliegue distinta al nombre guardado en el
-// catálogo en 2 casos (mismo registro, solo cambia cómo se ve aquí).
-const ORDEN_CHIPS_CATEGORIA = ["Fertilizante", "Agroquimico", "Combustible", "Refaccion", "Empaque", "Herramientas", "Oficina", "Laboratorio"];
-const ETIQUETA_CHIP_CATEGORIA: Record<string, string> = { Agroquimico: "Agroquímico", Refaccion: "Refacciones" };
+// catálogo en 2 casos (mismo registro, solo cambia cómo se ve aquí). Esta
+// lista solo controla el ORDEN de despliegue de las categorías que ya
+// existen en el catálogo real (listaCategorias, abajo) — nunca filtra ni
+// restringe cuáles aparecen; cualquier categoría nueva que se dé de alta
+// aparece sola, sin tocar este archivo (corrección auditoría 10-sep-2026:
+// "Agroquimico" ya no es una categoría real — se reemplazó por tipos
+// específicos como Herbicida/Insecticida/Fungicida, ver 9.7 — se quita de
+// aquí para no dejar una referencia muerta).
+const ORDEN_CHIPS_CATEGORIA = ["Fertilizante", "Herbicida", "Insecticida", "Combustible", "Refaccion", "Empaque", "Herramientas", "Oficina", "Laboratorio"];
+const ETIQUETA_CHIP_CATEGORIA: Record<string, string> = { Refaccion: "Refacciones" };
 
 interface Filtro {
   columna: Columna;
