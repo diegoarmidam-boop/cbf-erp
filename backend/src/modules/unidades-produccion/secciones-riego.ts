@@ -30,3 +30,33 @@ export async function actualizarCuadrosSeccion(seccionId: string, cuadroIds: str
     }
   });
 }
+
+/** Líneas de cintilla vigentes de una Sección en una fecha (Prioridad 4, 14-sep-2026) — mismo patrón que obtenerVersionVigente (Cuadro, 9.1). */
+export async function lineasCintillaVigentes(seccionId: string, fecha: Date): Promise<number | null> {
+  const version = await prisma.seccionRiegoLineasCintilla.findFirst({
+    where: { seccionId, vigenteDesde: { lte: fecha }, OR: [{ vigenteHasta: null }, { vigenteHasta: { gte: fecha } }] },
+  });
+  return version?.lineas ?? null;
+}
+
+/**
+ * Cambiar las líneas de cintilla de una Sección (ej. de 1 a 2 a mitad del
+ * Ciclo) no sobreescribe el valor vigente — lo cierra y abre uno nuevo,
+ * para conservar el historial por fecha (mismo criterio que
+ * actualizarConfiguracionCuadro, 9.1).
+ */
+export async function actualizarLineasCintilla(seccionId: string, lineas: number, vigenteDesde: string) {
+  return prisma.$transaction(async (tx) => {
+    const anterior = await tx.seccionRiegoLineasCintilla.findFirst({ where: { seccionId, vigenteHasta: null } });
+    if (anterior) {
+      const diaAnterior = new Date(vigenteDesde);
+      diaAnterior.setDate(diaAnterior.getDate() - 1);
+      await tx.seccionRiegoLineasCintilla.update({ where: { id: anterior.id }, data: { vigenteHasta: diaAnterior } });
+    }
+    return tx.seccionRiegoLineasCintilla.create({ data: { seccionId, lineas, vigenteDesde: new Date(vigenteDesde) } });
+  });
+}
+
+export function historialLineasCintilla(seccionId: string) {
+  return prisma.seccionRiegoLineasCintilla.findMany({ where: { seccionId }, orderBy: { vigenteDesde: "desc" } });
+}

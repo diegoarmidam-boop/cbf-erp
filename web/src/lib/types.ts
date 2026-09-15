@@ -53,6 +53,9 @@ export interface Ciclo {
   fechaInicio: string;
   fechaFin: string | null;
   activo: boolean;
+  // Litros de agua aplicados por riego (Prioridad 4, 14-sep-2026) — L/m/hora,
+  // se re-confirma cada Ciclo nuevo. null hasta que se capture.
+  gastoCintillaLHoraM: string | null;
   variedades: CicloVariedad[];
 }
 
@@ -61,6 +64,16 @@ export interface SeccionRiego {
   huertaId: string;
   nombre: string;
   cuadros: { cuadro: Cuadro }[];
+}
+
+// Líneas de cintilla por surco (Prioridad 4, 14-sep-2026) — con historial
+// por fecha, mismo patrón que la versión de Cuadro.
+export interface SeccionRiegoLineasCintilla {
+  id: string;
+  seccionId: string;
+  lineas: number;
+  vigenteDesde: string;
+  vigenteHasta: string | null;
 }
 
 export interface Personal {

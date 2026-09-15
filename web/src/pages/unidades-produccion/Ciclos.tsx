@@ -45,6 +45,7 @@ export default function Ciclos() {
   const [variedades, setVariedades] = useState<FilaVariedad[]>([{ cuadroId: "", variedad: "", hectareas: "" }]);
   const [avisoSobrante, setAvisoSobrante] = useState<DesajusteCuadro[] | null>(null);
   const [editandoId, setEditandoId] = useState<string | null>(null);
+  const [gastoCintillaForm, setGastoCintillaForm] = useState("");
 
   function hectareasVigentesCuadro(cuadroId: string): number | null {
     const cuadro = cuadros.find((c) => c.id === cuadroId);
@@ -159,6 +160,17 @@ export default function Ciclos() {
     }
   }
 
+  async function guardarGastoCintilla(cicloId: string) {
+    setError(null);
+    try {
+      await api.patch(`/ciclos/${cicloId}/gasto-cintilla`, { gastoCintillaLHoraM: Number(gastoCintillaForm) });
+      setGastoCintillaForm("");
+      cargar();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "No se pudo guardar.");
+    }
+  }
+
   async function cerrarCiclo(cicloId: string) {
     setError(null);
     try {
@@ -203,6 +215,26 @@ export default function Ciclos() {
                 </button>
               ))}
             </div>
+          </div>
+
+          <div style={{ marginTop: 14, display: "flex", gap: 8, alignItems: "flex-end" }}>
+            <label className="field" style={{ maxWidth: 180 }}>
+              Gasto de cintilla (L/m/hora)
+              <input
+                type="number"
+                min={0}
+                step="0.0001"
+                placeholder={activo.gastoCintillaLHoraM ?? "Sin confirmar"}
+                value={gastoCintillaForm}
+                onChange={(e) => setGastoCintillaForm(e.target.value)}
+              />
+            </label>
+            <button className="btn-secondary" onClick={() => guardarGastoCintilla(activo.id)} disabled={!gastoCintillaForm}>
+              Guardar
+            </button>
+            {activo.gastoCintillaLHoraM && (
+              <span style={{ fontSize: 11.5, color: "var(--ink-soft)" }}>Confirmado: {activo.gastoCintillaLHoraM} L/m/hora</span>
+            )}
           </div>
 
           {activo.variedades.length > 0 && (

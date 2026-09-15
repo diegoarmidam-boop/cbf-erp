@@ -1,6 +1,9 @@
 import { diaMarcadoDiasSemana, ordenarPorNombreNumerico } from "@cbf/shared";
 import { prisma } from "../../core/db.js";
 import type { TransactionClient } from "../../core/db.js";
+import { obtenerVersionVigente } from "../unidades-produccion/cuadros.js";
+import { lineasCintillaVigentes } from "../unidades-produccion/secciones-riego.js";
+import { cicloActivo } from "../unidades-produccion/ciclos.js";
 
 export class FertirriegoNoActivoError extends Error {
   constructor() {
@@ -61,6 +64,45 @@ export function historialRiego(seccionId: string) {
   return prisma.riegoRegistroDiario.findMany({ where: { seccionId }, orderBy: { fecha: "desc" }, include: { productos: true } });
 }
 
+/**
+ * Litros de agua aplicados por riego (Prioridad 4, 14-sep-2026) — dato
+ * informativo/analítico, nunca bloquea ni alerta. Fórmula (ver 9.6):
+ * metros de cintilla de la Sección = (10,000 m² ÷ distancia entre surcos
+ * de CADA Cuadro) × líneas de cintilla vigentes en la fecha × hectáreas de
+ * ese Cuadro — si los Cuadros de la Sección tienen distinta distancia
+ * entre surcos, se calcula Cuadro por Cuadro y se suma (la distancia entre
+ * plantas NO entra aquí, solo importa para plantas/hectárea). Litros por
+ * hora = metros de cintilla × Gasto de cintilla (L/m/hora) del Ciclo
+ * activo de la Huerta. Litros aplicados = litros por hora × horas
+ * regadas. `null` si falta cualquier dato de la cadena (Gasto de cintilla
+ * sin confirmar para este Ciclo, Líneas de cintilla sin capturar para
+ * esta Sección, o Cuadros sin Marco de Plantación vigente) — no se
+ * adivina ningún valor.
+ */
+export async function calcularLitrosAplicados(seccionId: string, fecha: Date, horas: number): Promise<number | null> {
+  const seccion = await prisma.seccionRiego.findUniqueOrThrow({ where: { id: seccionId } });
+
+  const lineas = await lineasCintillaVigentes(seccionId, fecha);
+  if (lineas == null) return null;
+
+  const ciclo = await cicloActivo(seccion.huertaId);
+  const gastoCintilla = ciclo?.gastoCintillaLHoraM != null ? Number(ciclo.gastoCintillaLHoraM) : null;
+  if (gastoCintilla == null) return null;
+
+  const cuadrosSeccion = await prisma.seccionRiegoCuadro.findMany({ where: { seccionId } });
+  if (cuadrosSeccion.length === 0) return null;
+
+  let metrosCintilla = 0;
+  for (const { cuadroId } of cuadrosSeccion) {
+    const version = await obtenerVersionVigente(cuadroId, fecha);
+    if (!version || !version.distSurcosM) return null; // falta Marco de Plantación de algún Cuadro -- no se adivina, se regresa null completo
+    metrosCintilla += (10_000 / Number(version.distSurcosM)) * lineas * Number(version.hectareas);
+  }
+
+  const litrosPorHora = metrosCintilla * gastoCintilla;
+  return litrosPorHora * horas;
+}
+
 export interface CantidadProductoInput {
   productoId: string;
   cantidadAplicada: number;
@@ -97,6 +139,7 @@ export async function registrarRiegoDiario(seccionId: string, fecha: string, inp
   }
   const motivoNoAplicado = fertirriegoDelDia && !input.fertirriegoConfirmado ? input.motivoNoAplicado : undefined;
   const cantidadesNuevas = input.fertirriegoConfirmado ? input.cantidadesAplicadas ?? [] : [];
+  const litrosAplicados = await calcularLitrosAplicados(seccionId, fechaDate, input.horas);
 
   return prisma.$transaction(async (tx) => {
     const anterior = await tx.riegoRegistroDiario.findUnique({
@@ -140,6 +183,7 @@ export async function registrarRiegoDiario(seccionId: string, fecha: string, inp
         motivoNoAplicado: motivoNoAplicado ?? null,
         comentario: input.comentario,
         capturadoPorId,
+        litrosAplicados,
       },
       create: {
         seccionId,
@@ -149,6 +193,7 @@ export async function registrarRiegoDiario(seccionId: string, fecha: string, inp
         motivoNoAplicado,
         comentario: input.comentario,
         capturadoPorId,
+        litrosAplicados,
       },
     });
 

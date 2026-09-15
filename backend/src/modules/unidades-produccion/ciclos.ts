@@ -26,6 +26,11 @@ export function listarCiclos(huertaId: string) {
   return prisma.ciclo.findMany({ where: { huertaId }, include: { variedades: true }, orderBy: { fechaInicio: "desc" } });
 }
 
+/** Gasto de cintilla (L/m/hora) del Ciclo (Prioridad 4, 14-sep-2026) — se re-confirma cada Ciclo nuevo, nunca se asume igual al anterior. */
+export function actualizarGastoCintilla(cicloId: string, gastoCintillaLHoraM: number) {
+  return prisma.ciclo.update({ where: { id: cicloId }, data: { gastoCintillaLHoraM } });
+}
+
 export function cicloActivo(huertaId: string) {
   return prisma.ciclo.findFirst({ where: { huertaId, activo: true }, include: { variedades: true } });
 }

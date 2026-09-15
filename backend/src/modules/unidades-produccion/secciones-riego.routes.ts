@@ -3,7 +3,13 @@ import { z } from "zod";
 import { requireAuth, requirePermission } from "../../middleware/auth.js";
 import { mensajeErrorValidacion, unoSolo } from "../../core/http.js";
 import { prisma } from "../../core/db.js";
-import { actualizarCuadrosSeccion, crearSeccionRiego, listarSeccionesRiego } from "./secciones-riego.js";
+import {
+  actualizarCuadrosSeccion,
+  actualizarLineasCintilla,
+  crearSeccionRiego,
+  historialLineasCintilla,
+  listarSeccionesRiego,
+} from "./secciones-riego.js";
 
 export const seccionesRiegoRouter = Router();
 seccionesRiegoRouter.use(requireAuth);
@@ -39,6 +45,26 @@ seccionesRiegoRouter.patch("/:id/cuadros", requirePermission("unidades_produccio
   }
   await actualizarCuadrosSeccion(unoSolo(req.params.id), parsed.data.cuadroIds);
   res.status(204).end();
+});
+
+// Líneas de cintilla por surco (Prioridad 4, 14-sep-2026) — con historial
+// por fecha, ver detalle en secciones-riego.ts. GET regresa todas las
+// versiones (la más reciente primero); POST cierra la vigente y abre una
+// nueva desde `vigenteDesde`.
+seccionesRiegoRouter.get("/:id/lineas-cintilla", requirePermission("unidades_produccion", "ver"), async (req, res) => {
+  res.json(await historialLineasCintilla(unoSolo(req.params.id)));
+});
+
+const lineasCintillaSchema = z.object({ lineas: z.number().int().positive(), vigenteDesde: z.string().min(1) });
+
+seccionesRiegoRouter.post("/:id/lineas-cintilla", requirePermission("unidades_produccion", "editar"), async (req, res) => {
+  const parsed = lineasCintillaSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
+    return;
+  }
+  const version = await actualizarLineasCintilla(unoSolo(req.params.id), parsed.data.lineas, parsed.data.vigenteDesde);
+  res.status(201).json(version);
 });
 
 // Solo se puede borrar una Sección que nunca se usó — si ya tiene

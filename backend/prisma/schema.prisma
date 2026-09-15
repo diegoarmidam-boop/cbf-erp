@@ -231,6 +231,13 @@ model Ciclo {
   fechaInicio DateTime   @db.Date
   fechaFin    DateTime?  @db.Date
   activo      Boolean    @default(true)
+  // Litros de agua aplicados por riego (Prioridad 4, 14-sep-2026): gasto de
+  // cintilla en L/metro/hora, ligado a este Ciclo — si empieza un Ciclo
+  // nuevo se vuelve a confirmar, nunca se asume igual al anterior. Nullable
+  // a propósito: mientras no se confirme, el cálculo de litros aplicados
+  // (ver RiegoRegistroDiario.litrosAplicados) simplemente no se hace —
+  // informativo, no bloquea nada.
+  gastoCintillaLHoraM Decimal? @db.Decimal(8, 4)
 
   variedades CicloVariedad[]
 
@@ -264,6 +271,7 @@ model SeccionRiego {
   cuadros              SeccionRiegoCuadro[]
   fertirriegoSecciones FertirriegoSeccion[]
   registrosRiego       RiegoRegistroDiario[]
+  lineasCintilla       SeccionRiegoLineasCintilla[]
 
   @@unique([huertaId, nombre])
 }
@@ -275,6 +283,24 @@ model SeccionRiegoCuadro {
   cuadro    Cuadro       @relation(fields: [cuadroId], references: [id])
 
   @@id([seccionId, cuadroId])
+}
+
+// Líneas de cintilla por surco (Prioridad 4, 14-sep-2026): a diferencia del
+// Gasto de cintilla (por Ciclo completo), este dato es de la Sección de
+// Riego específica y puede cambiar A MITAD del mismo Ciclo (ej. se agrega
+// una 2ª línea más adelante) — mismo patrón de historial por fecha que
+// CuadroVersion (9.1): un cambio no sobreescribe, cierra la versión vigente
+// (vigenteHasta) y abre una nueva. El cálculo de cualquier fecha usa las
+// líneas vigentes en ESA fecha, no siempre el valor más reciente.
+model SeccionRiegoLineasCintilla {
+  id           String       @id @default(uuid())
+  seccionId    String
+  seccion      SeccionRiego @relation(fields: [seccionId], references: [id])
+  lineas       Int
+  vigenteDesde DateTime     @db.Date
+  vigenteHasta DateTime?    @db.Date // null = vigente actualmente
+
+  @@index([seccionId, vigenteDesde])
 }
 
 // ============================================================
@@ -1902,6 +1928,14 @@ model RiegoRegistroDiario {
   // opcional que puede existir cualquier día, se haya metido o no el fertirriego.
   comentario            String?      @db.Text
   capturadoPorId        String
+  // Litros de agua aplicados (Prioridad 4, 14-sep-2026): calculado y
+  // guardado en cada registro diario (no solo en vivo) para conservar el
+  // histórico exacto, ya que Gasto de cintilla y Líneas de cintilla pueden
+  // cambiar con el tiempo — ver calcularLitrosAplicados en riego.ts.
+  // Nullable: si al capturar el día todavía no había Gasto de cintilla
+  // confirmado para el Ciclo o Líneas de cintilla para la Sección, se
+  // guarda null — dato informativo/analítico, nunca bloquea la captura.
+  litrosAplicados       Decimal?     @db.Decimal(12, 3)
 
   productos RiegoRegistroDiarioProducto[]
 

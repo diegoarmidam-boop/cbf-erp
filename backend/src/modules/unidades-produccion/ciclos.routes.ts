@@ -2,7 +2,16 @@ import { Router } from "express";
 import { z } from "zod";
 import { requireAuth, requirePermission } from "../../middleware/auth.js";
 import { mensajeErrorValidacion, unoSolo } from "../../core/http.js";
-import { avanzarEtapa, cerrarCiclo, crearCiclo, editarCiclo, listarCiclos, SuperficieExcedeCuadroError, YaHayCicloActivoError } from "./ciclos.js";
+import {
+  actualizarGastoCintilla,
+  avanzarEtapa,
+  cerrarCiclo,
+  crearCiclo,
+  editarCiclo,
+  listarCiclos,
+  SuperficieExcedeCuadroError,
+  YaHayCicloActivoError,
+} from "./ciclos.js";
 
 export const ciclosRouter = Router();
 ciclosRouter.use(requireAuth);
@@ -83,4 +92,17 @@ ciclosRouter.post("/:id/avanzar-etapa", requirePermission("unidades_produccion",
 
 ciclosRouter.post("/:id/cerrar", requirePermission("unidades_produccion", "editar"), async (req, res) => {
   res.json(await cerrarCiclo(unoSolo(req.params.id)));
+});
+
+// Gasto de cintilla (L/m/hora) del Ciclo (Prioridad 4, 14-sep-2026) — se
+// re-confirma cada Ciclo nuevo, alimenta el cálculo de litros aplicados en Riego (9.6).
+const gastoCintillaSchema = z.object({ gastoCintillaLHoraM: z.number().positive() });
+
+ciclosRouter.patch("/:id/gasto-cintilla", requirePermission("unidades_produccion", "editar"), async (req, res) => {
+  const parsed = gastoCintillaSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
+    return;
+  }
+  res.json(await actualizarGastoCintilla(unoSolo(req.params.id), parsed.data.gastoCintillaLHoraM));
 });

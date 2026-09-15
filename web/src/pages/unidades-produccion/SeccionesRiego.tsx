@@ -1,9 +1,15 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { api, ApiError } from "../../lib/api";
 import { useCuadros } from "../../lib/useCuadros";
-import type { SeccionRiego } from "../../lib/types";
+import type { SeccionRiego, SeccionRiegoLineasCintilla } from "../../lib/types";
 import { useHuertaSeleccionada } from "./HuertaSeleccionadaContext";
 import ConfirmModal from "../../components/ConfirmModal";
+import FechaInput from "../../components/FechaInput";
+
+function hoyISO(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
 
 export default function SeccionesRiego() {
   const { huertaId } = useHuertaSeleccionada();
@@ -15,15 +21,49 @@ export default function SeccionesRiego() {
   const [nombre, setNombre] = useState("");
   const [cuadroIds, setCuadroIds] = useState<string[]>([]);
 
+  // Líneas de cintilla por surco (Prioridad 4, 14-sep-2026): vigente hoy,
+  // por sección — solo informativo aquí; el histórico completo vive en la
+  // base de datos, no hace falta mostrarlo en esta tabla.
+  const [lineasVigentes, setLineasVigentes] = useState<Record<string, number | null>>({});
+  const [editandoLineasId, setEditandoLineasId] = useState<string | null>(null);
+  const [lineasForm, setLineasForm] = useState("");
+  const [vigenteDesdeForm, setVigenteDesdeForm] = useState(hoyISO());
+
   function cargar() {
     if (!huertaId) return;
     api
       .get<SeccionRiego[]>(`/secciones-riego?huertaId=${huertaId}`)
-      .then(setSecciones)
+      .then((data) => {
+        setSecciones(data);
+        for (const s of data) cargarLineasVigentes(s.id);
+      })
       .catch((err) => setError(err instanceof ApiError ? err.message : "No se pudo cargar."));
   }
 
+  function cargarLineasVigentes(seccionId: string) {
+    api
+      .get<SeccionRiegoLineasCintilla[]>(`/secciones-riego/${seccionId}/lineas-cintilla`)
+      .then((historial) => {
+        const hoy = hoyISO();
+        const vigente = historial.find((h) => h.vigenteDesde <= hoy && (h.vigenteHasta == null || h.vigenteHasta >= hoy));
+        setLineasVigentes((prev) => ({ ...prev, [seccionId]: vigente?.lineas ?? null }));
+      })
+      .catch(() => {});
+  }
+
   useEffect(cargar, [huertaId]);
+
+  async function guardarLineasCintilla(seccionId: string) {
+    setError(null);
+    try {
+      await api.post(`/secciones-riego/${seccionId}/lineas-cintilla`, { lineas: Number(lineasForm), vigenteDesde: vigenteDesdeForm });
+      setEditandoLineasId(null);
+      setLineasForm("");
+      cargarLineasVigentes(seccionId);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "No se pudo guardar.");
+    }
+  }
 
   function toggleCuadro(id: string) {
     setCuadroIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
@@ -89,6 +129,7 @@ export default function SeccionesRiego() {
           <tr>
             <th>Nombre</th>
             <th>Cuadros</th>
+            <th>Líneas de cintilla</th>
             <th></th>
           </tr>
         </thead>
@@ -97,6 +138,41 @@ export default function SeccionesRiego() {
             <tr key={s.id}>
               <td>{s.nombre}</td>
               <td>{s.cuadros.map((c) => c.cuadro.nombre).join(", ") || "—"}</td>
+              <td>
+                {editandoLineasId === s.id ? (
+                  <div style={{ display: "flex", gap: 6, alignItems: "flex-end", flexWrap: "wrap" }}>
+                    <label className="field" style={{ maxWidth: 70 }}>
+                      Líneas
+                      <input type="number" min={1} step="1" value={lineasForm} onChange={(e) => setLineasForm(e.target.value)} />
+                    </label>
+                    <label className="field" style={{ maxWidth: 150 }}>
+                      Vigente desde
+                      <FechaInput value={vigenteDesdeForm} onChange={setVigenteDesdeForm} />
+                    </label>
+                    <button className="btn-primary" onClick={() => guardarLineasCintilla(s.id)} disabled={!lineasForm}>
+                      Guardar
+                    </button>
+                    <button className="btn-secondary" onClick={() => setEditandoLineasId(null)}>
+                      Cancelar
+                    </button>
+                  </div>
+                ) : (
+                  <span>
+                    {lineasVigentes[s.id] ?? "— (sin capturar)"}{" "}
+                    <button
+                      className="btn-secondary"
+                      style={{ fontSize: 11, padding: "2px 8px" }}
+                      onClick={() => {
+                        setEditandoLineasId(s.id);
+                        setLineasForm(lineasVigentes[s.id] != null ? String(lineasVigentes[s.id]) : "");
+                        setVigenteDesdeForm(hoyISO());
+                      }}
+                    >
+                      {lineasVigentes[s.id] != null ? "Cambiar" : "Capturar"}
+                    </button>
+                  </span>
+                )}
+              </td>
               <td>
                 <button className="btn-secondary" onClick={() => setConfirmandoId(s.id)}>
                   Borrar
