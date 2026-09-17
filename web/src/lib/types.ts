@@ -593,6 +593,14 @@ export interface OrigenPendienteIngredienteActivo {
 // de Compras): agrupa por Ingrediente Activo cuando el producto lo tiene, o
 // por Producto Comercial cuando no (empaque, refacciones, etc.) — `categoria`
 // viene del catálogo de Almacén (9.15), sirve para el filtro "Tipo de producto".
+// Monto por Proveedor en "Por Producto" (Prioridad 5, V35, 17-sep-2026).
+export interface ProveedorPendienteIngredienteActivo {
+  proveedorId: string;
+  proveedorNombre: string;
+  totalSinFlete: number;
+  totalConFlete: number;
+}
+
 export interface PendienteIngredienteActivo {
   ingredienteActivo: string;
   categoria: string;
@@ -600,6 +608,7 @@ export interface PendienteIngredienteActivo {
   cantidadPendiente: number;
   ordenes: { id: string; estado: EstadoOrdenCompra; cantidadPendiente: number }[];
   origenes: OrigenPendienteIngredienteActivo[];
+  proveedores: ProveedorPendienteIngredienteActivo[];
 }
 
 // Pendientes de cotizar agrupadas por PROGRAMACIÓN de origen (2.1, 2-sep-2026,

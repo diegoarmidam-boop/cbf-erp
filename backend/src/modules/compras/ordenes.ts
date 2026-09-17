@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { calcularCotizacion } from "@cbf/shared";
 import { prisma } from "../../core/db.js";
 import type { TransactionClient } from "../../core/db.js";
 import { intentarComprometer, registrarEntradaTx } from "../almacen/movimientos.js";
@@ -102,6 +103,14 @@ export interface OrigenPendienteIngredienteActivo {
   cantidad: number;
 }
 
+/** Monto por Proveedor en "Por Producto" (5, V35, 17-sep-2026) — ver comentario completo en listarPendientesPorIngredienteActivo. */
+export interface ProveedorPendienteIngredienteActivo {
+  proveedorId: string;
+  proveedorNombre: string;
+  totalSinFlete: number;
+  totalConFlete: number;
+}
+
 /**
  * Compras agrupadas por Ingrediente Activo (2.1, 2-sep-2026): suma la
  * cantidad pendiente de cada Ingrediente Activo a través de TODAS las
@@ -123,6 +132,17 @@ export interface OrigenPendienteIngredienteActivo {
  * `esManual: true` y se etiquetan en pantalla como "Solicitud manual"
  * (mismo criterio ya usado en la vista "Por Programación") — Diego debe
  * confirmar si esta etiqueta es la que quiere o si prefiere otra cosa.
+ *
+ * Monto en dinero por Proveedor (5, V35, 17-sep-2026): junto al total de
+ * cantidad pendiente, cada grupo trae `proveedores` — por cada Proveedor
+ * que tiene cotizado este Ingrediente Activo (en cualquiera de las
+ * necesidades que arman el total), cuánto costaría cubrir la
+ * cantidadPendiente COMPLETA del grupo con él (Total sin flete/con flete),
+ * para decidir a quién comprarle viendo el impacto en dinero, no solo el
+ * precio unitario. Si tiene más de una cotización de este Ingrediente
+ * Activo, se usa la más reciente (mismo criterio de precarga ya usado en
+ * el Comparador). Mismo motor (`calcularCotizacion`) que ya usa el
+ * Comparador y las tarjetas de "Por Proveedor" (4) — nada de cálculo nuevo.
  */
 export async function listarPendientesPorIngredienteActivo() {
   // "generada" NUNCA es un estado de la necesidad misma (solo pasa por
@@ -138,7 +158,7 @@ export async function listarPendientesPorIngredienteActivo() {
     where: { estado: { in: ["pendiente_autorizar", "pendiente_cotizar", "cubierta"] } },
     include: {
       producto: true,
-      comparacionOrigen: { include: { cotizaciones: true } },
+      comparacionOrigen: { include: { cotizaciones: { include: { proveedor: true, zona: true } } } },
     },
   });
 
@@ -151,6 +171,14 @@ export async function listarPendientesPorIngredienteActivo() {
       cantidadPendiente: number;
       ordenes: { id: string; estado: string; cantidadPendiente: number }[];
       origenesMap: Map<string, OrigenPendienteIngredienteActivo>;
+      // Monto por Proveedor (5) — cotización más reciente vista de cada
+      // Proveedor para este Ingrediente Activo, a través de TODAS sus
+      // necesidades; el total se calcula al final, ya con cantidadPendiente
+      // completa del grupo (no se puede calcular a mitad del loop).
+      cotizacionMasRecientePorProveedor: Map<
+        string,
+        { proveedorNombre: string; fechaCreacion: Date; moneda: "MXN" | "USD"; precioValor: number; tipoCambio: number | null; presentacionCantidad: number; costoFleteKg: number }
+      >;
     }
   >();
   const cacheOrigen = new Map<string, { huertaId: string | null; huertaNombre: string | null; recetaNombre: string | null }>();
@@ -173,11 +201,34 @@ export async function listarPendientesPorIngredienteActivo() {
     const etiqueta = orden.producto.ingredienteActivo ?? orden.producto.nombreComercial;
     let grupo = grupos.get(clave);
     if (!grupo) {
-      grupo = { ingredienteActivo: etiqueta, categoria: orden.producto.categoria, unidad: orden.producto.unidad, cantidadPendiente: 0, ordenes: [], origenesMap: new Map() };
+      grupo = {
+        ingredienteActivo: etiqueta,
+        categoria: orden.producto.categoria,
+        unidad: orden.producto.unidad,
+        cantidadPendiente: 0,
+        ordenes: [],
+        origenesMap: new Map(),
+        cotizacionMasRecientePorProveedor: new Map(),
+      };
       grupos.set(clave, grupo);
     }
     grupo.cantidadPendiente += cantidadPendiente;
     grupo.ordenes.push({ id: orden.id, estado: orden.estado, cantidadPendiente });
+
+    for (const cot of orden.comparacionOrigen?.cotizaciones ?? []) {
+      const actual = grupo.cotizacionMasRecientePorProveedor.get(cot.proveedorId);
+      if (!actual || cot.fechaCreacion > actual.fechaCreacion) {
+        grupo.cotizacionMasRecientePorProveedor.set(cot.proveedorId, {
+          proveedorNombre: cot.proveedor.nombre,
+          fechaCreacion: cot.fechaCreacion,
+          moneda: cot.moneda,
+          precioValor: Number(cot.precioValor),
+          tipoCambio: cot.tipoCambio != null ? Number(cot.tipoCambio) : null,
+          presentacionCantidad: Number(cot.presentacionCantidad),
+          costoFleteKg: Number(cot.zona.costoFleteKg),
+        });
+      }
+    }
 
     const cacheKey = orden.referenciaAplicacionId ?? "manual";
     let origen = cacheOrigen.get(cacheKey);
@@ -202,14 +253,30 @@ export async function listarPendientesPorIngredienteActivo() {
   }
 
   return [...grupos.values()]
-    .map((g) => ({
-      ingredienteActivo: g.ingredienteActivo,
-      categoria: g.categoria,
-      unidad: g.unidad,
-      cantidadPendiente: g.cantidadPendiente,
-      ordenes: g.ordenes,
-      origenes: [...g.origenesMap.values()].sort((a, b) => b.cantidad - a.cantidad),
-    }))
+    .map((g) => {
+      const proveedores: ProveedorPendienteIngredienteActivo[] = [...g.cotizacionMasRecientePorProveedor.entries()]
+        .map(([proveedorId, cot]) => {
+          const calc = calcularCotizacion(g.cantidadPendiente, {
+            moneda: cot.moneda,
+            precioValor: cot.precioValor,
+            tipoCambio: cot.tipoCambio,
+            presentacionCantidad: cot.presentacionCantidad,
+            costoFleteKg: cot.costoFleteKg,
+          });
+          return { proveedorId, proveedorNombre: cot.proveedorNombre, totalSinFlete: calc.precioTotalPresentaciones, totalConFlete: calc.totalConFlete };
+        })
+        .sort((a, b) => a.totalConFlete - b.totalConFlete);
+
+      return {
+        ingredienteActivo: g.ingredienteActivo,
+        categoria: g.categoria,
+        unidad: g.unidad,
+        cantidadPendiente: g.cantidadPendiente,
+        ordenes: g.ordenes,
+        origenes: [...g.origenesMap.values()].sort((a, b) => b.cantidad - a.cantidad),
+        proveedores,
+      };
+    })
     .sort((a, b) => a.ingredienteActivo.localeCompare(b.ingredienteActivo, "es"));
 }
 

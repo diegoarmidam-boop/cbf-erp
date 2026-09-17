@@ -707,6 +707,24 @@ export default function Ordenes() {
                         .join(", ")}
                     </div>
                   )}
+                  {g.proveedores.length > 0 && (
+                    <div style={{ marginTop: 8, borderTop: "1px solid var(--border)", paddingTop: 6 }}>
+                      <div style={{ fontSize: 11, color: "var(--ink-soft)", marginBottom: 4 }}>
+                        Costo de cubrir {formatearNumero(g.cantidadPendiente)} {g.unidad} con cada Proveedor cotizado:
+                      </div>
+                      {g.proveedores.map((p, i) => (
+                        <div key={p.proveedorId} style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, gap: 8 }}>
+                          <span>
+                            {p.proveedorNombre}
+                            {i === 0 && <span className="tag tag-success" style={{ marginLeft: 6 }}>Menor total</span>}
+                          </span>
+                          <span>
+                            Sin flete: {formatearDinero(p.totalSinFlete)} · <strong>Con flete: {formatearDinero(p.totalConFlete)}</strong>
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 8 }}>
                     {g.ordenes.map((o) => (
                       <div key={o.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12.5 }}>
