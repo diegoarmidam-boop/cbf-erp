@@ -8,6 +8,7 @@ import {
   listarPorProducto,
   listarPorProgramacion,
   listarPorProveedor,
+  listarProveedoresConCotizacionesActivas,
   TopeDisponibleExcedidoError,
   validarYAgruparAsignaciones,
 } from "./ordenesGeneracion.js";
@@ -27,6 +28,12 @@ ordenesGeneracionRouter.get("/por-producto/:clave", requirePermission("compras",
 
 ordenesGeneracionRouter.get("/por-proveedor/:proveedorId", requirePermission("compras", "ver"), async (req, res) => {
   res.json(await listarPorProveedor(req.params.proveedorId as string));
+});
+
+// Tarjetas "Por Proveedor" (4.1, V35) -- resumen de todos los Proveedores
+// con al menos una cotización activa, antes de elegir/expandir ninguno.
+ordenesGeneracionRouter.get("/resumen-proveedores", requirePermission("compras", "ver"), async (_req, res) => {
+  res.json(await listarProveedoresConCotizacionesActivas());
 });
 
 const asignacionSchema = z.object({

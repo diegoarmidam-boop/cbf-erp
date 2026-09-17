@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { requireAuth, requirePermission } from "../../middleware/auth.js";
 import { prisma } from "../../core/db.js";
-import { actualizarDiasCredito, crearProveedor, editarProveedor, listarProveedores, mejoresProveedoresPorProducto } from "./proveedores.js";
+import { actualizarDiasCredito, crearProveedor, editarProveedor, historicoDeProveedor, listarProveedores, mejoresProveedoresPorProducto } from "./proveedores.js";
 import { mensajeErrorValidacion, unoSolo } from "../../core/http.js";
 
 export const proveedoresRouter = Router();
@@ -25,6 +25,12 @@ proveedoresRouter.get("/", requirePermission("compras", "ver"), async (req, res)
 
 proveedoresRouter.get("/mejores/:productoId", requirePermission("compras", "ver"), async (req, res) => {
   res.json(await mejoresProveedoresPorProducto(unoSolo(req.params.productoId)));
+});
+
+// Histórico de compras/cotizaciones cerradas con un Proveedor (4.4, V35) --
+// información aparte de la vista activa de "Por Proveedor".
+proveedoresRouter.get("/:id/historico", requirePermission("compras", "ver"), async (req, res) => {
+  res.json(await historicoDeProveedor(unoSolo(req.params.id)));
 });
 
 const altaSchema = z.object({

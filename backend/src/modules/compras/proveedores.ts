@@ -74,3 +74,49 @@ export async function mejoresProveedoresPorProducto(productoId: string, limite =
     fecha: o.fechaCreacion,
   }));
 }
+
+/**
+ * Histórico de un Proveedor (4.4, V35, 17-sep-2026) -- información separada
+ * de la vista activa de "Por Proveedor" (tarjetas de cotizaciones
+ * pendientes), para consulta operativa ("¿a cuánto le compré esto la
+ * última vez?"). Dos partes: compras reales ya formalizadas/recibidas, y
+ * el historial completo de cotizaciones capturadas con él (se conservan
+ * para siempre, aunque no hayan terminado en una compra).
+ */
+export async function historicoDeProveedor(proveedorId: string) {
+  const [compras, cotizaciones] = await Promise.all([
+    prisma.ordenCompra.findMany({
+      where: { proveedorId, estado: { in: ["generada", "recibida"] } },
+      include: { producto: true },
+      orderBy: { fechaFormalizacion: "desc" },
+    }),
+    prisma.comparacionCotizacion.findMany({
+      where: { proveedorId },
+      include: { productoComercial: true, comparacion: { include: { producto: true } } },
+      orderBy: { fechaCreacion: "desc" },
+    }),
+  ]);
+
+  return {
+    compras: compras.map((o) => ({
+      id: o.id,
+      numero: o.numero,
+      nombreComercial: o.producto.nombreComercial,
+      cantidadSolicitada: Number(o.cantidadSolicitada),
+      unidad: o.producto.unidad,
+      precioUnitario: o.precioUnitario != null ? Number(o.precioUnitario) : null,
+      fecha: o.fechaFormalizacion,
+      estado: o.estado,
+    })),
+    cotizaciones: cotizaciones.map((c) => ({
+      id: c.id,
+      nombreComercial: c.productoComercial.nombreComercial,
+      ingredienteActivo: c.comparacion.producto.ingredienteActivo,
+      moneda: c.moneda,
+      precioValor: Number(c.precioValor),
+      presentacionCantidad: Number(c.presentacionCantidad),
+      contenedor: c.contenedor,
+      fecha: c.fechaCreacion,
+    })),
+  };
+}

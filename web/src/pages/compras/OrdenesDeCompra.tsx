@@ -2,45 +2,72 @@ import { useEffect, useState } from "react";
 import { api, ApiError, getToken } from "../../lib/api";
 import type {
   GrupoPendienteProgramacion,
+  HistoricoProveedor,
   LineaOrigenNecesidad,
   OrdenCompra,
   PendienteIngredienteActivo,
-  Proveedor,
+  ResumenProveedorActivo,
   VistaPreviaProveedor,
 } from "../../lib/types";
 import { formatearDinero, formatearNumero } from "../../lib/numero";
-import { formatearFecha } from "../../lib/fecha";
+import { formatearFecha, formatearInstante } from "../../lib/fecha";
 
 type ModoEntrada = "" | "proveedor" | "programacion" | "producto";
 
 interface Asignacion {
   cotizacionId: string;
   cantidad: number;
+  // De qué Proveedor/tarjeta vino esta asignación (4.3, V35) — para poder
+  // avisar "Ya cubierto con [Proveedor]" cuando la MISMA necesidad aparece
+  // cotizada por más de un Proveedor y ya se eligió uno.
+  proveedorId: string;
+  proveedorNombre: string;
 }
 
 /**
  * Pestaña "Órdenes de Compra" (3-sep-2026, Prioridad 1) — el único lugar
  * donde de verdad se arma y genera una orden de compra real. 3 formas de
- * entrada (Por Proveedor / Por Orden [= por Programación completa,
- * decisión de Diego 3-sep-2026] / Por Producto), agrupación automática por
- * Proveedor resultante con vista previa, y tope estricto de Cantidad
- * disponible del Proveedor (sin repartir automático).
+ * entrada (Por Proveedor / Por Solicitud [= por Programación completa,
+ * decisión de Diego 3-sep-2026, renombrada de "Por Orden" en la fusión de
+ * terminología V35] / Por Producto), agrupación automática por Proveedor
+ * resultante con vista previa, y tope estricto de Cantidad disponible del
+ * Proveedor (sin repartir automático).
+ *
+ * "Por Proveedor" (4.1, V35, 17-sep-2026): ya no es un selector — se
+ * muestran tarjetas apiladas, una por Proveedor con cotizaciones activas,
+ * y las asignaciones se conservan al expandir/cerrar distintas tarjetas
+ * (antes `cargarPorProveedor` las borraba cada vez que cambiabas de
+ * Proveedor) — eso es justo lo que permite avisar en tiempo real si el
+ * mismo Ingrediente Activo ya quedó cubierto con otro Proveedor en la
+ * misma sesión (4.3, el bug real de la compra doble de Diego).
  */
 export default function OrdenesDeCompra({ ordenCompraIdInicial }: { ordenCompraIdInicial?: string | null }) {
   const [modo, setModo] = useState<ModoEntrada>("");
-  const [lineas, setLineas] = useState<LineaOrigenNecesidad[]>([]);
-  const [cargandoLineas, setCargandoLineas] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Selectores de "a dónde entrar" por modo.
-  const [proveedores, setProveedores] = useState<Proveedor[]>([]);
-  const [proveedorId, setProveedorId] = useState("");
+  // "Por Proveedor" (4.1) — tarjetas, no selector: resumen de todos los
+  // Proveedores con cotizaciones activas, expandibles una o varias a la
+  // vez; las líneas de cada uno se cargan solas (lazy) al expandir.
+  const [resumenProveedores, setResumenProveedores] = useState<ResumenProveedorActivo[]>([]);
+  const [proveedoresExpandidos, setProveedoresExpandidos] = useState<Set<string>>(new Set());
+  const [lineasPorProveedor, setLineasPorProveedor] = useState<Record<string, LineaOrigenNecesidad[]>>({});
+  const [cargandoProveedorId, setCargandoProveedorId] = useState<string | null>(null);
+  // Histórico (4.4) — aparte de la vista activa, se abre desde la misma tarjeta.
+  const [historicoProveedorId, setHistoricoProveedorId] = useState<string | null>(null);
+  const [historicoData, setHistoricoData] = useState<HistoricoProveedor | null>(null);
+  const [cargandoHistorico, setCargandoHistorico] = useState(false);
+
+  // "Por Solicitud" y "Por Producto" — sin cambio de mecánica, solo de nombre.
+  const [lineas, setLineas] = useState<LineaOrigenNecesidad[]>([]);
+  const [cargandoLineas, setCargandoLineas] = useState(false);
   const [gruposProgramacion, setGruposProgramacion] = useState<GrupoPendienteProgramacion[]>([]);
   const [gruposProducto, setGruposProducto] = useState<PendienteIngredienteActivo[]>([]);
   const [objetivoProgramacion, setObjetivoProgramacion] = useState<GrupoPendienteProgramacion | null>(null);
   const [objetivoProducto, setObjetivoProducto] = useState<PendienteIngredienteActivo | null>(null);
 
-  // Asignación: por necesidad (ordenCompraId), qué cotización y cuánto.
+  // Asignación: por necesidad (ordenCompraId), qué cotización y cuánto —
+  // GLOBAL, compartida entre las 3 formas de entrada; en "Por Proveedor" ya
+  // no se limpia al expandir/cerrar tarjetas (ver comentario arriba).
   const [asignaciones, setAsignaciones] = useState<Record<string, Asignacion>>({});
 
   const [vistaPrevia, setVistaPrevia] = useState<VistaPreviaProveedor[] | null>(null);
@@ -51,8 +78,12 @@ export default function OrdenesDeCompra({ ordenCompraIdInicial }: { ordenCompraI
   // tener que ir a buscarlo a "En Camino" reabriendo la cotización.
   const [ordenesGeneradas, setOrdenesGeneradas] = useState<OrdenCompra[]>([]);
 
+  function cargarResumenProveedores() {
+    api.get<ResumenProveedorActivo[]>("/compras/ordenes-generacion/resumen-proveedores").then(setResumenProveedores);
+  }
+
   useEffect(() => {
-    api.get<Proveedor[]>("/compras/proveedores").then(setProveedores);
+    cargarResumenProveedores();
     api.get<GrupoPendienteProgramacion[]>("/compras/ordenes/pendientes-por-programacion").then(setGruposProgramacion);
     api.get<PendienteIngredienteActivo[]>("/compras/ordenes/pendientes-por-ingrediente-activo").then(setGruposProducto);
   }, []);
@@ -60,7 +91,7 @@ export default function OrdenesDeCompra({ ordenCompraIdInicial }: { ordenCompraI
   // Ruta rápida (1.1) — llegando desde "Cotizar"/"Generar orden de compra"
   // en Pendientes: ?ordenCompraId= resuelve automáticamente a qué
   // programación (o solicitud manual) pertenece y entra directo en modo
-  // "Por Orden", sin que el usuario tenga que volver a buscarla.
+  // "Por Solicitud", sin que el usuario tenga que volver a buscarla.
   useEffect(() => {
     if (!ordenCompraIdInicial || gruposProgramacion.length === 0) return;
     const grupo = gruposProgramacion.find((g) => g.lineas.some((l) => l.ordenId === ordenCompraIdInicial));
@@ -89,22 +120,47 @@ export default function OrdenesDeCompra({ ordenCompraIdInicial }: { ordenCompraI
 
   function cambiarModo(m: ModoEntrada) {
     setModo(m);
-    setProveedorId("");
+    setProveedoresExpandidos(new Set());
+    setLineasPorProveedor({});
+    setHistoricoProveedorId(null);
     setObjetivoProgramacion(null);
     setObjetivoProducto(null);
     limpiarSeleccion();
   }
 
-  function cargarPorProveedor(id: string) {
-    setProveedorId(id);
-    limpiarSeleccion();
-    if (!id) return;
-    setCargandoLineas(true);
+  // "Por Proveedor" (4.1) — expandir/cerrar una tarjeta NO limpia las
+  // asignaciones de las demás (a diferencia del selector viejo, que las
+  // borraba al cambiar de Proveedor) — es justo lo que permite detectar
+  // que el mismo Ingrediente Activo ya se eligió con otro Proveedor.
+  function alternarProveedorExpandido(proveedorId: string) {
+    setProveedoresExpandidos((prev) => {
+      const siguiente = new Set(prev);
+      if (siguiente.has(proveedorId)) {
+        siguiente.delete(proveedorId);
+      } else {
+        siguiente.add(proveedorId);
+        if (!lineasPorProveedor[proveedorId]) {
+          setCargandoProveedorId(proveedorId);
+          api
+            .get<LineaOrigenNecesidad[]>(`/compras/ordenes-generacion/por-proveedor/${proveedorId}`)
+            .then((data) => setLineasPorProveedor((p) => ({ ...p, [proveedorId]: data })))
+            .catch((err) => setError(err instanceof ApiError ? err.message : "No se pudo cargar."))
+            .finally(() => setCargandoProveedorId(null));
+        }
+      }
+      return siguiente;
+    });
+  }
+
+  function abrirHistorico(proveedorId: string) {
+    setHistoricoProveedorId(proveedorId);
+    setHistoricoData(null);
+    setCargandoHistorico(true);
     api
-      .get<LineaOrigenNecesidad[]>(`/compras/ordenes-generacion/por-proveedor/${id}`)
-      .then(setLineas)
-      .catch((err) => setError(err instanceof ApiError ? err.message : "No se pudo cargar."))
-      .finally(() => setCargandoLineas(false));
+      .get<HistoricoProveedor>(`/compras/proveedores/${proveedorId}/historico`)
+      .then(setHistoricoData)
+      .catch((err) => setError(err instanceof ApiError ? err.message : "No se pudo cargar el histórico."))
+      .finally(() => setCargandoHistorico(false));
   }
 
   function cargarPorProgramacion(grupo: GrupoPendienteProgramacion) {
@@ -152,7 +208,10 @@ export default function OrdenesDeCompra({ ordenCompraIdInicial }: { ordenCompraI
     const presentacion = cotizacion?.presentacionCantidad || 1;
     const unidades = Math.ceil(necesidad.cantidadPendiente / presentacion);
     const cantidad = unidades * presentacion;
-    setAsignaciones((prev) => ({ ...prev, [necesidad.ordenCompraId]: { cotizacionId, cantidad } }));
+    setAsignaciones((prev) => ({
+      ...prev,
+      [necesidad.ordenCompraId]: { cotizacionId, cantidad, proveedorId: cotizacion?.proveedorId ?? "", proveedorNombre: cotizacion?.proveedorNombre ?? "" },
+    }));
   }
 
   function cambiarCantidad(ordenCompraId: string, cantidad: number) {
@@ -206,15 +265,128 @@ export default function OrdenesDeCompra({ ordenCompraIdInicial }: { ordenCompraI
       );
       setAsignaciones({});
       setVistaPrevia(null);
-      // Recarga las líneas de la selección actual — lo ya cubierto desaparece.
-      if (modo === "proveedor" && proveedorId) cargarPorProveedor(proveedorId);
-      else if (modo === "programacion" && objetivoProgramacion) cargarPorProgramacion(objetivoProgramacion);
+      // Recarga la selección actual — lo ya cubierto desaparece (4.2).
+      if (modo === "proveedor") {
+        cargarResumenProveedores();
+        for (const proveedorId of proveedoresExpandidos) {
+          api.get<LineaOrigenNecesidad[]>(`/compras/ordenes-generacion/por-proveedor/${proveedorId}`).then((data) => setLineasPorProveedor((p) => ({ ...p, [proveedorId]: data })));
+        }
+      } else if (modo === "programacion" && objetivoProgramacion) cargarPorProgramacion(objetivoProgramacion);
       else if (modo === "producto" && objetivoProducto) cargarPorProducto(objetivoProducto);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "No se pudo generar.");
     } finally {
       setGenerando(false);
     }
+  }
+
+  // Alerta de duplicado (4.3) — la MISMA necesidad ya asignada a otro
+  // Proveedor (siempre posible en "Por Proveedor", donde una necesidad
+  // puede aparecer cotizada por varios), O el mismo Ingrediente Activo ya
+  // cubierto por una necesidad DISTINTA en otro Proveedor dentro de esta
+  // misma sesión sin confirmar — mismo criterio pedido para "Por Producto".
+  function duplicadoDe(l: LineaOrigenNecesidad, proveedorIdTarjeta?: string): string | null {
+    const propia = asignaciones[l.ordenCompraId];
+    if (propia && proveedorIdTarjeta && propia.proveedorId !== proveedorIdTarjeta) return propia.proveedorNombre;
+    if (!l.ingredienteActivo) return null;
+    for (const [ordenCompraId, a] of Object.entries(asignaciones)) {
+      if (ordenCompraId === l.ordenCompraId) continue;
+      const otra = [...lineas, ...Object.values(lineasPorProveedor).flat()].find((x) => x.ordenCompraId === ordenCompraId);
+      if (otra && otra.ingredienteActivo === l.ingredienteActivo && (!proveedorIdTarjeta || a.proveedorId !== proveedorIdTarjeta)) {
+        return a.proveedorNombre;
+      }
+    }
+    return null;
+  }
+
+  function renderLinea(l: LineaOrigenNecesidad, proveedorIdTarjeta?: string) {
+    const asignacion = asignaciones[l.ordenCompraId];
+    const yaCubiertoCon = duplicadoDe(l, proveedorIdTarjeta);
+    return (
+      <div key={l.ordenCompraId} className="card">
+        <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 13.5 }}>{l.nombreComercial}</div>
+            <div style={{ fontSize: 12, color: "var(--ink-soft)" }}>
+              {l.origenLabel} · {l.fecha && formatearFecha(l.fecha)} · Pendiente: {formatearNumero(l.cantidadPendiente)} {l.unidad}
+            </div>
+          </div>
+          {yaCubiertoCon && (
+            <span className="tag tag-danger" style={{ alignSelf: "flex-start" }}>
+              Ya cubierto con {yaCubiertoCon}
+            </span>
+          )}
+        </div>
+        {l.cotizaciones.length === 0 ? (
+          <p style={{ fontSize: 12, color: "var(--ink-soft)" }}>Sin cotizaciones capturadas todavía para este producto.</p>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table>
+              <thead>
+                <tr>
+                  <th></th>
+                  <th>Proveedor</th>
+                  <th>Marca</th>
+                  <th>Presentación</th>
+                  <th>Precio/unidad</th>
+                  <th>Disponible</th>
+                  <th>Ya usado</th>
+                </tr>
+              </thead>
+              <tbody>
+                {l.cotizaciones.map((c) => (
+                  <tr key={c.cotizacionId} style={asignacion?.cotizacionId === c.cotizacionId ? { background: "var(--pink-soft, #fdeef1)" } : undefined}>
+                    <td>
+                      <input
+                        type="radio"
+                        name={`cot-${l.ordenCompraId}`}
+                        checked={asignacion?.cotizacionId === c.cotizacionId}
+                        onChange={() => asignar(l, c.cotizacionId)}
+                      />
+                    </td>
+                    <td>
+                      {c.proveedorNombre}
+                      {c.esPreferido && <span className="tag tag-success" style={{ marginLeft: 6 }}>Preferido</span>}
+                      {c.esSustituto && <span className="tag tag-neutral" style={{ marginLeft: 6 }}>Sustituto</span>}
+                      {c.esMejorGlobal && (
+                        <span className="tag tag-success" style={{ marginLeft: 6 }}>
+                          Mejor Global
+                        </span>
+                      )}
+                      {c.esMejorLocal && !c.esMejorGlobal && (
+                        <span className="tag tag-success" style={{ marginLeft: 6 }}>
+                          Mejor Local
+                        </span>
+                      )}
+                      {c.esMejorGlobal && (
+                        <div style={{ fontSize: 10.5, color: "var(--pink)", fontWeight: 600 }}>(mejor precio)</div>
+                      )}
+                    </td>
+                    <td>{c.nombreComercial}</td>
+                    <td>{formatearNumero(c.presentacionCantidad)} {l.unidad}</td>
+                    <td>{formatearDinero(c.precioUnitarioMXN)}</td>
+                    <td>{c.cantidadDisponibleTotal ? <span className="tag tag-neutral">Toda</span> : formatearNumero(c.cantidadDisponible ?? 0)}</td>
+                    <td>{formatearNumero(c.cantidadYaUsada)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {asignacion && (
+          <label className="field" style={{ maxWidth: 200, marginTop: 8 }}>
+            Cantidad a comprarle a este Proveedor ({l.unidad})
+            <input
+              type="number"
+              min={0.001}
+              step="0.001"
+              value={asignacion.cantidad}
+              onChange={(e) => cambiarCantidad(l.ordenCompraId, Number(e.target.value))}
+            />
+          </label>
+        )}
+      </div>
+    );
   }
 
   return (
@@ -229,7 +401,7 @@ export default function OrdenesDeCompra({ ordenCompraIdInicial }: { ordenCompraI
           Por Proveedor
         </button>
         <button className={modo === "programacion" ? "btn-primary" : "btn-secondary"} onClick={() => cambiarModo("programacion")}>
-          Por Orden (programación completa)
+          Por Solicitud
         </button>
         <button className={modo === "producto" ? "btn-primary" : "btn-secondary"} onClick={() => cambiarModo("producto")}>
           Por Producto
@@ -255,17 +427,133 @@ export default function OrdenesDeCompra({ ordenCompraIdInicial }: { ordenCompraI
       )}
 
       {modo === "proveedor" && (
-        <label className="field" style={{ maxWidth: 320, marginBottom: 16 }}>
-          Proveedor
-          <select value={proveedorId} onChange={(e) => cargarPorProveedor(e.target.value)}>
-            <option value="">Selecciona…</option>
-            {proveedores.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.nombre}
-              </option>
-            ))}
-          </select>
-        </label>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 16 }}>
+          <p style={{ fontSize: 12, color: "var(--ink-soft)" }}>
+            Una tarjeta por Proveedor con al menos una cotización activa — sin buscarlo ni elegirlo de una lista. Haz clic para
+            expandir y asignar.
+          </p>
+          {resumenProveedores.map((p) => {
+            const expandida = proveedoresExpandidos.has(p.proveedorId);
+            const lineasProveedor = lineasPorProveedor[p.proveedorId] ?? [];
+            return (
+              <div key={p.proveedorId} className="card">
+                <div
+                  style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, cursor: "pointer" }}
+                  onClick={() => alternarProveedorExpandido(p.proveedorId)}
+                >
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: 14 }}>{p.proveedorNombre}</div>
+                    <div style={{ fontSize: 12, color: "var(--ink-soft)" }}>
+                      {p.cotizacionesActivas} cotización{p.cotizacionesActivas !== 1 ? "es" : ""} activa{p.cotizacionesActivas !== 1 ? "s" : ""}
+                    </div>
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    <div style={{ fontSize: 12, color: "var(--ink-soft)" }}>Sin flete: {formatearDinero(p.totalSinFlete)}</div>
+                    <div style={{ fontWeight: 700, fontSize: 13.5 }}>Con flete: {formatearDinero(p.totalConFlete)}</div>
+                  </div>
+                </div>
+                {expandida && (
+                  <div style={{ marginTop: 10, borderTop: "1px solid var(--border)", paddingTop: 10 }}>
+                    <button
+                      className="btn-secondary"
+                      style={{ marginBottom: 10 }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        abrirHistorico(p.proveedorId);
+                      }}
+                    >
+                      Ver histórico con este Proveedor
+                    </button>
+                    {cargandoProveedorId === p.proveedorId ? (
+                      <p>Cargando…</p>
+                    ) : (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                        {lineasProveedor.map((l) => renderLinea(l, p.proveedorId))}
+                        {lineasProveedor.length === 0 && <p style={{ color: "var(--ink-soft)" }}>Sin líneas para este Proveedor.</p>}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          {resumenProveedores.length === 0 && <p style={{ color: "var(--ink-soft)" }}>Sin Proveedores con cotizaciones activas.</p>}
+        </div>
+      )}
+
+      {historicoProveedorId && (
+        <div className="card" style={{ marginBottom: 16, background: "var(--surface-soft, #fafafa)" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+            <div style={{ fontWeight: 700, fontSize: 13.5 }}>
+              Histórico — {resumenProveedores.find((p) => p.proveedorId === historicoProveedorId)?.proveedorNombre}
+            </div>
+            <button className="btn-secondary" onClick={() => setHistoricoProveedorId(null)}>
+              Cerrar
+            </button>
+          </div>
+          {cargandoHistorico ? (
+            <p>Cargando…</p>
+          ) : (
+            <>
+              <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 4 }}>Compras ya formalizadas</div>
+              {historicoData && historicoData.compras.length > 0 ? (
+                <table style={{ marginBottom: 14 }}>
+                  <thead>
+                    <tr>
+                      <th>Folio</th>
+                      <th>Producto</th>
+                      <th>Cantidad</th>
+                      <th>Precio/unidad</th>
+                      <th>Fecha</th>
+                      <th>Estado</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {historicoData.compras.map((c) => (
+                      <tr key={c.id}>
+                        <td>{c.numero ?? "—"}</td>
+                        <td>{c.nombreComercial}</td>
+                        <td>{formatearNumero(c.cantidadSolicitada)} {c.unidad}</td>
+                        <td>{c.precioUnitario != null ? formatearDinero(c.precioUnitario) : "—"}</td>
+                        <td>{c.fecha ? formatearFecha(c.fecha) : "—"}</td>
+                        <td>{c.estado}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <p style={{ fontSize: 12, color: "var(--ink-soft)", marginBottom: 14 }}>Sin compras formalizadas todavía con este Proveedor.</p>
+              )}
+              <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 4 }}>Historial de cotizaciones</div>
+              {historicoData && historicoData.cotizaciones.length > 0 ? (
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Ingrediente Activo</th>
+                      <th>Producto Comercial</th>
+                      <th>Precio</th>
+                      <th>Presentación</th>
+                      <th>Fecha</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {historicoData.cotizaciones.map((c) => (
+                      <tr key={c.id}>
+                        <td>{c.ingredienteActivo ?? "—"}</td>
+                        <td>{c.nombreComercial}</td>
+                        <td>{formatearDinero(c.precioValor)} {c.moneda}</td>
+                        <td>{formatearNumero(c.presentacionCantidad)} ({c.contenedor})</td>
+                        <td>{formatearInstante(c.fecha)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <p style={{ fontSize: 12, color: "var(--ink-soft)" }}>Sin cotizaciones capturadas con este Proveedor.</p>
+              )}
+            </>
+          )}
+        </div>
       )}
 
       {modo === "programacion" && !objetivoProgramacion && (
@@ -320,105 +608,26 @@ export default function OrdenesDeCompra({ ordenCompraIdInicial }: { ordenCompraI
         </div>
       )}
 
-      {cargandoLineas && <p>Cargando…</p>}
+      {(modo === "programacion" || modo === "producto") && (
+        <>
+          {cargandoLineas && <p>Cargando…</p>}
 
-      {!cargandoLineas && lineas.length > 0 && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 20 }}>
-          {lineas.map((l) => {
-            const asignacion = asignaciones[l.ordenCompraId];
-            return (
-              <div key={l.ordenCompraId} className="card">
-                <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
-                  <div>
-                    <div style={{ fontWeight: 700, fontSize: 13.5 }}>{l.nombreComercial}</div>
-                    <div style={{ fontSize: 12, color: "var(--ink-soft)" }}>
-                      {l.origenLabel} · {l.fecha && formatearFecha(l.fecha)} · Pendiente: {formatearNumero(l.cantidadPendiente)} {l.unidad}
-                    </div>
-                  </div>
-                </div>
-                {l.cotizaciones.length === 0 ? (
-                  <p style={{ fontSize: 12, color: "var(--ink-soft)" }}>Sin cotizaciones capturadas todavía para este producto.</p>
-                ) : (
-                  <div style={{ overflowX: "auto" }}>
-                    <table>
-                      <thead>
-                        <tr>
-                          <th></th>
-                          <th>Proveedor</th>
-                          <th>Marca</th>
-                          <th>Presentación</th>
-                          <th>Precio/unidad</th>
-                          <th>Disponible</th>
-                          <th>Ya usado</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {l.cotizaciones.map((c) => (
-                          <tr key={c.cotizacionId} style={asignacion?.cotizacionId === c.cotizacionId ? { background: "var(--pink-soft, #fdeef1)" } : undefined}>
-                            <td>
-                              <input
-                                type="radio"
-                                name={`cot-${l.ordenCompraId}`}
-                                checked={asignacion?.cotizacionId === c.cotizacionId}
-                                onChange={() => asignar(l, c.cotizacionId)}
-                              />
-                            </td>
-                            <td>
-                              {c.proveedorNombre}
-                              {c.esPreferido && <span className="tag tag-success" style={{ marginLeft: 6 }}>Preferido</span>}
-                              {c.esSustituto && <span className="tag tag-neutral" style={{ marginLeft: 6 }}>Sustituto</span>}
-                              {c.esMejorGlobal && (
-                                <span className="tag tag-success" style={{ marginLeft: 6 }}>
-                                  Mejor Global
-                                </span>
-                              )}
-                              {c.esMejorLocal && !c.esMejorGlobal && (
-                                <span className="tag tag-success" style={{ marginLeft: 6 }}>
-                                  Mejor Local
-                                </span>
-                              )}
-                              {c.esMejorGlobal && (
-                                <div style={{ fontSize: 10.5, color: "var(--pink)", fontWeight: 600 }}>(mejor precio)</div>
-                              )}
-                            </td>
-                            <td>{c.nombreComercial}</td>
-                            <td>{formatearNumero(c.presentacionCantidad)} {l.unidad}</td>
-                            <td>{formatearDinero(c.precioUnitarioMXN)}</td>
-                            <td>{c.cantidadDisponibleTotal ? <span className="tag tag-neutral">Toda</span> : formatearNumero(c.cantidadDisponible ?? 0)}</td>
-                            <td>{formatearNumero(c.cantidadYaUsada)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-                {asignacion && (
-                  <label className="field" style={{ maxWidth: 200, marginTop: 8 }}>
-                    Cantidad a comprarle a este Proveedor ({l.unidad})
-                    <input
-                      type="number"
-                      min={0.001}
-                      step="0.001"
-                      value={asignacion.cantidad}
-                      onChange={(e) => cambiarCantidad(l.ordenCompraId, Number(e.target.value))}
-                    />
-                  </label>
-                )}
-              </div>
-            );
-          })}
-          {asignacionesArray.length > 0 && (
-            <div style={{ display: "flex", gap: 8 }}>
-              <button className="btn-secondary" onClick={verVistaPrevia} disabled={cargandoPreview}>
-                {cargandoPreview ? "Calculando…" : "Ver vista previa"}
-              </button>
-            </div>
+          {!cargandoLineas && lineas.length > 0 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 20 }}>{lineas.map((l) => renderLinea(l))}</div>
           )}
-        </div>
+
+          {!cargandoLineas && lineas.length === 0 && !error && (objetivoProgramacion || objetivoProducto) && (
+            <p style={{ color: "var(--ink-soft)" }}>Sin necesidades pendientes cotizadas en esta selección.</p>
+          )}
+        </>
       )}
 
-      {!cargandoLineas && modo && lineas.length === 0 && !error && (proveedorId || objetivoProgramacion || objetivoProducto) && (
-        <p style={{ color: "var(--ink-soft)" }}>Sin necesidades pendientes cotizadas en esta selección.</p>
+      {asignacionesArray.length > 0 && !vistaPrevia && (
+        <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
+          <button className="btn-secondary" onClick={verVistaPrevia} disabled={cargandoPreview}>
+            {cargandoPreview ? "Calculando…" : `Ver vista previa (${asignacionesArray.length} línea${asignacionesArray.length !== 1 ? "s" : ""} asignada${asignacionesArray.length !== 1 ? "s" : ""})`}
+          </button>
+        </div>
       )}
 
       {vistaPrevia && (

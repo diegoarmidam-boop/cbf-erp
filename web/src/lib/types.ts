@@ -798,6 +798,42 @@ export interface AsignacionInput {
   cantidad: number;
 }
 
+// Tarjetas "Por Proveedor" (Prioridad 4, V35, 17-sep-2026).
+export interface ResumenProveedorActivo {
+  proveedorId: string;
+  proveedorNombre: string;
+  cotizacionesActivas: number;
+  totalSinFlete: number;
+  totalConFlete: number;
+}
+
+export interface HistoricoProveedorCompra {
+  id: string;
+  numero: number | null;
+  nombreComercial: string;
+  cantidadSolicitada: number;
+  unidad: string;
+  precioUnitario: number | null;
+  fecha: string | null;
+  estado: string;
+}
+
+export interface HistoricoProveedorCotizacion {
+  id: string;
+  nombreComercial: string;
+  ingredienteActivo: string | null;
+  moneda: string;
+  precioValor: number;
+  presentacionCantidad: number;
+  contenedor: string;
+  fecha: string;
+}
+
+export interface HistoricoProveedor {
+  compras: HistoricoProveedorCompra[];
+  cotizaciones: HistoricoProveedorCotizacion[];
+}
+
 export type TipoEquipo = "tractor" | "camioneta" | "remolque" | "implemento";
 
 export interface Equipo {

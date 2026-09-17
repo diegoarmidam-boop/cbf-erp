@@ -242,6 +242,62 @@ export async function listarPorProveedor(proveedorId: string): Promise<LineaOrig
     .filter((l) => l.cotizaciones.length > 0);
 }
 
+export interface ResumenProveedorActivo {
+  proveedorId: string;
+  proveedorNombre: string;
+  cotizacionesActivas: number;
+  totalSinFlete: number;
+  totalConFlete: number;
+}
+
+/**
+ * "Por Proveedor" ya no es un selector (4.1, V35, 17-sep-2026) — antes de
+ * elegir, se muestra una tarjeta por cada Proveedor que tiene al menos una
+ * cotización activa (necesidad pendiente con Comparación), con el monto en
+ * dinero de comprarle todo lo que tiene cotizado ahora mismo. Mismos 2
+ * montos que ya calcula el Comparador por línea (Total sin flete/con
+ * flete), sumados aquí a nivel Proveedor -- recalculados contra lo que de
+ * verdad falta (cantidadPendiente), no contra la cantidadNecesaria
+ * original de toda la campaña (esa ya puede estar parcialmente comprada).
+ */
+export async function listarProveedoresConCotizacionesActivas(): Promise<ResumenProveedorActivo[]> {
+  const necesidades = await prisma.ordenCompra.findMany({
+    where: { estado: { in: ["pendiente_cotizar", "cubierta"] }, comparacionOrigen: { isNot: null } },
+    include: { comparacionOrigen: true },
+  });
+
+  const resumen = new Map<string, ResumenProveedorActivo>();
+  for (const necesidad of necesidades) {
+    const calc = await obtenerComparacionCalculada(necesidad.comparacionOrigen!.id);
+    if (!calc || calc.cantidadPendiente <= 0) continue;
+
+    const cotizacionesCrudas = await prisma.comparacionCotizacion.findMany({
+      where: { comparacionId: necesidad.comparacionOrigen!.id },
+      include: { proveedor: true, zona: true },
+    });
+
+    for (const cot of cotizacionesCrudas) {
+      const calcPendiente = calcularCotizacion(calc.cantidadPendiente, {
+        moneda: cot.moneda,
+        precioValor: Number(cot.precioValor),
+        tipoCambio: cot.tipoCambio != null ? Number(cot.tipoCambio) : null,
+        presentacionCantidad: Number(cot.presentacionCantidad),
+        costoFleteKg: Number(cot.zona.costoFleteKg),
+      });
+
+      let r = resumen.get(cot.proveedorId);
+      if (!r) {
+        r = { proveedorId: cot.proveedorId, proveedorNombre: cot.proveedor.nombre, cotizacionesActivas: 0, totalSinFlete: 0, totalConFlete: 0 };
+        resumen.set(cot.proveedorId, r);
+      }
+      r.cotizacionesActivas += 1;
+      r.totalSinFlete += calcPendiente.precioTotalPresentaciones;
+      r.totalConFlete += calcPendiente.totalConFlete;
+    }
+  }
+  return [...resumen.values()].sort((a, b) => a.proveedorNombre.localeCompare(b.proveedorNombre, "es"));
+}
+
 export interface AsignacionInput {
   cotizacionId: string;
   ordenCompraId: string; // necesidad de origen a la que aplica esta cantidad
