@@ -499,6 +499,13 @@ model EmpresaConfig {
   telefono            String?
   firmaAtiendeNombre  String?
   firmaAutorizaNombre String?
+  // Comparador de Cotizaciones (Prioridad 2, V35, 17-sep-2026): constante
+  // única del sistema para la alerta "⚠ REVISAR" de % Excedente -- ya no se
+  // captura por Comparación al cotizar. Sigue existiendo `Comparacion.
+  // umbralExcedentePct` (por diseño, para no afectar comparaciones ya
+  // hechas si se ajusta este valor después) -- este campo solo alimenta el
+  // default con el que se crea cada Comparación nueva.
+  umbralExcedentePctDefault Decimal @default(20) @db.Decimal(5, 2)
 }
 
 // Contador atómico genérico (2-sep-2026, primer uso: folio de Orden de

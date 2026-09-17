@@ -86,7 +86,6 @@ export default function Comparador() {
   const [error, setError] = useState<string | null>(null);
 
   const [ordenId, setOrdenId] = useState("");
-  const [umbralExcedentePct, setUmbralExcedentePct] = useState("20");
   const [cotizaciones, setCotizaciones] = useState<CotizacionForm[]>([nuevaCotizacion()]);
 
   // Agregar cotización a una comparación ya guardada (vista de detalle).
@@ -146,7 +145,6 @@ export default function Comparador() {
   function limpiarForm() {
     setMostrarForm(false);
     setOrdenId("");
-    setUmbralExcedentePct("20");
     setCotizaciones([nuevaCotizacion()]);
   }
 
@@ -160,7 +158,6 @@ export default function Comparador() {
     try {
       const payload = {
         ordenCompraId: ordenId,
-        umbralExcedentePct: Number(umbralExcedentePct),
         cotizaciones: cotizaciones.map(cotizacionAPayload),
       };
       const nueva = await api.post<{ id: string }>("/compras/comparador", payload);
@@ -468,12 +465,12 @@ export default function Comparador() {
       {mostrarForm && (
         <form onSubmit={onSubmit} className="card" style={{ marginBottom: 18 }}>
           <label className="field" style={{ maxWidth: 420, marginBottom: 12 }}>
-            Producto (de la lista de compra pendiente de cotizar)
+            Ingrediente Activo (de la Solicitud pendiente de cotizar)
             <select value={ordenId} onChange={(e) => setOrdenId(e.target.value)} required>
               <option value="">Selecciona…</option>
               {listaCompra.map((o) => (
                 <option key={o.id} value={o.id}>
-                  {o.producto.nombreComercial} — {o.cantidadSolicitada} {o.producto.unidad}
+                  {o.producto.ingredienteActivo ?? o.producto.nombreComercial} — {o.cantidadSolicitada} {o.producto.unidad}
                 </option>
               ))}
             </select>
@@ -482,11 +479,6 @@ export default function Comparador() {
                 No hay productos pendientes de cotizar en Órdenes ahora mismo.
               </div>
             )}
-          </label>
-
-          <label className="field" style={{ maxWidth: 220, marginBottom: 12 }}>
-            Umbral de alerta % Excedente
-            <input type="number" min={0} step="1" value={umbralExcedentePct} onChange={(e) => setUmbralExcedentePct(e.target.value)} required />
           </label>
 
           <div style={{ fontSize: 11.5, color: "var(--ink-soft)", marginBottom: 6 }}>Cotizaciones por proveedor</div>

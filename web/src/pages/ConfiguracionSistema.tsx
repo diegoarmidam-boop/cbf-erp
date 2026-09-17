@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { api, ApiError } from "../lib/api";
 import CatalogosTab from "./CatalogosTab";
 
-type Tab = "modulos" | "facturacion" | "catalogos";
+type Tab = "modulos" | "facturacion" | "compras" | "catalogos";
 
 interface ModuloConfigItem {
   modulo: string;
@@ -18,6 +18,7 @@ interface EmpresaConfig {
   telefono: string | null;
   firmaAtiendeNombre: string | null;
   firmaAutorizaNombre: string | null;
+  umbralExcedentePctDefault: number;
 }
 
 /**
@@ -44,6 +45,7 @@ export default function ConfiguracionSistema() {
     telefono: "",
     firmaAtiendeNombre: "",
     firmaAutorizaNombre: "",
+    umbralExcedentePctDefault: "20",
   });
   const [guardandoEmpresa, setGuardandoEmpresa] = useState(false);
   const [empresaGuardada, setEmpresaGuardada] = useState(false);
@@ -68,6 +70,7 @@ export default function ConfiguracionSistema() {
         telefono: e.telefono ?? "",
         firmaAtiendeNombre: e.firmaAtiendeNombre ?? "",
         firmaAutorizaNombre: e.firmaAutorizaNombre ?? "",
+        umbralExcedentePctDefault: String(e.umbralExcedentePctDefault ?? 20),
       });
     });
   }, []);
@@ -77,7 +80,10 @@ export default function ConfiguracionSistema() {
     setGuardandoEmpresa(true);
     setEmpresaGuardada(false);
     try {
-      await api.patch<EmpresaConfig>("/configuracion/empresa", empresaForm);
+      await api.patch<EmpresaConfig>("/configuracion/empresa", {
+        ...empresaForm,
+        umbralExcedentePctDefault: Number(empresaForm.umbralExcedentePctDefault),
+      });
       setEmpresaGuardada(true);
       setTimeout(() => setEmpresaGuardada(false), 2500);
     } catch (err) {
@@ -109,6 +115,7 @@ export default function ConfiguracionSistema() {
           [
             { value: "modulos", label: "Módulos" },
             { value: "facturacion", label: "Facturación y firmas" },
+            { value: "compras", label: "Compras" },
             { value: "catalogos", label: "Catálogos" },
           ] as { value: Tab; label: string }[]
         ).map((t) => (
@@ -209,6 +216,35 @@ export default function ConfiguracionSistema() {
               <input
                 value={empresaForm.firmaAutorizaNombre}
                 onChange={(e) => setEmpresaForm((p) => ({ ...p, firmaAutorizaNombre: e.target.value }))}
+              />
+            </label>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <button className="btn-primary" disabled={guardandoEmpresa} onClick={guardarEmpresa}>
+                {guardandoEmpresa ? "Guardando…" : "Guardar"}
+              </button>
+              {empresaGuardada && <span className="tag tag-success">Guardado</span>}
+            </div>
+          </div>
+        </>
+      )}
+
+      {tab === "compras" && (
+        <>
+          <p style={{ fontSize: 12.5, color: "var(--ink-soft)", marginBottom: 18, maxWidth: 640 }}>
+            Constante única del sistema — ya no se pide al cotizar. Se usa para marcar "⚠ REVISAR" cuando el % Excedente de una
+            línea del Comparador pasa de este valor. Cambiarlo aquí solo afecta a las cotizaciones nuevas — las ya hechas
+            conservan el umbral con el que se calcularon.
+          </p>
+
+          <div className="card" style={{ maxWidth: 320, display: "flex", flexDirection: "column", gap: 12 }}>
+            <label className="field">
+              Umbral de alerta % Excedente
+              <input
+                type="number"
+                min={0}
+                step="1"
+                value={empresaForm.umbralExcedentePctDefault}
+                onChange={(e) => setEmpresaForm((p) => ({ ...p, umbralExcedentePctDefault: e.target.value }))}
               />
             </label>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>

@@ -12,6 +12,7 @@ export interface EmpresaConfigInput {
   telefono?: string | null;
   firmaAtiendeNombre?: string | null;
   firmaAutorizaNombre?: string | null;
+  umbralExcedentePctDefault?: number;
 }
 
 export async function obtenerEmpresaConfig() {
@@ -25,8 +26,15 @@ export async function obtenerEmpresaConfig() {
       telefono: null,
       firmaAtiendeNombre: null,
       firmaAutorizaNombre: null,
+      umbralExcedentePctDefault: 20,
     }
   );
+}
+
+/** Umbral global de % Excedente del Comparador (Prioridad 2, V35) -- usado como default al crear una Comparación nueva. */
+export async function obtenerUmbralExcedenteDefault(): Promise<number> {
+  const config = await obtenerEmpresaConfig();
+  return Number(config.umbralExcedentePctDefault ?? 20);
 }
 
 export async function actualizarEmpresaConfig(input: EmpresaConfigInput) {

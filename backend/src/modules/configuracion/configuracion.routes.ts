@@ -55,6 +55,7 @@ const empresaSchema = z.object({
   telefono: z.string().optional(),
   firmaAtiendeNombre: z.string().optional(),
   firmaAutorizaNombre: z.string().optional(),
+  umbralExcedentePctDefault: z.number().positive().optional(),
 });
 
 configuracionRouter.patch("/empresa", async (req, res) => {

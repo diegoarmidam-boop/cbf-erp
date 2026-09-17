@@ -1,6 +1,7 @@
 import { calcularAhorroForaneo, calcularCotizacion, type MonedaCotizacion } from "@cbf/shared";
 import { prisma } from "../../core/db.js";
 import { opcionesRecepcionDeProducto } from "../almacen/preferencias.js";
+import { obtenerUmbralExcedenteDefault } from "../configuracion/empresa.js";
 
 export interface CotizacionInput {
   proveedorId: string;
@@ -92,13 +93,20 @@ export async function crearComparacion(input: CrearComparacionInput, creadoPorId
   const existente = await prisma.comparacion.findUnique({ where: { ordenCompraId: input.ordenCompraId } });
   if (existente) throw new YaTieneComparacionError();
 
+  // Umbral de excedente (Prioridad 2, V35, 17-sep-2026): ya no se captura
+  // por Comparación -- es una constante única del sistema, editable en
+  // Configuración. Se copia como default al crear (no se referencia en
+  // vivo) para que un ajuste futuro del valor global nunca cambie la
+  // alerta de una Comparación ya hecha.
+  const umbralExcedentePct = input.umbralExcedentePct ?? (await obtenerUmbralExcedenteDefault());
+
   return prisma.comparacion.create({
     data: {
       ordenCompraId: input.ordenCompraId,
       productoId: orden.productoId,
       cantidadNecesaria: orden.cantidadSolicitada,
       unidad: orden.producto.unidad,
-      umbralExcedentePct: input.umbralExcedentePct ?? 20,
+      umbralExcedentePct,
       creadoPorId,
       cotizaciones: {
         create: input.cotizaciones.map((c) => ({
