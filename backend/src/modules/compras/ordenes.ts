@@ -51,7 +51,10 @@ export async function listarOrdenes(estado?: string, incluirCerradas?: boolean) 
     orderBy: { fechaCreacion: "desc" },
   });
 
-  const nombresUsuarios = await resolverNombresUsuarios(ordenes.map((o) => o.creadoPorId));
+  const nombresUsuarios = await resolverNombresUsuarios([
+    ...ordenes.map((o) => o.creadoPorId),
+    ...ordenes.map((o) => o.canceladoPorId).filter((x): x is string => !!x),
+  ]);
   const cacheContexto = new Map<string, ContextoProgramacion>();
 
   const resultado = [];
@@ -65,6 +68,9 @@ export async function listarOrdenes(estado?: string, incluirCerradas?: boolean) 
     resultado.push({
       ...orden,
       solicitanteNombre: nombresUsuarios.get(orden.creadoPorId) ?? "—",
+      // Cancelación de Orden ya generada (7, V35, 17-sep-2026) — distinto de
+      // `motivoRechazo` (Solicitud manual rechazada antes de cotizar).
+      canceladoPorNombre: orden.canceladoPorId ? nombresUsuarios.get(orden.canceladoPorId) ?? "—" : null,
       huertaOrigen: contexto.huertaId ? { id: contexto.huertaId, nombre: contexto.huertaNombre! } : null,
       tipoAplicacionId: contexto.tipoAplicacionId,
       tipoAplicacionNombre: contexto.tipoAplicacionNombre,

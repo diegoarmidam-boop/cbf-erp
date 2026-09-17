@@ -157,6 +157,11 @@ export default function Ordenes() {
   const [mostrarNuevoCentroCosto, setMostrarNuevoCentroCosto] = useState(false);
   const [nuevoCentroCostoNombre, setNuevoCentroCostoNombre] = useState("");
 
+  // Cancelar una Orden ya generada (7, V35, 17-sep-2026) — observaciones
+  // opcionales (7.2), el rol exclusivo de Compras (7.3) lo valida el backend.
+  const [cancelandoId, setCancelandoId] = useState<string | null>(null);
+  const [observacionesCancelar, setObservacionesCancelar] = useState("");
+
   function cargarTodo() {
     api
       .get<OrdenCompra[]>("/compras/ordenes?incluirCerradas=true")
@@ -277,6 +282,18 @@ export default function Ordenes() {
       cargarTodo();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "No se pudo rechazar.");
+    }
+  }
+
+  async function cancelarOrdenGenerada(id: string) {
+    setError(null);
+    try {
+      await api.post(`/compras/ordenes-generacion/${id}/cancelar`, { observaciones: observacionesCancelar.trim() || undefined });
+      setCancelandoId(null);
+      setObservacionesCancelar("");
+      cargarTodo();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "No se pudo cancelar la orden.");
     }
   }
 
@@ -442,9 +459,45 @@ export default function Ordenes() {
                 Descargar PDF
               </button>
             )}
+            {o.estado === "generada" && (
+              <button className="btn-danger" onClick={() => setCancelandoId(cancelandoId === o.id ? null : o.id)}>
+                Cancelar orden
+              </button>
+            )}
             {colapsable && <span style={{ fontSize: 12, color: "var(--ink-soft)" }}>{abierta ? "▲" : "▼"}</span>}
           </div>
         </div>
+
+        {cancelandoId === o.id && (
+          <div
+            style={{ marginTop: 8, borderTop: "1px solid var(--border)", paddingTop: 8, display: "flex", flexDirection: "column", gap: 6 }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <label className="field">
+              Observaciones (opcional)
+              <textarea
+                value={observacionesCancelar}
+                onChange={(e) => setObservacionesCancelar(e.target.value)}
+                rows={2}
+                placeholder="Motivo de la cancelación…"
+              />
+            </label>
+            <div style={{ display: "flex", gap: 6 }}>
+              <button className="btn-danger" onClick={() => cancelarOrdenGenerada(o.id)}>
+                Confirmar cancelación
+              </button>
+              <button
+                className="btn-secondary"
+                onClick={() => {
+                  setCancelandoId(null);
+                  setObservacionesCancelar("");
+                }}
+              >
+                Cerrar
+              </button>
+            </div>
+          </div>
+        )}
 
         {abierta && (
           <div style={{ marginTop: 8, borderTop: colapsable ? "1px solid var(--border)" : undefined, paddingTop: colapsable ? 8 : 0 }}>
@@ -460,6 +513,12 @@ export default function Ordenes() {
               </div>
             )}
             {o.motivoRechazo && <div style={{ fontSize: 12, color: "var(--danger)" }}>Motivo: {o.motivoRechazo}</div>}
+            {o.estado === "cancelada" && o.canceladoPorNombre && (
+              <div style={{ fontSize: 12, color: "var(--danger)" }}>
+                Cancelada por: {o.canceladoPorNombre}
+                {o.observacionesCancelacion && ` — ${o.observacionesCancelacion}`}
+              </div>
+            )}
             {o.estado === "recibida" && o.recepciones.length > 0 && (
               <div style={{ fontSize: 12, color: "var(--ink-soft)" }}>
                 Recibido: {o.recepciones.map((r) => `${r.cantidadRecibida} ${o.producto.unidad} el ${formatearInstante(r.fechaRecepcion)}`).join(" · ")}
@@ -752,7 +811,8 @@ export default function Ordenes() {
       {tab === "en_camino" && (
         <>
           <p style={{ fontSize: 12, color: "var(--ink-soft)", marginBottom: 10 }}>
-            Solo lectura — la recepción física ya se confirma desde Almacén → "En Camino" (Prioridad 4).
+            La recepción física ya se confirma desde Almacén → "En Camino" (Prioridad 4). "Cancelar orden" (7, V35) es
+            exclusivo de la persona de Compras.
           </p>
           <BarraFiltros mostrarFechaYTipoAplicacion />
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>

@@ -311,6 +311,8 @@ export interface VistaPreviaProveedor {
   total: number;
 }
 
+export class OrdenNoGeneradaError extends Error {}
+
 export class AsignacionInvalidaError extends Error {}
 export class TopeDisponibleExcedidoError extends Error {
   constructor(public detalle: { cotizacionId: string; proveedorNombre: string; nombreComercial: string; disponible: number; asignado: number }[]) {
@@ -501,5 +503,57 @@ export async function generarOrdenesDesdeAsignaciones(asignaciones: AsignacionIn
       }
     }
     return ordenesCreadas;
+  });
+}
+
+/**
+ * Cancelar una Orden de Compra ya generada (7, V35, 17-sep-2026) — hueco
+ * real distinto de "Rechazadas/Canceladas" (eso es para una Solicitud
+ * manual rechazada ANTES de cotizar, nunca llegó a "generada"). Solo
+ * aplica a órdenes en estado "generada" (ni "recibida" ni ya "cancelada").
+ *
+ * 7.1: deshace Pendiente→En Camino — si la necesidad de origen se había
+ * marcado "cubierta" por esta orden (u otras), se recalcula su saldo
+ * EXCLUYENDO la que se está cancelando y, si ya no queda cubierta, su
+ * estado regresa a "pendiente_cotizar" (mismo umbral 0.0001 que
+ * `generarOrdenesDesdeAsignaciones` usó para cubrirla).
+ */
+export async function cancelarOrdenGenerada(ordenId: string, canceladoPorId: string, observaciones: string | undefined) {
+  const orden = await prisma.ordenCompra.findUnique({
+    where: { id: ordenId },
+    include: { comparacionCotizacion: { include: { comparacion: { include: { ordenCompra: true } } } } },
+  });
+  if (!orden) throw new OrdenNoGeneradaError("La Orden de Compra no existe.");
+  if (orden.estado !== "generada") {
+    throw new OrdenNoGeneradaError("Solo se puede cancelar una Orden ya generada (no recibida, ni ya cancelada/rechazada).");
+  }
+
+  const necesidad = orden.comparacionCotizacion?.comparacion.ordenCompra ?? null;
+  const comparacionId = orden.comparacionCotizacion?.comparacion.id ?? null;
+
+  return prisma.$transaction(async (tx) => {
+    const ordenCancelada = await tx.ordenCompra.update({
+      where: { id: ordenId },
+      data: { estado: "cancelada", canceladoPorId, observacionesCancelacion: observaciones ?? null },
+    });
+
+    if (necesidad && necesidad.estado === "cubierta" && comparacionId) {
+      // Recalculado a mano (no vía `obtenerComparacionCalculada`, que usa el
+      // cliente Prisma normal y no vería el "cancelada" de arriba todavía sin
+      // commit): mismo criterio que esa función, EXCLUYENDO la orden que se
+      // está cancelando en este momento.
+      const comparacion = await tx.comparacion.findUniqueOrThrow({ where: { id: comparacionId }, select: { cantidadNecesaria: true } });
+      const otrasOrdenes = await tx.ordenCompra.findMany({
+        where: { comparacionCotizacion: { comparacionId }, estado: { in: ["generada", "recibida"] }, id: { not: ordenId } },
+        select: { cantidadSolicitada: true },
+      });
+      const cantidadComprada = otrasOrdenes.reduce((s, o) => s + Number(o.cantidadSolicitada), 0);
+      const cantidadPendiente = Math.max(0, Number(comparacion.cantidadNecesaria) - cantidadComprada);
+      if (cantidadPendiente > 0.0001) {
+        await tx.ordenCompra.update({ where: { id: necesidad.id }, data: { estado: "pendiente_cotizar" } });
+      }
+    }
+
+    return ordenCancelada;
   });
 }

@@ -1,20 +1,37 @@
-import { Router } from "express";
+import { Router, type Request, type Response } from "express";
 import { z } from "zod";
+import type { Rol } from "@prisma/client";
 import { requireAuth, requirePermission } from "../../middleware/auth.js";
-import { mensajeErrorCaptura, mensajeErrorValidacion } from "../../core/http.js";
+import { mensajeErrorCaptura, mensajeErrorValidacion, unoSolo } from "../../core/http.js";
 import {
   AsignacionInvalidaError,
+  cancelarOrdenGenerada,
   generarOrdenesDesdeAsignaciones,
   listarPorProducto,
   listarPorProgramacion,
   listarPorProveedor,
   listarProveedoresConCotizacionesActivas,
+  OrdenNoGeneradaError,
   TopeDisponibleExcedidoError,
   validarYAgruparAsignaciones,
 } from "./ordenesGeneracion.js";
 
 export const ordenesGeneracionRouter = Router();
 ordenesGeneracionRouter.use(requireAuth);
+
+// Cancelar una Orden ya generada (7.3, V35, 17-sep-2026): permiso exclusivo
+// de la persona de Compras -- NO de quien autoriza (gerente_administrativo/
+// gerente_tecnico_produccion tienen "compras.autoriza" pero no deben poder
+// cancelar). Mismo patrón que ROLES_CANCELAR en aplicaciones.routes.ts.
+const ROLES_ACCESO_UNIVERSAL: Rol[] = ["director_general", "encargado_sistemas"];
+const ROLES_CANCELAR_ORDEN: Rol[] = ["encargado_compras"];
+
+function verificarRol(req: Request, res: Response, permitidos: Rol[]): boolean {
+  const rol = req.usuario!.rol;
+  if (ROLES_ACCESO_UNIVERSAL.includes(rol) || permitidos.includes(rol)) return true;
+  res.status(403).json({ error: "Tu rol no puede realizar esta acción dentro de Órdenes de Compra." });
+  return false;
+}
 
 ordenesGeneracionRouter.get("/por-programacion", requirePermission("compras", "ver"), async (req, res) => {
   const referenciaAplicacionId = typeof req.query.referenciaAplicacionId === "string" ? req.query.referenciaAplicacionId : null;
@@ -82,5 +99,26 @@ ordenesGeneracionRouter.post("/generar", requirePermission("compras", "capturar"
     res.status(201).json(ordenes);
   } catch (err) {
     manejarErrorAsignacion(err, res);
+  }
+});
+
+const cancelarSchema = z.object({ observaciones: z.string().optional() });
+
+ordenesGeneracionRouter.post("/:id/cancelar", requirePermission("compras", "capturar"), async (req, res) => {
+  if (!verificarRol(req, res, ROLES_CANCELAR_ORDEN)) return;
+  const parsed = cancelarSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
+    return;
+  }
+  try {
+    const orden = await cancelarOrdenGenerada(unoSolo(req.params.id), req.usuario!.usuarioId, parsed.data.observaciones);
+    res.json(orden);
+  } catch (err) {
+    if (err instanceof OrdenNoGeneradaError) {
+      res.status(409).json({ error: err.message });
+      return;
+    }
+    res.status(400).json({ error: mensajeErrorCaptura(err) });
   }
 });

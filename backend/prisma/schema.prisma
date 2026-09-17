@@ -1219,6 +1219,21 @@ model OrdenCompra {
   titulo            String?
   solicitudManualId String?
 
+  // Cancelar una Orden ya generada (7, V35, 17-sep-2026) -- distinto de
+  // `motivoRechazo` (eso es para una Solicitud manual rechazada antes de
+  // cotizar, nunca llegó a "generada"). Observaciones OPCIONAL, no
+  // obligatoria (a diferencia del protocolo de cancelación de Aplicación
+  // vencida, 9.7, que sí exige motivo).
+  observacionesCancelacion String?
+  canceladoPorId           String?
+
+  // Editar solicitudes manuales con reautorización condicional (8, V35,
+  // 17-sep-2026) -- el creador original nunca se sobrescribe
+  // (`creadoPorId` arriba); esto es aparte, solo se llena si alguien
+  // distinto la edita después.
+  editadoPorId String?
+  fechaEdicion DateTime?
+
   @@index([estado])
   @@index([numero])
   @@index([solicitudManualId])

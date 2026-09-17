@@ -548,6 +548,12 @@ export interface OrdenCompra {
   precioUnitario: string | null;
   fechaEsperada: string | null;
   motivoRechazo: string | null;
+  // Cancelar una Orden ya generada (7, V35, 17-sep-2026) — distinto de
+  // `motivoRechazo` (eso es para una Solicitud manual rechazada antes de
+  // cotizar, nunca llegó a "generada").
+  observacionesCancelacion: string | null;
+  canceladoPorId: string | null;
+  canceladoPorNombre: string | null;
   fechaCreacion: string;
   fechaFormalizacion: string | null;
   pagada: boolean;
