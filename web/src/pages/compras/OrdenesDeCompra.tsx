@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, ApiError, getToken } from "../../lib/api";
 import type {
+  FilaComparativoGeneral,
   GrupoPendienteProgramacion,
   HistoricoProveedor,
   LineaOrigenNecesidad,
@@ -12,7 +13,7 @@ import type {
 import { formatearDinero, formatearNumero } from "../../lib/numero";
 import { formatearFecha, formatearInstante } from "../../lib/fecha";
 
-type ModoEntrada = "" | "proveedor" | "programacion" | "producto";
+type ModoEntrada = "" | "proveedor" | "programacion" | "producto" | "comparativo";
 
 interface Asignacion {
   cotizacionId: string;
@@ -64,6 +65,16 @@ export default function OrdenesDeCompra({ ordenCompraIdInicial }: { ordenCompraI
   const [gruposProducto, setGruposProducto] = useState<PendienteIngredienteActivo[]>([]);
   const [objetivoProgramacion, setObjetivoProgramacion] = useState<GrupoPendienteProgramacion | null>(null);
   const [objetivoProducto, setObjetivoProducto] = useState<PendienteIngredienteActivo | null>(null);
+
+  // "Comparativo General" (6, V35, 17-sep-2026) — 4ª forma de entrada.
+  const [comparativoGeneral, setComparativoGeneral] = useState<FilaComparativoGeneral[]>([]);
+  const [cargandoComparativo, setCargandoComparativo] = useState(false);
+  // Cambio manual de Proveedor por fila (6.2) — el sistema sugiere Mejor
+  // Global por default; Diego puede cambiarlo a mano a cualquier otro
+  // Proveedor cotizado, sin que el sistema calcule ninguna combinación
+  // óptima automática.
+  const [proveedorPorFila, setProveedorPorFila] = useState<Record<string, string>>({});
+  const [armandoDesdeComparativo, setArmandoDesdeComparativo] = useState(false);
 
   // Asignación: por necesidad (ordenCompraId), qué cotización y cuánto —
   // GLOBAL, compartida entre las 3 formas de entrada; en "Por Proveedor" ya
@@ -126,6 +137,67 @@ export default function OrdenesDeCompra({ ordenCompraIdInicial }: { ordenCompraI
     setObjetivoProgramacion(null);
     setObjetivoProducto(null);
     limpiarSeleccion();
+    if (m === "comparativo" && comparativoGeneral.length === 0) cargarComparativoGeneral();
+  }
+
+  function cargarComparativoGeneral() {
+    setCargandoComparativo(true);
+    api
+      .get<FilaComparativoGeneral[]>("/compras/ordenes/comparativo-general")
+      .then(setComparativoGeneral)
+      .catch((err) => setError(err instanceof ApiError ? err.message : "No se pudo cargar."))
+      .finally(() => setCargandoComparativo(false));
+  }
+
+  // Proveedor elegido para una fila (6.2) — Mejor Global por default,
+  // editable a mano a cualquier otro Proveedor cotizado.
+  function proveedorElegidoDe(fila: FilaComparativoGeneral): string {
+    return proveedorPorFila[fila.ingredienteActivo] ?? fila.proveedores[0]?.proveedorId ?? "";
+  }
+
+  const totalGeneralComparativo = comparativoGeneral.reduce((s, f) => {
+    const elegidoId = proveedorElegidoDe(f);
+    const elegido = f.proveedores.find((p) => p.proveedorId === elegidoId);
+    return s + (elegido?.totalConFlete ?? 0);
+  }, 0);
+
+  // Salto directo a Órdenes de Compra (6.3) — con la selección ya armada
+  // (sugerida o ajustada a mano), arma las asignaciones reales consultando
+  // "Por Producto" de cada Ingrediente Activo elegido (misma fuente que ya
+  // usa esa forma de entrada) y salta directo a la vista previa — sin volver
+  // a capturar nada. No reemplaza las otras 3 formas de entrada.
+  async function irAGenerarDesdeComparativo() {
+    setError(null);
+    setArmandoDesdeComparativo(true);
+    try {
+      const nuevasAsignaciones: Record<string, Asignacion> = {};
+      for (const fila of comparativoGeneral) {
+        const proveedorId = proveedorElegidoDe(fila);
+        if (!proveedorId) continue;
+        const proveedorNombre = fila.proveedores.find((p) => p.proveedorId === proveedorId)?.proveedorNombre ?? "";
+        const lineasFila = await api.get<LineaOrigenNecesidad[]>(`/compras/ordenes-generacion/por-producto/${encodeURIComponent(fila.ingredienteActivo)}`);
+        for (const l of lineasFila) {
+          const cot = l.cotizaciones.find((c) => c.proveedorId === proveedorId);
+          if (!cot) continue; // este Proveedor no cotizó esta necesidad específica -- se deja pendiente, no se inventa
+          const presentacion = cot.presentacionCantidad || 1;
+          const unidades = Math.ceil(l.cantidadPendiente / presentacion);
+          nuevasAsignaciones[l.ordenCompraId] = { cotizacionId: cot.cotizacionId, cantidad: unidades * presentacion, proveedorId, proveedorNombre };
+        }
+      }
+      setAsignaciones(nuevasAsignaciones);
+      if (Object.keys(nuevasAsignaciones).length > 0) {
+        const preview = await api.post<VistaPreviaProveedor[]>("/compras/ordenes-generacion/vista-previa", {
+          asignaciones: Object.entries(nuevasAsignaciones).map(([ordenCompraId, a]) => ({ ordenCompraId, cotizacionId: a.cotizacionId, cantidad: a.cantidad })),
+        });
+        setVistaPrevia(preview);
+      } else {
+        setError("Ninguna de las Solicitudes pendientes tiene cotización de los Proveedores elegidos.");
+      }
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "No se pudo armar la selección.");
+    } finally {
+      setArmandoDesdeComparativo(false);
+    }
   }
 
   // "Por Proveedor" (4.1) — expandir/cerrar una tarjeta NO limpia las
@@ -406,6 +478,9 @@ export default function OrdenesDeCompra({ ordenCompraIdInicial }: { ordenCompraI
         <button className={modo === "producto" ? "btn-primary" : "btn-secondary"} onClick={() => cambiarModo("producto")}>
           Por Producto
         </button>
+        <button className={modo === "comparativo" ? "btn-primary" : "btn-secondary"} onClick={() => cambiarModo("comparativo")}>
+          Comparativo General
+        </button>
       </div>
 
       {error && <div className="tag tag-danger" style={{ display: "block", padding: "8px 12px", marginBottom: 12 }}>{error}</div>}
@@ -605,6 +680,82 @@ export default function OrdenesDeCompra({ ordenCompraIdInicial }: { ordenCompraI
             ← Elegir otro producto
           </button>
           <div style={{ fontWeight: 700, fontSize: 13, marginTop: 8 }}>{objetivoProducto.ingredienteActivo}</div>
+        </div>
+      )}
+
+      {modo === "comparativo" && (
+        <div style={{ marginBottom: 20 }}>
+          <p style={{ fontSize: 12.5, color: "var(--ink-soft)", marginBottom: 10 }}>
+            Todos los productos con cotizaciones abiertas en una sola tabla — mismo motor de cálculo del Comparador, solo junto.
+            El sistema sugiere Mejor Global por fila; puedes cambiarlo a mano (ej. para consolidar varios productos con un mismo
+            Proveedor y ahorrar flete combinando envío) — no se calcula ninguna combinación óptima automática.
+          </p>
+          {cargandoComparativo ? (
+            <p>Cargando…</p>
+          ) : comparativoGeneral.length === 0 ? (
+            <p style={{ color: "var(--ink-soft)" }}>Sin productos con cotizaciones abiertas.</p>
+          ) : (
+            <>
+              <div style={{ overflowX: "auto" }}>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Ingrediente Activo</th>
+                      <th>Pendiente</th>
+                      <th>Mejor Global</th>
+                      <th>Mejor Local</th>
+                      <th>Ahorro</th>
+                      <th>Proveedor a usar</th>
+                      <th>Total con flete</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {comparativoGeneral.map((f) => {
+                      const mejorGlobal = f.proveedores[0];
+                      const mejorLocal = f.proveedores.find((p) => p.proveedorId === f.mejorLocalId);
+                      const elegidoId = proveedorElegidoDe(f);
+                      const elegido = f.proveedores.find((p) => p.proveedorId === elegidoId);
+                      return (
+                        <tr key={f.ingredienteActivo}>
+                          <td>{f.ingredienteActivo}</td>
+                          <td>{formatearNumero(f.cantidadPendiente)} {f.unidad}</td>
+                          <td>{mejorGlobal ? `${mejorGlobal.proveedorNombre} — ${formatearDinero(mejorGlobal.totalConFlete)}` : "—"}</td>
+                          <td>{mejorLocal ? `${mejorLocal.proveedorNombre} — ${formatearDinero(mejorLocal.totalConFlete)}` : "—"}</td>
+                          <td>
+                            {f.ahorroForaneo ? `${formatearDinero(f.ahorroForaneo.monto)} (${f.ahorroForaneo.porcentaje.toFixed(1)}%)` : "—"}
+                          </td>
+                          <td>
+                            <select
+                              value={elegidoId}
+                              onChange={(e) => setProveedorPorFila((prev) => ({ ...prev, [f.ingredienteActivo]: e.target.value }))}
+                            >
+                              {f.proveedores.map((p) => (
+                                <option key={p.proveedorId} value={p.proveedorId}>
+                                  {p.proveedorNombre}
+                                </option>
+                              ))}
+                            </select>
+                          </td>
+                          <td style={{ fontWeight: 700 }}>{elegido ? formatearDinero(elegido.totalConFlete) : "—"}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                  <tfoot>
+                    <tr>
+                      <td colSpan={6} style={{ textAlign: "right", fontWeight: 700 }}>
+                        Total general (según Proveedor elegido por fila):
+                      </td>
+                      <td style={{ fontWeight: 700 }}>{formatearDinero(totalGeneralComparativo)}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+              <button className="btn-primary" style={{ marginTop: 12 }} onClick={irAGenerarDesdeComparativo} disabled={armandoDesdeComparativo}>
+                {armandoDesdeComparativo ? "Armando…" : "Ir a generar Órdenes de Compra con esta selección"}
+              </button>
+            </>
+          )}
         </div>
       )}
 

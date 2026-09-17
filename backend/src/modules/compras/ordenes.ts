@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { calcularCotizacion } from "@cbf/shared";
+import { calcularAhorroForaneo, calcularCotizacion } from "@cbf/shared";
 import { prisma } from "../../core/db.js";
 import type { TransactionClient } from "../../core/db.js";
 import { intentarComprometer, registrarEntradaTx } from "../almacen/movimientos.js";
@@ -109,6 +109,10 @@ export interface ProveedorPendienteIngredienteActivo {
   proveedorNombre: string;
   totalSinFlete: number;
   totalConFlete: number;
+  // Zona del comprador (6, "Comparativo General") — para distinguir Mejor
+  // Global (el de menor Total con flete, cualquier Zona) de Mejor Local
+  // (el de menor Total dentro de la Zona del comprador).
+  esZonaComprador: boolean;
 }
 
 /**
@@ -177,7 +181,16 @@ export async function listarPendientesPorIngredienteActivo() {
       // completa del grupo (no se puede calcular a mitad del loop).
       cotizacionMasRecientePorProveedor: Map<
         string,
-        { proveedorNombre: string; fechaCreacion: Date; moneda: "MXN" | "USD"; precioValor: number; tipoCambio: number | null; presentacionCantidad: number; costoFleteKg: number }
+        {
+          proveedorNombre: string;
+          fechaCreacion: Date;
+          moneda: "MXN" | "USD";
+          precioValor: number;
+          tipoCambio: number | null;
+          presentacionCantidad: number;
+          costoFleteKg: number;
+          esZonaComprador: boolean;
+        }
       >;
     }
   >();
@@ -226,6 +239,7 @@ export async function listarPendientesPorIngredienteActivo() {
           tipoCambio: cot.tipoCambio != null ? Number(cot.tipoCambio) : null,
           presentacionCantidad: Number(cot.presentacionCantidad),
           costoFleteKg: Number(cot.zona.costoFleteKg),
+          esZonaComprador: cot.zona.esZonaComprador,
         });
       }
     }
@@ -263,7 +277,13 @@ export async function listarPendientesPorIngredienteActivo() {
             presentacionCantidad: cot.presentacionCantidad,
             costoFleteKg: cot.costoFleteKg,
           });
-          return { proveedorId, proveedorNombre: cot.proveedorNombre, totalSinFlete: calc.precioTotalPresentaciones, totalConFlete: calc.totalConFlete };
+          return {
+            proveedorId,
+            proveedorNombre: cot.proveedorNombre,
+            totalSinFlete: calc.precioTotalPresentaciones,
+            totalConFlete: calc.totalConFlete,
+            esZonaComprador: cot.esZonaComprador,
+          };
         })
         .sort((a, b) => a.totalConFlete - b.totalConFlete);
 
@@ -278,6 +298,50 @@ export async function listarPendientesPorIngredienteActivo() {
       };
     })
     .sort((a, b) => a.ingredienteActivo.localeCompare(b.ingredienteActivo, "es"));
+}
+
+export interface FilaComparativoGeneral {
+  ingredienteActivo: string;
+  categoria: string;
+  unidad: string;
+  cantidadPendiente: number;
+  ordenes: { id: string; estado: string; cantidadPendiente: number }[];
+  proveedores: ProveedorPendienteIngredienteActivo[]; // ordenados de menor a mayor Total con flete -- proveedores[0] = Mejor Global
+  mejorLocalId: string | null;
+  ahorroForaneo: { monto: number; porcentaje: number } | null;
+}
+
+/**
+ * "Comparativo General" (6, V35, 17-sep-2026) — vista de análisis que junta
+ * TODOS los productos con cotizaciones abiertas en una sola tabla, a partir
+ * del prototipo de Excel de Diego. Una fila por Ingrediente Activo, con
+ * Mejor opción Global (con flete) vs. Mejor opción Local (Campeche, sin
+ * flete) y el ahorro -- mismo motor ya existente
+ * (listarPendientesPorIngredienteActivo + calcularAhorroForaneo, el mismo
+ * que ya usa el Comparador individual), solo mostrado para todos los
+ * productos a la vez. El cambio manual de Proveedor por fila (6.2) es
+ * enteramente del frontend -- aquí solo se entrega `proveedores` completo
+ * para que se pueda elegir cualquiera, no solo Global/Local.
+ */
+export async function listarComparativoGeneral(): Promise<FilaComparativoGeneral[]> {
+  const grupos = await listarPendientesPorIngredienteActivo();
+  return grupos
+    .filter((g) => g.proveedores.length > 0)
+    .map((g) => {
+      const mejorGlobal = g.proveedores[0]!; // ya viene ordenado asc por totalConFlete
+      const locales = g.proveedores.filter((p) => p.esZonaComprador);
+      const mejorLocal = locales.length > 0 ? locales.reduce((a, b) => (b.totalConFlete < a.totalConFlete ? b : a)) : null;
+      return {
+        ingredienteActivo: g.ingredienteActivo,
+        categoria: g.categoria,
+        unidad: g.unidad,
+        cantidadPendiente: g.cantidadPendiente,
+        ordenes: g.ordenes,
+        proveedores: g.proveedores,
+        mejorLocalId: mejorLocal?.proveedorId ?? null,
+        ahorroForaneo: calcularAhorroForaneo(mejorGlobal.totalConFlete, mejorLocal?.totalConFlete ?? null),
+      };
+    });
 }
 
 export type EstadoLineaPendiente = "pendiente" | "cotizado" | "comprado_parcial";

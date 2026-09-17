@@ -599,6 +599,7 @@ export interface ProveedorPendienteIngredienteActivo {
   proveedorNombre: string;
   totalSinFlete: number;
   totalConFlete: number;
+  esZonaComprador: boolean;
 }
 
 export interface PendienteIngredienteActivo {
@@ -609,6 +610,18 @@ export interface PendienteIngredienteActivo {
   ordenes: { id: string; estado: EstadoOrdenCompra; cantidadPendiente: number }[];
   origenes: OrigenPendienteIngredienteActivo[];
   proveedores: ProveedorPendienteIngredienteActivo[];
+}
+
+// "Comparativo General" (Prioridad 6, V35, 17-sep-2026).
+export interface FilaComparativoGeneral {
+  ingredienteActivo: string;
+  categoria: string;
+  unidad: string;
+  cantidadPendiente: number;
+  ordenes: { id: string; estado: EstadoOrdenCompra; cantidadPendiente: number }[];
+  proveedores: ProveedorPendienteIngredienteActivo[];
+  mejorLocalId: string | null;
+  ahorroForaneo: { monto: number; porcentaje: number } | null;
 }
 
 // Pendientes de cotizar agrupadas por PROGRAMACIÓN de origen (2.1, 2-sep-2026,

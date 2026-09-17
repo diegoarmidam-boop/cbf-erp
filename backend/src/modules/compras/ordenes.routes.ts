@@ -8,6 +8,7 @@ import {
   autorizarOrden,
   crearSolicitudManual,
   DestinoManualInvalidoError,
+  listarComparativoGeneral,
   listarOrdenes,
   listarPendientesPorIngredienteActivo,
   listarPendientesPorProgramacion,
@@ -26,6 +27,12 @@ ordenesRouter.use(requireAuth);
 
 ordenesRouter.get("/pendientes-por-ingrediente-activo", requirePermission("compras", "ver"), async (_req, res) => {
   res.json(await listarPendientesPorIngredienteActivo());
+});
+
+// "Comparativo General" (6, V35) — todos los productos con cotizaciones
+// abiertas en una sola tabla.
+ordenesRouter.get("/comparativo-general", requirePermission("compras", "ver"), async (_req, res) => {
+  res.json(await listarComparativoGeneral());
 });
 
 ordenesRouter.get("/pendientes-por-programacion", requirePermission("compras", "ver"), async (_req, res) => {
