@@ -49,7 +49,10 @@ function tagLineaPendiente(estado: EstadoLineaPendiente) {
 }
 
 type TabPrincipal = "pendientes" | "ordenes_de_compra" | "en_camino" | "recibidas" | "rechazadas_canceladas";
-type SubvistaPendientes = "programacion" | "producto" | "orden";
+// Fusión "Por Programación" + "Por Orden" -> "Por Solicitud" (Prioridad 3,
+// V35, 17-sep-2026): describían casi lo mismo -- una tarjeta por Solicitud
+// de Compra completa (programación completa o solicitud manual completa).
+type SubvistaPendientes = "solicitud" | "producto";
 
 const TABS_PRINCIPALES: { id: TabPrincipal; label: string }[] = [
   { id: "pendientes", label: "Pendientes" },
@@ -60,9 +63,8 @@ const TABS_PRINCIPALES: { id: TabPrincipal; label: string }[] = [
 ];
 
 const SUBVISTAS_PENDIENTES: { id: SubvistaPendientes; label: string }[] = [
-  { id: "programacion", label: "Por Programación" },
+  { id: "solicitud", label: "Por Solicitud" },
   { id: "producto", label: "Por Producto" },
-  { id: "orden", label: "Por Orden" },
 ];
 
 function destinoTexto(o: OrdenCompra): string | null {
@@ -88,16 +90,17 @@ function productoSolicitudVacio(): ProductoSolicitudForm {
 }
 
 /**
- * Reestructura de Compras → Órdenes (Bloque 1-3, 2-sep-2026): 4 pestañas de
- * primer nivel por estado (Pendientes por default, con 3 sub-vistas adentro;
- * En Camino/Recibidas/Rechazadas y Canceladas simples). "Rechazadas y
- * Canceladas" como pestaña propia fue decisión explícita de Diego (no
- * estaba definida en el documento) — antes vivían escondidas detrás de un
- * checkbox "Mostrar canceladas/rechazadas" en la vista "Por orden".
+ * Reestructura de Compras → Órdenes (Bloque 1-3, 2-sep-2026): 5 pestañas de
+ * primer nivel por estado (Pendientes por default, con 2 sub-vistas adentro
+ * desde la fusión "Por Programación"+"Por Orden" -> "Por Solicitud",
+ * Prioridad 3, V35; En Camino/Recibidas/Rechazadas y Canceladas simples).
+ * "Rechazadas y Canceladas" como pestaña propia fue decisión explícita de
+ * Diego (no estaba definida en el documento) — antes vivían escondidas
+ * detrás de un checkbox "Mostrar canceladas/rechazadas".
  *
  * "Cotizar" vive en el Comparador de Cotizaciones (2-sep-2026): esta
  * pantalla ya no captura proveedor/precio directo, solo manda para allá con
- * el contexto de la orden.
+ * el contexto de la Solicitud.
  */
 export default function Ordenes() {
   const navigate = useNavigate();
@@ -113,7 +116,7 @@ export default function Ordenes() {
   const [tarjetasAbiertas, setTarjetasAbiertas] = useState<Set<string>>(new Set());
 
   const [tab, setTab] = useState<TabPrincipal>("pendientes");
-  const [subvista, setSubvista] = useState<SubvistaPendientes>("programacion");
+  const [subvista, setSubvista] = useState<SubvistaPendientes>("solicitud");
 
   // Filtros (Bloque 1, 2-sep-2026) — disponibles por igual en las 4
   // pestañas; dentro de Pendientes, Fecha/Tipo de aplicación se ocultan en
@@ -183,9 +186,14 @@ export default function Ordenes() {
     else if (o.estado === "rechazada" || o.estado === "cancelada") setTab("rechazadas_canceladas");
     else if (o.estado === "pendiente_autorizar" || o.estado === "pendiente_cotizar") {
       setTab("pendientes");
-      setSubvista("orden");
+      setSubvista("solicitud");
+      // "Por Solicitud" agrupa por Solicitud completa (fusión Prioridad 3,
+      // V35) -- para llegar a una orden puntual desde una notificación, hay
+      // que abrir la tarjeta de la Solicitud que la contiene.
+      const grupo = pendientesPorProgramacion.find((g) => g.lineas.some((l) => l.ordenId === idResaltado));
+      if (grupo) setTarjetasAbiertas((prev) => new Set(prev).add(grupo.clave));
     }
-  }, [idResaltado, ordenes]);
+  }, [idResaltado, ordenes, pendientesPorProgramacion]);
 
   useEffect(() => {
     if (idResaltado) refResaltada.current?.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -322,7 +330,6 @@ export default function Ordenes() {
     return true;
   }
 
-  const ordenesPendientes = ordenes.filter((o) => (o.estado === "pendiente_autorizar" || o.estado === "pendiente_cotizar") && ordenPasaFiltros(o));
   const ordenesEnCamino = ordenes.filter((o) => o.estado === "generada" && ordenPasaFiltros(o));
   const ordenesRecibidas = ordenes.filter((o) => o.estado === "recibida" && ordenPasaFiltros(o));
   const ordenesRechazadasCanceladas = ordenes.filter((o) => (o.estado === "rechazada" || o.estado === "cancelada") && ordenPasaFiltros(o));
@@ -617,16 +624,17 @@ export default function Ordenes() {
 
           <BarraFiltros mostrarFechaYTipoAplicacion={subvista !== "producto"} />
 
-          {subvista === "programacion" ? (
+          {subvista === "solicitud" ? (
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               <p style={{ fontSize: 12.5, color: "var(--ink-soft)" }}>
-                Una tarjeta = una Aplicación/Fertirriego/Fertilización Granular completa con todos sus productos, o una solicitud manual —
-                para cotizar/comprar todo lo que necesita un mismo evento de una sola vez. Coexiste con las otras dos vistas.
+                Una tarjeta = una Solicitud de Compra completa — una Aplicación/Fertirriego/Fertilización Granular completa con todos sus
+                productos, o una solicitud manual — para cotizar/comprar todo lo que necesita de una sola vez. Coexiste con "Por Producto".
               </p>
               {gruposProgramacionFiltrados.map((g) => {
                 const abierta = tarjetasAbiertas.has(g.clave);
+                const resaltada = idResaltado != null && g.lineas.some((l) => l.ordenId === idResaltado);
                 return (
-                  <div key={g.clave} className="card">
+                  <div key={g.clave} className="card" ref={resaltada ? refResaltada : undefined} style={resaltada ? { outline: "2px solid var(--pink)", outlineOffset: 2 } : undefined}>
                     <div
                       style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8, cursor: "pointer" }}
                       onClick={() => alternarTarjeta(g.clave)}
@@ -670,21 +678,21 @@ export default function Ordenes() {
                   </div>
                 );
               })}
-              {gruposProgramacionFiltrados.length === 0 && <p style={{ color: "var(--ink-soft)" }}>Sin nada pendiente por Programación.</p>}
+              {gruposProgramacionFiltrados.length === 0 && <p style={{ color: "var(--ink-soft)" }}>Sin nada pendiente por Solicitud.</p>}
             </div>
-          ) : subvista === "producto" ? (
+          ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               <p style={{ fontSize: 12.5, color: "var(--ink-soft)" }}>
                 Suma la cantidad pendiente de cada Ingrediente Activo (o Producto Comercial, si no aplica Ingrediente Activo) entre todas las
-                órdenes pendientes, sin importar de dónde vinieron — para comprar en volumen. No reemplaza la vista por orden, sirve para
-                anticipar en vez de resolver una orden puntual.
+                Solicitudes pendientes, sin importar de dónde vinieron — para comprar en volumen. No reemplaza "Por Solicitud", sirve para
+                anticipar en vez de resolver una Solicitud puntual.
               </p>
               {gruposProductoFiltrados.map((g) => (
                 <div key={g.ingredienteActivo} className="card">
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8 }}>
                     <div style={{ fontSize: 14, fontWeight: 700 }}>{g.ingredienteActivo}</div>
                     <div style={{ fontSize: 13, fontWeight: 700 }}>
-                      {formatearNumero(g.cantidadPendiente)} {g.unidad} pendientes entre {g.ordenes.length} orden{g.ordenes.length !== 1 ? "es" : ""}
+                      {formatearNumero(g.cantidadPendiente)} {g.unidad} pendientes entre {g.ordenes.length} Solicitud{g.ordenes.length !== 1 ? "es" : ""}
                     </div>
                   </div>
                   {g.origenes.length > 0 && (
@@ -716,15 +724,6 @@ export default function Ordenes() {
                 </div>
               ))}
               {gruposProductoFiltrados.length === 0 && <p style={{ color: "var(--ink-soft)" }}>Sin nada pendiente por Producto.</p>}
-            </div>
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              <p style={{ fontSize: 12.5, color: "var(--ink-soft)" }}>
-                Una tarjeta = una orden individual, sin agrupar — útil para resolver una solicitud puntual sin entrar a toda la programación
-                que la generó. Haz clic para ver el detalle completo.
-              </p>
-              {ordenesPendientes.map((o) => tarjetaOrdenIndividual(o, true))}
-              {ordenesPendientes.length === 0 && <p style={{ color: "var(--ink-soft)" }}>Sin órdenes pendientes.</p>}
             </div>
           )}
         </>
