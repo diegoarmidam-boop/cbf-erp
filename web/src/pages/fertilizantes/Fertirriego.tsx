@@ -135,7 +135,10 @@ export default function Fertirriego() {
   useEffect(cargar, [mostrarCerradas]);
 
   useEffect(() => {
-    api.get<IngredienteAutorizado[]>("/fertilizantes/granular/productos").then(setIngredientes);
+    // Prioridad 9 (V35, 18-sep-2026): endpoint propio de Fertirriego, ya no
+    // comparte el de Fertilización Granular -- abierto a cualquier producto
+    // agrícola con Ingrediente Activo, no solo Fertilizante.
+    api.get<IngredienteAutorizado[]>("/fertilizantes/fertirriego/productos").then(setIngredientes);
   }, []);
 
   useEffect(() => {

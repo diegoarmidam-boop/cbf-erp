@@ -16,7 +16,13 @@ export async function esCategoriaRegulada(categoriaNombre: string): Promise<bool
   return (categoria?.esFertilizante || categoria?.esAgroquimico) ?? false;
 }
 
-/** ¿Esta Categoría es de Fertilizante? — usado por Fertirriego/Fertilización Granular para exigir que el producto programado sea uno (mismo bug/corrección de esCategoriaRegulada arriba). */
+/**
+ * ¿Esta Categoría es de Fertilizante? — usado por Fertilización Granular
+ * para exigir que el producto programado sea uno (mismo bug/corrección de
+ * esCategoriaRegulada arriba). Fertirriego dejó de usar este check
+ * angosto (Prioridad 9, V35, 18-sep-2026) — ver
+ * `categoriaRequiereIngredienteActivo` abajo, más amplio.
+ */
 export async function categoriaEsFertilizante(categoriaNombre: string): Promise<boolean> {
   const categoria = await prisma.categoriaProducto.findUnique({ where: { nombre: categoriaNombre } });
   return categoria?.esFertilizante ?? false;
@@ -28,6 +34,20 @@ export async function categoriaEsAgroquimico(categoriaNombre: string): Promise<b
   return categoria?.esAgroquimico ?? false;
 }
 
+/**
+ * ¿Esta Categoría tiene "¿Requiere Ingrediente Activo?" = Sí? (Prioridad
+ * 9, V35, 18-sep-2026) — usado por Fertirriego para validar al guardar
+ * que el producto programado sea cualquier producto agrícola con
+ * Ingrediente Activo (no solo Fertilizante), mismo criterio que el
+ * selector ya amplio (`nombresCategoriasConIngredienteActivo`). Sin
+ * filtro de solubilidad adicional (decisión explícita de Diego). Granular
+ * sigue exigiendo `categoriaEsFertilizante` arriba, sin cambio.
+ */
+export async function categoriaRequiereIngredienteActivo(categoriaNombre: string): Promise<boolean> {
+  const categoria = await prisma.categoriaProducto.findUnique({ where: { nombre: categoriaNombre } });
+  return categoria?.requiereIngredienteActivo ?? false;
+}
+
 /** Nombres de TODAS las Categorías vivas marcadas Fertilizante — para filtrar por lista, no por un solo nombre fijo (ver ingredientesAutorizados). */
 export async function nombresCategoriasFertilizante(): Promise<string[]> {
   const categorias = await prisma.categoriaProducto.findMany({ where: { esFertilizante: true } });
@@ -37,6 +57,21 @@ export async function nombresCategoriasFertilizante(): Promise<string[]> {
 /** Nombres de TODAS las Categorías vivas marcadas Agroquímico. */
 export async function nombresCategoriasAgroquimico(): Promise<string[]> {
   const categorias = await prisma.categoriaProducto.findMany({ where: { esAgroquimico: true } });
+  return categorias.map((c) => c.nombre);
+}
+
+/**
+ * Nombres de TODAS las Categorías vivas con "¿Requiere Ingrediente
+ * Activo?" = Sí (Prioridad 9, V35, 18-sep-2026) — cualquier producto
+ * agrícola, sin importar si además está marcado Fertilizante o
+ * Agroquímico. Mismo filtro que ya usa Almacén para exigir el campo
+ * (`requiereIngredienteActivo`, ver resolverIngredienteActivoPorCategoria
+ * arriba), reutilizado aquí para Fertirriego (ver fertilizantes/fertirriego.ts)
+ * — Fertilización Granular sigue usando el filtro más angosto de
+ * `nombresCategoriasFertilizante`, sin cambio.
+ */
+export async function nombresCategoriasConIngredienteActivo(): Promise<string[]> {
+  const categorias = await prisma.categoriaProducto.findMany({ where: { requiereIngredienteActivo: true } });
   return categorias.map((c) => c.nombre);
 }
 

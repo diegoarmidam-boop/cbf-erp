@@ -9,6 +9,7 @@ import {
   liberarFertirriegoVencido,
   listarFertirriego,
   obtenerFertirriego,
+  productosParaFertirriego,
   programarFertirriego,
   RolNoPuedeAjustarRecetaFertirriegoError,
   YaHayAvanceRegistradoFertirriegoError,
@@ -138,6 +139,13 @@ fertirriegoRouter.get("/", requirePermission("fertilizantes", "ver"), async (req
     return;
   }
   res.json(await listarFertirriego(huertaId ?? alcance ?? undefined, req.query.incluirCerradas === "true"));
+});
+
+// Catálogo de Ingredientes Activos para programar (Prioridad 9, V35,
+// 18-sep-2026) -- registrado ANTES de "/:id" para que Express no
+// interprete "productos" como un id de programación.
+fertirriegoRouter.get("/productos", requirePermission("fertilizantes", "ver"), async (_req, res) => {
+  res.json(await productosParaFertirriego());
 });
 
 fertirriegoRouter.get("/:id", requirePermission("fertilizantes", "ver"), async (req, res) => {

@@ -17,11 +17,11 @@ import {
   stockTotalProductoTx,
 } from "../almacen/movimientos.js";
 import { obtenerVersionVigente } from "../unidades-produccion/cuadros.js";
-import { categoriaEsFertilizante } from "../almacen/productos.js";
+import { categoriaRequiereIngredienteActivo, nombresCategoriasConIngredienteActivo } from "../almacen/productos.js";
 import { ProductoNoAutorizadoFertilizanteError, StockNoComprometidoError, TransicionFertilizacionInvalidaError } from "./granular.js";
 import { actualizarDosisProductoEnRecetaFertirriego, obtenerRecetaFertirriego, ROLES_RECETAS_FERTIRRIEGO } from "./recetario-fertirriego.js";
 import { cancelarOrdenesDeReferencia } from "../compras/ordenes.js";
-import { resolverProductoPreferidoPorNombre } from "../almacen/preferencias.js";
+import { ingredientesAutorizados, resolverProductoPreferidoPorNombre } from "../almacen/preferencias.js";
 
 const DIAS_VENCIMIENTO = 15;
 
@@ -130,7 +130,7 @@ export async function programarFertirriego(input: ProgramarFertirriegoInput, cre
   const productosResueltos = await resolverIngredientesFertirriego(input.productos);
   const productos = await prisma.producto.findMany({ where: { id: { in: productosResueltos.map((p) => p.productoId) } } });
   for (const p of productos) {
-    if (!(await categoriaEsFertilizante(p.categoria)) || !p.autorizado) {
+    if (!(await categoriaRequiereIngredienteActivo(p.categoria)) || !p.autorizado) {
       throw new ProductoNoAutorizadoFertilizanteError();
     }
   }
@@ -243,7 +243,7 @@ export async function editarFertirriegoProgramada(id: string, input: Omit<Progra
   const productosResueltos = await resolverIngredientesFertirriego(input.productos);
   const productosNuevos = await prisma.producto.findMany({ where: { id: { in: productosResueltos.map((p) => p.productoId) } } });
   for (const p of productosNuevos) {
-    if (!(await categoriaEsFertilizante(p.categoria)) || !p.autorizado) {
+    if (!(await categoriaRequiereIngredienteActivo(p.categoria)) || !p.autorizado) {
       throw new ProductoNoAutorizadoFertilizanteError();
     }
   }
@@ -414,6 +414,20 @@ function ordenarSeccionesDe<T extends { secciones: { seccion: { nombre: string }
  * ocultan de la vista activa; `incluirCerradas` las trae de vuelta para
  * consulta/historial.
  */
+/**
+ * Catálogo de Ingredientes Activos para programar Fertirriego (Prioridad
+ * 9, V35, 18-sep-2026) — ya NO comparte el endpoint de Fertilización
+ * Granular (`productosParaFertilizacion`, angosto a solo Fertilizante).
+ * Aquí se abre a CUALQUIER producto agrícola con "¿Requiere Ingrediente
+ * Activo?" = Sí (mismo filtro que ya usa Almacén), sin filtro de
+ * solubilidad adicional (decisión explícita de Diego). Exclusivo de
+ * Fertirriego — Granular sigue usando su propio filtro angosto, sin
+ * cambio, para no ampliarle sus opciones sin que él lo haya pedido.
+ */
+export async function productosParaFertirriego() {
+  return ingredientesAutorizados(await nombresCategoriasConIngredienteActivo());
+}
+
 export async function listarFertirriego(huertaId?: string, incluirCerradas?: boolean) {
   const fertirriegos = await prisma.fertirriegoProgramacion.findMany({
     where: { huertaId, ...(incluirCerradas ? {} : { estado: { notIn: ["vencida", "cancelada"] } }) },
