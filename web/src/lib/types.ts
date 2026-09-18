@@ -646,6 +646,10 @@ export interface LineaPendienteProgramacion {
   cantidadPendiente: number;
   estado: EstadoLineaPendiente;
   estadoOrden: EstadoOrdenCompra;
+  // Trazabilidad de edición (8.3, V35, 17-sep-2026) — el creador original
+  // (solicitanteNombre, a nivel de grupo) nunca se pierde.
+  editadoPorNombre: string | null;
+  fechaEdicion: string | null;
 }
 
 export interface DestinoPendienteProgramacion {

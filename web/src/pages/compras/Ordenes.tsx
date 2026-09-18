@@ -4,7 +4,7 @@ import { api, ApiError, getToken } from "../../lib/api";
 import { useProductos } from "../../lib/useProductos";
 import { useCatalogoAbierto } from "../../lib/useCatalogoAbierto";
 import { useHuertas } from "../../lib/useHuertas";
-import type { EstadoLineaPendiente, GrupoPendienteProgramacion, OrdenCompra, PendienteIngredienteActivo, Producto } from "../../lib/types";
+import type { EstadoLineaPendiente, GrupoPendienteProgramacion, LineaPendienteProgramacion, OrdenCompra, PendienteIngredienteActivo, Producto } from "../../lib/types";
 import FechaInput from "../../components/FechaInput";
 import { formatearFecha, formatearInstante } from "../../lib/fecha";
 import { formatearDinero, formatearNumero } from "../../lib/numero";
@@ -162,6 +162,15 @@ export default function Ordenes() {
   const [cancelandoId, setCancelandoId] = useState<string | null>(null);
   const [observacionesCancelar, setObservacionesCancelar] = useState("");
 
+  // Editar Solicitud manual (8, V35, 17-sep-2026) — Título es de la
+  // Solicitud completa (se prellena del grupo), Producto/Cantidad son de
+  // la línea que se está editando. Quién puede editar (Solicitante o
+  // Compras) y la reautorización condicional (8.2) las valida el backend.
+  const [editandoOrdenId, setEditandoOrdenId] = useState<string | null>(null);
+  const [editTitulo, setEditTitulo] = useState("");
+  const [editProductoId, setEditProductoId] = useState("");
+  const [editCantidad, setEditCantidad] = useState("");
+
   function cargarTodo() {
     api
       .get<OrdenCompra[]>("/compras/ordenes?incluirCerradas=true")
@@ -294,6 +303,40 @@ export default function Ordenes() {
       cargarTodo();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "No se pudo cancelar la orden.");
+    }
+  }
+
+  function abrirEdicionSolicitud(g: GrupoPendienteProgramacion, l: LineaPendienteProgramacion) {
+    setEditandoOrdenId(l.ordenId);
+    setEditTitulo(g.titulo ?? "");
+    setEditProductoId(l.productoId);
+    setEditCantidad(String(l.cantidadSolicitada));
+  }
+
+  function cerrarEdicionSolicitud() {
+    setEditandoOrdenId(null);
+    setEditTitulo("");
+    setEditProductoId("");
+    setEditCantidad("");
+  }
+
+  async function guardarEdicionSolicitud(g: GrupoPendienteProgramacion, l: LineaPendienteProgramacion) {
+    setError(null);
+    try {
+      const cambios: { titulo?: string; productoId?: string; cantidadSolicitada?: number } = {};
+      if (editTitulo.trim() && editTitulo.trim() !== (g.titulo ?? "")) cambios.titulo = editTitulo.trim();
+      if (editProductoId && editProductoId !== l.productoId) cambios.productoId = editProductoId;
+      const cantidadNum = Number(editCantidad);
+      if (editCantidad && cantidadNum !== l.cantidadSolicitada) cambios.cantidadSolicitada = cantidadNum;
+      if (Object.keys(cambios).length === 0) {
+        cerrarEdicionSolicitud();
+        return;
+      }
+      await api.post(`/compras/ordenes/${l.ordenId}/editar`, cambios);
+      cerrarEdicionSolicitud();
+      cargarTodo();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "No se pudo guardar la edición.");
     }
   }
 
@@ -719,19 +762,75 @@ export default function Ordenes() {
                     </div>
                     {abierta && (
                       <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 8, borderTop: "1px solid var(--border)", paddingTop: 8 }}>
-                        {g.lineas.map((l) => (
-                          <div key={l.ordenId} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12.5, gap: 8 }}>
-                            <span>
-                              {l.ingredienteActivo ?? l.nombreComercial} — {formatearNumero(l.cantidadPendiente)} {l.unidad}{" "}
-                              <span className={`tag ${tagLineaPendiente(l.estado)}`}>{ETIQUETAS_LINEA_PENDIENTE[l.estado]}</span>
-                            </span>
-                            {l.estadoOrden === "pendiente_cotizar" && (
-                              <button className="btn-secondary" onClick={() => irACotizar(l.ordenId)}>
-                                Cotizar
-                              </button>
-                            )}
-                          </div>
-                        ))}
+                        {g.lineas.map((l) => {
+                          const puedeEditar = g.tipo === "manual" && (l.estadoOrden === "pendiente_autorizar" || l.estadoOrden === "pendiente_cotizar");
+                          return (
+                            <div key={l.ordenId} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12.5, gap: 8 }}>
+                                <span>
+                                  {l.ingredienteActivo ?? l.nombreComercial} — {formatearNumero(l.cantidadPendiente)} {l.unidad}{" "}
+                                  <span className={`tag ${tagLineaPendiente(l.estado)}`}>{ETIQUETAS_LINEA_PENDIENTE[l.estado]}</span>
+                                </span>
+                                <div style={{ display: "flex", gap: 6 }}>
+                                  {puedeEditar && (
+                                    <button
+                                      className="btn-secondary"
+                                      onClick={() => (editandoOrdenId === l.ordenId ? cerrarEdicionSolicitud() : abrirEdicionSolicitud(g, l))}
+                                    >
+                                      {editandoOrdenId === l.ordenId ? "Cerrar" : "Editar"}
+                                    </button>
+                                  )}
+                                  {l.estadoOrden === "pendiente_cotizar" && (
+                                    <button className="btn-secondary" onClick={() => irACotizar(l.ordenId)}>
+                                      Cotizar
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                              {l.editadoPorNombre && (
+                                <div style={{ fontSize: 11, color: "var(--ink-soft)" }}>
+                                  Editado por: {l.editadoPorNombre}
+                                  {l.fechaEdicion && ` el ${formatearInstante(l.fechaEdicion)}`}
+                                </div>
+                              )}
+                              {editandoOrdenId === l.ordenId && (
+                                <div style={{ display: "flex", flexDirection: "column", gap: 8, background: "var(--surface-2, #f4f4f4)", padding: 8, borderRadius: 6 }}>
+                                  <label className="field">
+                                    Título de la Solicitud
+                                    <input value={editTitulo} onChange={(e) => setEditTitulo(e.target.value)} />
+                                  </label>
+                                  <label className="field">
+                                    Producto
+                                    <select value={editProductoId} onChange={(e) => setEditProductoId(e.target.value)}>
+                                      {productos.map((prod) => (
+                                        <option key={prod.id} value={prod.id}>
+                                          {nombreConMarca(prod)}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </label>
+                                  <label className="field">
+                                    Cantidad
+                                    <input type="number" min={0} step="0.01" value={editCantidad} onChange={(e) => setEditCantidad(e.target.value)} />
+                                  </label>
+                                  {l.estadoOrden === "pendiente_cotizar" && (
+                                    <p style={{ fontSize: 11, color: "var(--ink-soft)" }}>
+                                      Ya estaba autorizada — si cambias Cantidad o Producto, vuelve a pedir autorización.
+                                    </p>
+                                  )}
+                                  <div style={{ display: "flex", gap: 6 }}>
+                                    <button className="btn-primary" onClick={() => guardarEdicionSolicitud(g, l)}>
+                                      Guardar cambios
+                                    </button>
+                                    <button className="btn-secondary" onClick={cerrarEdicionSolicitud}>
+                                      Cancelar
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
                       </div>
                     )}
                   </div>

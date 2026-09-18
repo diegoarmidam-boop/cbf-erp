@@ -23,6 +23,14 @@ export class TransicionInvalidaError extends Error {
   }
 }
 
+// Editar Solicitudes manuales (8, V35, 17-sep-2026).
+export class SolicitudNoEditableError extends Error {}
+export class EdicionSolicitudNoPermitidaError extends Error {
+  constructor() {
+    super("Solo quien creó esta solicitud, o la persona de Compras, puede editarla.");
+  }
+}
+
 /** Resuelve nombre de Usuario en lote — usado para "Solicitante" (Bloque 2, 2-sep-2026) en las tres vistas de Compras. */
 async function resolverNombresUsuarios(ids: string[]): Promise<Map<string, string>> {
   const unicos = [...new Set(ids)];
@@ -363,6 +371,12 @@ export interface LineaPendienteProgramacion {
   cantidadPendiente: number;
   estado: EstadoLineaPendiente;
   estadoOrden: string;
+  // Trazabilidad de edición (8.3, V35, 17-sep-2026) -- el creador original
+  // (solicitanteNombre, a nivel de grupo) nunca se pierde; esto es aparte,
+  // solo se llena si alguien (el mismo Solicitante o Compras) la editó
+  // después de creada.
+  editadoPorNombre: string | null;
+  fechaEdicion: string | null;
 }
 
 export interface DestinoPendienteProgramacion {
@@ -506,7 +520,10 @@ export async function listarPendientesPorProgramacion(): Promise<GrupoPendienteP
     orderBy: { fechaCreacion: "desc" },
   });
 
-  const nombresUsuarios = await resolverNombresUsuarios(ordenes.map((o) => o.creadoPorId));
+  const nombresUsuarios = await resolverNombresUsuarios([
+    ...ordenes.map((o) => o.creadoPorId),
+    ...ordenes.map((o) => o.editadoPorId).filter((x): x is string => !!x),
+  ]);
   const grupos = new Map<string, GrupoPendienteProgramacion>();
 
   for (const orden of ordenes) {
@@ -567,6 +584,8 @@ export async function listarPendientesPorProgramacion(): Promise<GrupoPendienteP
       cantidadPendiente,
       estado: estadoLinea,
       estadoOrden: orden.estado,
+      editadoPorNombre: orden.editadoPorId ? nombresUsuarios.get(orden.editadoPorId) ?? "—" : null,
+      fechaEdicion: orden.fechaEdicion?.toISOString() ?? null,
     });
   }
 
@@ -664,6 +683,87 @@ export async function rechazarOrden(id: string, autorizadoPorId: string, motivoR
   });
   if (actualizadas.count === 0) throw new SolicitudYaResueltaOrdenError();
   return prisma.ordenCompra.findUniqueOrThrow({ where: { id } });
+}
+
+export interface EditarSolicitudManualInput {
+  titulo?: string;
+  productoId?: string;
+  cantidadSolicitada?: number;
+}
+
+/**
+ * Editar una Solicitud manual (8, V35, 17-sep-2026). 8.1: el Solicitante
+ * original O la persona de Compras (directo, sin pasar por el
+ * Solicitante) — `puedeEditarComoCompras` ya viene resuelto por rol desde
+ * la ruta (mismo criterio ROLES_ACCESO_UNIVERSAL/encargado_compras que
+ * Prioridad 7), aquí solo se compara contra el creador original.
+ *
+ * Solo mientras la solicitud sigue "pendiente_autorizar"/"pendiente_cotizar"
+ * -- una vez que tiene compra real (parcial o total) ya no se toca (causa
+ * raíz: la Comparación fija `cantidadNecesaria` al crearse y nunca se
+ * vuelve a tocar, ver comentario en el schema; cambiar cantidad/producto
+ * después rompería esa cotización/compra ya hecha).
+ *
+ * 8.2: reautorización condicional -- si YA estaba autorizada
+ * (pendiente_cotizar) y se edita CANTIDAD o PRODUCTO, regresa a
+ * pendiente_autorizar (se limpia autorizadoPorId). Editar solo el Título
+ * NO la reinicia.
+ *
+ * 8.3: `creadoPorId` nunca se toca (el creador original no se pierde);
+ * `editadoPorId`/`fechaEdicion` se actualizan en cada edición, sea quien
+ * sea que edite (incluido el propio Solicitante).
+ *
+ * Título es de la Solicitud completa, no de una línea -- varias filas
+ * comparten `solicitudManualId` (ver crearSolicitudManual), así que un
+ * cambio de Título se propaga a todas las filas del grupo. Cantidad/
+ * Producto son por línea (cada producto de la solicitud es su propia fila
+ * de OrdenCompra con su propio estado de autorización).
+ */
+export async function editarSolicitudManual(ordenId: string, editorId: string, puedeEditarComoCompras: boolean, cambios: EditarSolicitudManualInput) {
+  const orden = await prisma.ordenCompra.findUnique({ where: { id: ordenId }, include: { comparacionOrigen: true } });
+  if (!orden) throw new SolicitudNoEditableError("La solicitud no existe.");
+  if (orden.origen !== "manual") throw new SolicitudNoEditableError("Solo las solicitudes manuales se editan aquí.");
+  if (orden.estado !== "pendiente_autorizar" && orden.estado !== "pendiente_cotizar") {
+    throw new SolicitudNoEditableError("Esta solicitud ya no se puede editar — ya tiene una compra real (parcial o total) o ya se cerró.");
+  }
+  if (editorId !== orden.creadoPorId && !puedeEditarComoCompras) throw new EdicionSolicitudNoPermitidaError();
+
+  const cambiaCantidad = cambios.cantidadSolicitada != null && Number(cambios.cantidadSolicitada) !== Number(orden.cantidadSolicitada);
+  const cambiaProducto = cambios.productoId != null && cambios.productoId !== orden.productoId;
+  if ((cambiaCantidad || cambiaProducto) && orden.comparacionOrigen) {
+    throw new SolicitudNoEditableError(
+      "Ya tiene cotizaciones capturadas — no se puede cambiar cantidad ni producto (cancélala y crea una nueva solicitud si hace falta otro producto)."
+    );
+  }
+  if (cambiaProducto) {
+    const producto = await prisma.producto.findUniqueOrThrow({ where: { id: cambios.productoId! } });
+    if (!producto.autorizado) throw new ProductoNoAutorizadoError();
+  }
+
+  return prisma.$transaction(async (tx) => {
+    if (cambiaCantidad || cambiaProducto) {
+      const dataFila: { productoId?: string; cantidadSolicitada?: number; editadoPorId: string; fechaEdicion: Date; estado?: "pendiente_autorizar"; autorizadoPorId?: null } = {
+        editadoPorId: editorId,
+        fechaEdicion: new Date(),
+      };
+      if (cambiaProducto) dataFila.productoId = cambios.productoId;
+      if (cambiaCantidad) dataFila.cantidadSolicitada = cambios.cantidadSolicitada;
+      if (orden.estado === "pendiente_cotizar") {
+        dataFila.estado = "pendiente_autorizar";
+        dataFila.autorizadoPorId = null;
+      }
+      await tx.ordenCompra.update({ where: { id: ordenId }, data: dataFila });
+    }
+
+    if (cambios.titulo !== undefined) {
+      await tx.ordenCompra.updateMany({
+        where: orden.solicitudManualId ? { solicitudManualId: orden.solicitudManualId } : { id: ordenId },
+        data: { titulo: cambios.titulo, editadoPorId: editorId, fechaEdicion: new Date() },
+      });
+    }
+
+    return tx.ordenCompra.findUniqueOrThrow({ where: { id: ordenId } });
+  });
 }
 
 /**

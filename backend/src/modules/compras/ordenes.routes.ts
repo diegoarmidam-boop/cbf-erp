@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
+import type { Rol } from "@prisma/client";
 import { requireAuth, requirePermission, requirePermissionAny } from "../../middleware/auth.js";
 import { mensajeErrorCaptura, mensajeErrorValidacion, unoSolo } from "../../core/http.js";
 import { prisma } from "../../core/db.js";
@@ -8,6 +9,8 @@ import {
   autorizarOrden,
   crearSolicitudManual,
   DestinoManualInvalidoError,
+  editarSolicitudManual,
+  EdicionSolicitudNoPermitidaError,
   listarComparativoGeneral,
   listarOrdenes,
   listarPendientesPorIngredienteActivo,
@@ -17,10 +20,21 @@ import {
   recibirOrden,
   rechazarOrden,
   SolicitudManualSinProductosError,
+  SolicitudNoEditableError,
   SolicitudYaResueltaOrdenError,
   TransicionInvalidaError,
 } from "./ordenes.js";
 import { generarPdfOrdenCompra, obtenerOrdenCompraParaPdf } from "./ordenCompraPdf.js";
+
+// Editar Solicitud manual (8.1, V35, 17-sep-2026): "el Solicitante Y la
+// persona de Compras (Compras directo, sin pasar por el Solicitante)" --
+// el dueño se valida en el servicio (contra creadoPorId); aquí solo se
+// resuelve si el rol da acceso directo sin ser el dueño. Mismo patrón
+// ROLES_ACCESO_UNIVERSAL que Prioridad 7 (ordenesGeneracion.routes.ts).
+const ROLES_ACCESO_UNIVERSAL: Rol[] = ["director_general", "encargado_sistemas"];
+function puedeEditarComoCompras(rol: Rol): boolean {
+  return ROLES_ACCESO_UNIVERSAL.includes(rol) || rol === "encargado_compras";
+}
 
 export const ordenesRouter = Router();
 ordenesRouter.use(requireAuth);
@@ -77,6 +91,42 @@ ordenesRouter.post("/", requirePermission("compras", "capturar"), async (req, re
       return;
     }
     throw err;
+  }
+});
+
+const editarSolicitudSchema = z
+  .object({
+    titulo: z.string().min(1).optional(),
+    productoId: z.string().min(1).optional(),
+    cantidadSolicitada: z.number().positive().optional(),
+  })
+  .refine((d) => d.titulo !== undefined || d.productoId !== undefined || d.cantidadSolicitada !== undefined, {
+    message: "No hay ningún cambio que guardar.",
+  });
+
+// Editar una Solicitud manual (8, V35, 17-sep-2026) -- compras.capturar es
+// el mismo permiso amplio que ya exige crear una solicitud (varios roles
+// lo tienen); la exclusividad real de 8.1 (Solicitante o Compras, nadie
+// más) se valida dentro de editarSolicitudManual contra creadoPorId.
+ordenesRouter.post("/:id/editar", requirePermission("compras", "capturar"), async (req, res) => {
+  const parsed = editarSolicitudSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
+    return;
+  }
+  try {
+    const orden = await editarSolicitudManual(unoSolo(req.params.id), req.usuario!.usuarioId, puedeEditarComoCompras(req.usuario!.rol), parsed.data);
+    res.json(orden);
+  } catch (err) {
+    if (err instanceof EdicionSolicitudNoPermitidaError) {
+      res.status(403).json({ error: err.message });
+      return;
+    }
+    if (err instanceof SolicitudNoEditableError || err instanceof ProductoNoAutorizadoError) {
+      res.status(409).json({ error: err.message });
+      return;
+    }
+    res.status(400).json({ error: mensajeErrorCaptura(err) });
   }
 });
 
