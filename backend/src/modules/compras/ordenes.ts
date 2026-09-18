@@ -31,6 +31,33 @@ export class EdicionSolicitudNoPermitidaError extends Error {
   }
 }
 
+export interface OrdenConProductoComercial {
+  producto: { nombreComercial: string; ingredienteActivo: string | null; unidad: string };
+  comparacionCotizacion: { productoComercial: { nombreComercial: string; ingredienteActivo: string | null; unidad: string } } | null;
+}
+
+/**
+ * Bug real corregido (18-sep-2026, reportado por Diego): en PDF/tarjetas/
+ * CxP/histórico de Proveedor se mostraba `orden.producto.nombreComercial`
+ * — el producto "preferido" de la NECESIDAD original, no el Producto
+ * Comercial que de verdad se cotizó y compró a ESE Proveedor (pueden ser
+ * marcas distintas del mismo Ingrediente Activo — ej. pedir "ULTRASOL"
+ * de SQM cuando en realidad se le compró "Microhow" a Greenhow). A propósito
+ * NO se cambia `OrdenCompra.productoId` en sí (sigue siendo el producto de
+ * la necesidad) — Almacén lo usa para emparejar de vuelta con la
+ * Aplicación/Fertilización que generó la orden automática al recibirla
+ * (ver `recibirOrden`, más abajo); cambiar productoId ahí rompería ese
+ * emparejamiento cuando el Producto Comercial cotizado no coincide con el
+ * producto original. Esto es puramente de PRESENTACIÓN: qué nombre
+ * mostrarle al humano. Toda orden real (generada/recibida/cubierta)
+ * siempre tiene `comparacionCotizacionId` (la única función que las crea,
+ * `generarOrdenesDesdeAsignaciones`, siempre lo asigna) — el fallback a
+ * `producto` es solo defensivo.
+ */
+export function productoRealDeOrden(orden: OrdenConProductoComercial) {
+  return orden.comparacionCotizacion?.productoComercial ?? orden.producto;
+}
+
 /** Resuelve nombre de Usuario en lote — usado para "Solicitante" (Bloque 2, 2-sep-2026) en las tres vistas de Compras. */
 async function resolverNombresUsuarios(ids: string[]): Promise<Map<string, string>> {
   const unicos = [...new Set(ids)];
@@ -55,7 +82,14 @@ async function resolverNombresUsuarios(ids: string[]): Promise<Map<string, strin
 export async function listarOrdenes(estado?: string, incluirCerradas?: boolean) {
   const ordenes = await prisma.ordenCompra.findMany({
     where: estado ? { estado: estado as never } : incluirCerradas ? {} : { estado: { notIn: ["cancelada", "rechazada"] } },
-    include: { producto: true, proveedor: true, recepciones: true, centroCosto: true, huertaDestino: true },
+    include: {
+      producto: true,
+      proveedor: true,
+      recepciones: true,
+      centroCosto: true,
+      huertaDestino: true,
+      comparacionCotizacion: { include: { productoComercial: true } },
+    },
     orderBy: { fechaCreacion: "desc" },
   });
 
@@ -79,6 +113,10 @@ export async function listarOrdenes(estado?: string, incluirCerradas?: boolean) 
       // Cancelación de Orden ya generada (7, V35, 17-sep-2026) — distinto de
       // `motivoRechazo` (Solicitud manual rechazada antes de cotizar).
       canceladoPorNombre: orden.canceladoPorId ? nombresUsuarios.get(orden.canceladoPorId) ?? "—" : null,
+      // Bug real corregido (18-sep-2026): el Producto Comercial de verdad
+      // comprado a este Proveedor, no el de la necesidad -- ver
+      // `productoRealDeOrden` arriba.
+      productoReal: productoRealDeOrden(orden),
       huertaOrigen: contexto.huertaId ? { id: contexto.huertaId, nombre: contexto.huertaNombre! } : null,
       tipoAplicacionId: contexto.tipoAplicacionId,
       tipoAplicacionNombre: contexto.tipoAplicacionNombre,

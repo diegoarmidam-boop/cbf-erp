@@ -541,6 +541,12 @@ export interface OrdenCompra {
   origen: "automatica" | "manual";
   productoId: string;
   producto: Producto;
+  // Bug real corregido (18-sep-2026): producto COMERCIAL de verdad
+  // cotizado/comprado a este Proveedor (puede ser una marca distinta de
+  // `producto`, mismo Ingrediente Activo) — cae de vuelta a `producto`
+  // cuando la orden todavía no tiene cotización (necesidad pendiente).
+  // Usar SIEMPRE este para mostrar "qué se compró", no `producto`.
+  productoReal: { nombreComercial: string; ingredienteActivo: string | null; unidad: string };
   cantidadSolicitada: string;
   estado: EstadoOrdenCompra;
   proveedorId: string | null;
@@ -713,7 +719,7 @@ export interface OpcionesProductoComercial {
 export interface ComparacionResumen {
   id: string;
   fechaCreacion: string;
-  producto: { id: string; nombreComercial: string };
+  producto: { id: string; nombreComercial: string; ingredienteActivo: string | null };
   cantidadNecesaria: string;
   unidad: string;
   ordenCompraId: string | null;
@@ -758,7 +764,7 @@ export interface OrdenGeneradaSalida {
 export interface ComparacionCalculada {
   id: string;
   ordenCompraId: string | null;
-  producto: { id: string; nombreComercial: string; unidad: string };
+  producto: { id: string; nombreComercial: string; ingredienteActivo: string | null; unidad: string };
   cantidadNecesaria: number;
   unidad: string;
   umbralExcedentePct: number;

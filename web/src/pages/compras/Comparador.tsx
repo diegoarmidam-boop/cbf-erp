@@ -280,7 +280,10 @@ export default function Comparador() {
         <button className="btn-secondary" onClick={() => setDetalle(null)} style={{ marginBottom: 14 }}>
           ← Volver al Comparador
         </button>
-        <h3 style={{ marginBottom: 4 }}>{detalle.producto.nombreComercial}</h3>
+        {/* Bug real corregido (18-sep-2026): mostraba el nombre comercial de
+            la necesidad en vez del Ingrediente Activo -- mismo criterio que
+            Prioridad 1 de V35, se le escaparon estos 2 lugares. */}
+        <h3 style={{ marginBottom: 4 }}>{detalle.producto.ingredienteActivo ?? detalle.producto.nombreComercial}</h3>
         <div style={{ fontSize: 12, color: "var(--ink-soft)", marginBottom: 16 }}>
           Necesario: {detalle.cantidadNecesaria} {detalle.unidad} · Umbral de excedente: {detalle.umbralExcedentePct}% · creada{" "}
           {formatearInstante(detalle.fechaCreacion)}
@@ -536,7 +539,7 @@ export default function Comparador() {
                   onClick={() => verDetalle(c.id)}
                   style={{ border: "none", background: "none", color: "var(--pink)", cursor: "pointer", padding: 0, font: "inherit", fontWeight: 600 }}
                 >
-                  {c.producto.nombreComercial}
+                  {c.producto.ingredienteActivo ?? c.producto.nombreComercial}
                 </button>
               </td>
               <td>

@@ -3,6 +3,7 @@ import PDFDocument from "pdfkit";
 import { importeALetra } from "@cbf/shared";
 import { prisma } from "../../core/db.js";
 import { obtenerEmpresaConfig } from "../configuracion/empresa.js";
+import { productoRealDeOrden } from "./ordenes.js";
 
 const ROSA = "#e6127a";
 const VINO = "#6b2140";
@@ -41,7 +42,7 @@ export async function obtenerOrdenCompraParaPdf(id: string) {
 
   const filas = await prisma.ordenCompra.findMany({
     where: { numero: referencia.numero },
-    include: { producto: true, proveedor: true },
+    include: { producto: true, proveedor: true, comparacionCotizacion: { include: { productoComercial: true } } },
     orderBy: { fechaCreacion: "asc" },
   });
   const primera = filas[0];
@@ -49,17 +50,26 @@ export async function obtenerOrdenCompraParaPdf(id: string) {
 
   const empresa = await obtenerEmpresaConfig();
 
+  // Bug real corregido (18-sep-2026): la línea del PDF mostraba el producto
+  // "preferido" de la necesidad, no el Producto Comercial que de verdad se
+  // cotizó y se le compró a ESTE Proveedor (pueden ser marcas distintas
+  // del mismo Ingrediente Activo) -- ver `productoRealDeOrden` en
+  // ordenes.ts. Se agrupa por el id del producto REAL (antes por
+  // `fila.productoId`, la necesidad) para que dos filas que resultaron ser
+  // el mismo Producto Comercial se sumen igual.
   const porProducto = new Map<string, { nombreComercial: string; ingredienteActivo: string; unidad: string; cantidad: number; precioUnitario: number }>();
   for (const fila of filas) {
     if (fila.precioUnitario == null) continue;
-    const existente = porProducto.get(fila.productoId);
+    const real = productoRealDeOrden(fila);
+    const claveReal = fila.comparacionCotizacion?.productoComercial.id ?? fila.productoId;
+    const existente = porProducto.get(claveReal);
     if (existente) {
       existente.cantidad += Number(fila.cantidadSolicitada);
     } else {
-      porProducto.set(fila.productoId, {
-        nombreComercial: fila.producto.nombreComercial,
-        ingredienteActivo: fila.producto.ingredienteActivo ?? "—",
-        unidad: fila.producto.unidad,
+      porProducto.set(claveReal, {
+        nombreComercial: real.nombreComercial,
+        ingredienteActivo: real.ingredienteActivo ?? "—",
+        unidad: real.unidad,
         cantidad: Number(fila.cantidadSolicitada),
         precioUnitario: Number(fila.precioUnitario),
       });

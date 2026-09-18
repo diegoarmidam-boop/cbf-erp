@@ -1,4 +1,5 @@
 import { prisma } from "../../core/db.js";
+import { productoRealDeOrden } from "./ordenes.js";
 
 export function listarProveedores() {
   return prisma.proveedor.findMany({ where: { activo: true }, orderBy: { nombre: "asc" }, include: { zona: true } });
@@ -87,7 +88,7 @@ export async function historicoDeProveedor(proveedorId: string) {
   const [compras, cotizaciones] = await Promise.all([
     prisma.ordenCompra.findMany({
       where: { proveedorId, estado: { in: ["generada", "recibida"] } },
-      include: { producto: true },
+      include: { producto: true, comparacionCotizacion: { include: { productoComercial: true } } },
       orderBy: { fechaFormalizacion: "desc" },
     }),
     prisma.comparacionCotizacion.findMany({
@@ -98,16 +99,23 @@ export async function historicoDeProveedor(proveedorId: string) {
   ]);
 
   return {
-    compras: compras.map((o) => ({
-      id: o.id,
-      numero: o.numero,
-      nombreComercial: o.producto.nombreComercial,
-      cantidadSolicitada: Number(o.cantidadSolicitada),
-      unidad: o.producto.unidad,
-      precioUnitario: o.precioUnitario != null ? Number(o.precioUnitario) : null,
-      fecha: o.fechaFormalizacion,
-      estado: o.estado,
-    })),
+    compras: compras.map((o) => {
+      // Bug real corregido (18-sep-2026): producto COMERCIAL de verdad
+      // comprado a este Proveedor, no el de la necesidad -- ver
+      // `productoRealDeOrden` en ordenes.ts. Mismo criterio que ya usaba
+      // "cotizaciones" abajo (esa parte nunca tuvo el bug).
+      const real = productoRealDeOrden(o);
+      return {
+        id: o.id,
+        numero: o.numero,
+        nombreComercial: real.nombreComercial,
+        cantidadSolicitada: Number(o.cantidadSolicitada),
+        unidad: o.producto.unidad,
+        precioUnitario: o.precioUnitario != null ? Number(o.precioUnitario) : null,
+        fecha: o.fechaFormalizacion,
+        estado: o.estado,
+      };
+    }),
     cotizaciones: cotizaciones.map((c) => ({
       id: c.id,
       nombreComercial: c.productoComercial.nombreComercial,

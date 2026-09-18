@@ -1,4 +1,5 @@
 import { prisma } from "../../core/db.js";
+import { productoRealDeOrden } from "./ordenes.js";
 
 const MS_DIA = 24 * 60 * 60 * 1000;
 
@@ -36,7 +37,7 @@ export async function listarCxP(): Promise<OrdenCxP[]> {
       estado: { in: ["generada", "recibida"] },
       proveedor: { diasCredito: { not: null } },
     },
-    include: { producto: true, proveedor: true },
+    include: { producto: true, proveedor: true, comparacionCotizacion: { include: { productoComercial: true } } },
   });
 
   const hoy = new Date();
@@ -50,7 +51,10 @@ export async function listarCxP(): Promise<OrdenCxP[]> {
       const miercolesAnterior = new Date(viernes.getTime() - 2 * MS_DIA);
       return {
         id: o.id,
-        producto: { nombreComercial: o.producto.nombreComercial },
+        // Bug real corregido (18-sep-2026): producto COMERCIAL de verdad
+        // comprado a este Proveedor, no el de la necesidad -- ver
+        // `productoRealDeOrden` en ordenes.ts.
+        producto: { nombreComercial: productoRealDeOrden(o).nombreComercial },
         proveedor: { id: o.proveedor!.id, nombre: o.proveedor!.nombre, diasCredito: o.proveedor!.diasCredito! },
         precioUnitario: o.precioUnitario ? o.precioUnitario.toString() : null,
         cantidadSolicitada: o.cantidadSolicitada.toString(),

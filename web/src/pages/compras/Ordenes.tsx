@@ -474,7 +474,10 @@ export default function Ordenes() {
             <span className="tag tag-neutral">{o.origen}</span>
             {o.numero != null && <span className="tag tag-neutral">Folio {o.numero}</span>}
             <div style={{ fontSize: 13, fontWeight: 600, marginTop: 6 }}>
-              {o.producto.nombreComercial} — {o.cantidadSolicitada} {o.producto.unidad}
+              {/* Bug real corregido (18-sep-2026): mostraba el producto de
+                  la necesidad en vez del Producto Comercial que de verdad
+                  se cotizó/compró a este Proveedor — ver productoReal. */}
+              {o.productoReal.nombreComercial} — {o.cantidadSolicitada} {o.productoReal.unidad}
             </div>
             <div style={{ fontSize: 12, color: "var(--ink-soft)" }}>
               {destino && <>Destino: {destino} · </>}

@@ -217,7 +217,7 @@ export interface OrdenGeneradaSalida {
 export interface ComparacionCalculada {
   id: string;
   ordenCompraId: string | null;
-  producto: { id: string; nombreComercial: string; unidad: string };
+  producto: { id: string; nombreComercial: string; ingredienteActivo: string | null; unidad: string };
   cantidadNecesaria: number;
   unidad: string;
   umbralExcedentePct: number;
@@ -316,7 +316,12 @@ export async function obtenerComparacionCalculada(id: string): Promise<Comparaci
   return {
     id: comparacion.id,
     ordenCompraId: comparacion.ordenCompraId,
-    producto: { id: comparacion.producto.id, nombreComercial: comparacion.producto.nombreComercial, unidad: comparacion.producto.unidad },
+    producto: {
+      id: comparacion.producto.id,
+      nombreComercial: comparacion.producto.nombreComercial,
+      ingredienteActivo: comparacion.producto.ingredienteActivo,
+      unidad: comparacion.producto.unidad,
+    },
     cantidadNecesaria,
     unidad: comparacion.unidad,
     umbralExcedentePct,
