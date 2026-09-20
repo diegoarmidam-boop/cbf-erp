@@ -12,6 +12,7 @@ import { formatearFecha, formatearInstante } from "../../lib/fecha";
 import { formatearNumero } from "../../lib/numero";
 import RecetarioPanel, { ROLES_PUEDEN_RECETAS } from "../../components/RecetarioPanel";
 import MezclaPorTanque from "../../components/MezclaPorTanque";
+import HistorialAplicaciones from "./HistorialAplicaciones";
 import OrdenAplicacionView from "../../components/OrdenAplicacionView";
 import ConfirmModal from "../../components/ConfirmModal";
 import CampoNumerico from "../../components/CampoNumerico";
@@ -223,6 +224,7 @@ export default function Aplicaciones() {
   // se quedaban en la lista para siempre (31-ago-2026, reportado por
   // Diego). Siguen existiendo, solo se piden aparte con este toggle.
   const [mostrarCerradas, setMostrarCerradas] = useState(false);
+  const [mostrarHistorial, setMostrarHistorial] = useState(false);
 
   function cargar() {
     setCargando(true);
@@ -559,6 +561,18 @@ export default function Aplicaciones() {
   // era un acordeón que se abría encima de la lista de programaciones,
   // empujándola hacia abajo. Ahora reemplaza la pantalla completa, con su
   // propio "← Volver", como ya hace Inventario con el detalle de un Producto.
+  if (mostrarHistorial) {
+    return (
+      <div>
+        <h2 style={{ marginBottom: 16 }}>Historial de Aplicaciones</h2>
+        <button className="btn-secondary" onClick={() => setMostrarHistorial(false)} style={{ marginBottom: 14 }}>
+          ← Volver a Aplicaciones
+        </button>
+        <HistorialAplicaciones />
+      </div>
+    );
+  }
+
   if (mostrarRecetario) {
     return (
       <div>
@@ -592,6 +606,9 @@ export default function Aplicaciones() {
         </button>
         <button className="btn-secondary" onClick={() => setMostrarRecetario(true)}>
           Recetario
+        </button>
+        <button className="btn-secondary" onClick={() => setMostrarHistorial(true)}>
+          Historial
         </button>
         <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "var(--ink-soft)" }}>
           <input type="checkbox" checked={mostrarCerradas} onChange={(e) => setMostrarCerradas(e.target.checked)} />
