@@ -133,7 +133,7 @@ export default function Inventario() {
   // Chips de Categoría (6.3/6.5) — filtro principal, siempre visible, no
   // detrás del botón "Filtros". "" = Todos.
   const [categoriaChip, setCategoriaChip] = useState("");
-  const [mostrarExistenciaIA, setMostrarExistenciaIA] = useState(true);
+  const [mostrarExistenciaIA, setMostrarExistenciaIA] = useState(false);
 
   const [productoDetalleId, setProductoDetalleId] = useState<string | null>(null);
   const [editandoId, setEditandoId] = useState<string | null>(null);
