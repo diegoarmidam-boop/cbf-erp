@@ -1,5 +1,6 @@
 import { ordenarPorNombreNumerico } from "@cbf/shared";
 import { prisma } from "../../core/db.js";
+import type { TransactionClient } from "../../core/db.js";
 
 export async function listarSeccionesRiego(huertaId: string) {
   const secciones = await prisma.seccionRiego.findMany({
@@ -45,21 +46,24 @@ export async function lineasCintillaVigentes(seccionId: string, fecha: Date): Pr
  * para conservar el historial por fecha (mismo criterio que
  * actualizarConfiguracionCuadro, 9.1).
  */
-export async function actualizarLineasCintilla(seccionId: string, lineas: number, vigenteDesde: string) {
-  return prisma.$transaction(async (tx) => {
-    // Guardar otra vez con la MISMA fecha de vigencia corrige ese registro en
-    // vez de abrir uno nuevo (antes dejaba una fila con vigenteHasta < vigenteDesde).
-    const mismaFecha = await tx.seccionRiegoLineasCintilla.findFirst({ where: { seccionId, vigenteDesde: new Date(vigenteDesde) } });
-    if (mismaFecha) return tx.seccionRiegoLineasCintilla.update({ where: { id: mismaFecha.id }, data: { lineas } });
+export async function actualizarLineasCintillaTx(tx: TransactionClient, seccionId: string, lineas: number, vigenteDesde: string) {
+  // Guardar otra vez con la MISMA fecha de vigencia corrige ese registro en
+  // vez de abrir uno nuevo (antes dejaba una fila con vigenteHasta < vigenteDesde).
+  const mismaFecha = await tx.seccionRiegoLineasCintilla.findFirst({ where: { seccionId, vigenteDesde: new Date(vigenteDesde) } });
+  if (mismaFecha) return tx.seccionRiegoLineasCintilla.update({ where: { id: mismaFecha.id }, data: { lineas } });
 
-    const anterior = await tx.seccionRiegoLineasCintilla.findFirst({ where: { seccionId, vigenteHasta: null } });
-    if (anterior) {
-      const diaAnterior = new Date(vigenteDesde);
-      diaAnterior.setDate(diaAnterior.getDate() - 1);
-      await tx.seccionRiegoLineasCintilla.update({ where: { id: anterior.id }, data: { vigenteHasta: diaAnterior } });
-    }
-    return tx.seccionRiegoLineasCintilla.create({ data: { seccionId, lineas, vigenteDesde: new Date(vigenteDesde) } });
-  });
+  const anterior = await tx.seccionRiegoLineasCintilla.findFirst({ where: { seccionId, vigenteHasta: null } });
+  if (anterior) {
+    const diaAnterior = new Date(vigenteDesde);
+    diaAnterior.setDate(diaAnterior.getDate() - 1);
+    await tx.seccionRiegoLineasCintilla.update({ where: { id: anterior.id }, data: { vigenteHasta: diaAnterior } });
+  }
+  return tx.seccionRiegoLineasCintilla.create({ data: { seccionId, lineas, vigenteDesde: new Date(vigenteDesde) } });
+}
+
+/** Ver actualizarLineasCintillaTx — versión con su propia transacción. */
+export async function actualizarLineasCintilla(seccionId: string, lineas: number, vigenteDesde: string) {
+  return prisma.$transaction((tx) => actualizarLineasCintillaTx(tx, seccionId, lineas, vigenteDesde));
 }
 
 export function historialLineasCintilla(seccionId: string) {

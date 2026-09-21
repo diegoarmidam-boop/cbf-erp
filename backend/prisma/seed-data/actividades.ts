@@ -38,4 +38,6 @@ export const ACTIVIDADES_SEED: Array<{ nombre: string }> = [
   // de mantenimiento de equipos.
   { nombre: "Mantenimiento Cintilla/Riego" },
   { nombre: "Albañil" },
+  // V1 P5 (21-sep-2026): al reportar su avance por Cuadro deja la Sección de Riego con 2 líneas de cintilla (ver actividades.ts).
+  { nombre: "Tirar 2da Cintilla" },
 ];

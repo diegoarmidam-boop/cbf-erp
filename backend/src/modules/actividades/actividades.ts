@@ -3,6 +3,7 @@ import type { Prisma, TipoRecursoActividad } from "@prisma/client";
 import { prisma } from "../../core/db.js";
 import type { TransactionClient } from "../../core/db.js";
 import { obtenerVersionVigente } from "../unidades-produccion/cuadros.js";
+import { actualizarLineasCintillaTx } from "../unidades-produccion/secciones-riego.js";
 import { obtenerConfigNomina } from "../nomina/config.js";
 import { aActividadCalc } from "../nomina/util.js";
 import { diaEstaCerrado } from "../nomina/captura.js";
@@ -424,11 +425,40 @@ export async function registrarAvanceActividad(actividadProgramadaId: string, in
 
     await crearLineasYNomina(tx, realizada.id, programada.huertaId, programada.actividadId, cuadroIdUnico, fecha, input.lineas, tarifaAplicada, registradoPorId);
 
+    if (programada.actividad.nombre === NOMBRE_ACTIVIDAD_SEGUNDA_CINTILLA) {
+      await aplicarSegundaCintillaTx(tx, input.cuadros.map((c) => c.cuadroId), input.fechaReal);
+    }
+
     return tx.actividadRealizada.findUniqueOrThrow({
       where: { id: realizada.id },
       include: { cuadros: { include: { cuadro: true } }, lineas: { include: INCLUDE_LINEA_ACTIVIDAD } },
     });
   });
+}
+
+/**
+ * "Tirar 2da Cintilla" (V1 P5, 21-sep-2026): al reportar su avance para
+ * uno o varios Cuadros, cada Sección de Riego a la que pertenecen esos
+ * Cuadros queda con "Líneas de cintilla" = 2 a partir de la fecha del
+ * avance -- alimenta el mismo historial por fecha de la Sección, sin
+ * captura manual aparte. Si a esa fecha ya estaba en 2, no abre versión
+ * nueva; si ya hay una versión POSTERIOR a la fecha del avance (reporte
+ * atrasado), no se toca para no pisar un dato más reciente.
+ */
+export const NOMBRE_ACTIVIDAD_SEGUNDA_CINTILLA = "Tirar 2da Cintilla";
+
+async function aplicarSegundaCintillaTx(tx: TransactionClient, cuadroIds: string[], fechaReal: string) {
+  const fecha = new Date(fechaReal);
+  const vinculos = await tx.seccionRiegoCuadro.findMany({ where: { cuadroId: { in: cuadroIds } }, select: { seccionId: true } });
+  for (const seccionId of new Set(vinculos.map((v) => v.seccionId))) {
+    const vigente = await tx.seccionRiegoLineasCintilla.findFirst({
+      where: { seccionId, vigenteDesde: { lte: fecha }, OR: [{ vigenteHasta: null }, { vigenteHasta: { gte: fecha } }] },
+    });
+    if (vigente?.lineas === 2) continue;
+    const posterior = await tx.seccionRiegoLineasCintilla.findFirst({ where: { seccionId, vigenteDesde: { gt: fecha } } });
+    if (posterior) continue;
+    await actualizarLineasCintillaTx(tx, seccionId, 2, fechaReal);
+  }
 }
 
 export interface EditarAvanceActividadInput {
