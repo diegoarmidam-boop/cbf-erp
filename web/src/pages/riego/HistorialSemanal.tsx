@@ -11,7 +11,7 @@ function hoyISO(): string {
 
 function sumarDias(fechaISO: string, dias: number): string {
   const d = new Date(fechaISO);
-  d.setDate(d.getDate() + dias);
+  d.setUTCDate(d.getUTCDate() + dias);
   return d.toISOString().slice(0, 10);
 }
 
