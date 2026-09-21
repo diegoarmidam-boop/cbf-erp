@@ -3,7 +3,7 @@ import type { Prisma, Rol } from "@prisma/client";
 import { prisma } from "../../core/db.js";
 import type { TransactionClient } from "../../core/db.js";
 import { ingredientesAutorizados, resolverProductoPreferidoPorNombre } from "../almacen/preferencias.js";
-import { categoriaEsAgroquimico, nombresCategoriasAgroquimico } from "../almacen/productos.js";
+import { categoriaRequiereIngredienteActivo, nombresCategoriasConIngredienteActivo } from "../almacen/productos.js";
 import { actualizarDosisProductoEnReceta, obtenerReceta, ROLES_RECETAS } from "../recetario/recetario.js";
 import {
   ajustarCantidadProducto,
@@ -173,7 +173,7 @@ export async function programarAplicacion(input: ProgramarAplicacionInput, cread
   const productosResueltos = await resolverIngredientesAplicacion(input.productos);
   const productos = await prisma.producto.findMany({ where: { id: { in: productosResueltos.map((p) => p.productoId) } } });
   for (const p of productos) {
-    if (!(await categoriaEsAgroquimico(p.categoria)) || !p.autorizado) {
+    if (!(await categoriaRequiereIngredienteActivo(p.categoria)) || !p.autorizado) {
       throw new ProductoNoAutorizadoAplicacionError();
     }
   }
@@ -288,7 +288,7 @@ export async function editarAplicacionProgramada(aplicacionId: string, input: Om
   const productosResueltos = await resolverIngredientesAplicacion(input.productos);
   const productosNuevos = await prisma.producto.findMany({ where: { id: { in: productosResueltos.map((p) => p.productoId) } } });
   for (const p of productosNuevos) {
-    if (!(await categoriaEsAgroquimico(p.categoria)) || !p.autorizado) throw new ProductoNoAutorizadoAplicacionError();
+    if (!(await categoriaRequiereIngredienteActivo(p.categoria)) || !p.autorizado) throw new ProductoNoAutorizadoAplicacionError();
   }
 
   const recetaId = input.recetaId ?? aplicacion.recetaId ?? undefined;
@@ -1100,9 +1100,9 @@ export async function listarCancelacionesPendientesConfirmar() {
 // viven en almacen/movimientos.ts — son genéricas por movimiento, no
 // dependen de si el origen fue una Aplicación o una Fertilización Granular.
 
-/** Catálogo de agroquímicos ya autorizados — lo único elegible al programar (9.7). */
+/** Ingredientes Activos de todo producto autorizado cuya Categoría requiere Ingrediente Activo (no solo agroquímicos) — lo elegible al programar (9.7, ampliado 20-sep-2026). */
 export async function productosParaAplicacion() {
-  return ingredientesAutorizados(await nombresCategoriasAgroquimico());
+  return ingredientesAutorizados(await nombresCategoriasConIngredienteActivo());
 }
 
 /** Implementos elegibles en una línea de Turbina/Aguilón (9.7/9.13). */
