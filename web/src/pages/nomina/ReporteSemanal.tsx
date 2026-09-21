@@ -80,6 +80,20 @@ export default function ReporteSemanal() {
       });
   }
 
+  function descargarHojaFirmaBono() {
+    const token = getToken();
+    fetch(`${api.apiUrl}/nomina/bono-asistencia/hoja-firma.pdf?hoy=${fechaRef}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+      .then((r) => r.blob())
+      .then((blob) => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `bono-asistencia-firma-${reporte?.periodo.fin ?? fechaRef}.pdf`;
+        a.click();
+        URL.revokeObjectURL(url);
+      });
+  }
+
   const totalNeto = reporte?.filas.reduce((s, f) => s + f.neto, 0) ?? 0;
   const totalDescuentos = reporte?.filas.reduce((s, f) => s + f.descuentoPrestamos, 0) ?? 0;
 
@@ -146,6 +160,9 @@ export default function ReporteSemanal() {
             <button className="btn-secondary" onClick={descargarSobres}>
               Exportar sobres (PDF)
             </button>
+            <button className="btn-secondary" onClick={descargarHojaFirmaBono}>
+              Hoja de firma del Bono de Asistencia (PDF)
+            </button>
             {!reporte.confirmada && (
               <button className="btn-primary" onClick={() => setMostrarConfirmacion(true)}>
                 Confirmar semana
@@ -160,6 +177,7 @@ export default function ReporteSemanal() {
                 <th>Tipo</th>
                 <th>Bruto</th>
                 <th>Bonos</th>
+                <th>De los cuales, Bono de Asistencia</th>
                 <th>Descuentos</th>
                 <th>Neto</th>
               </tr>
@@ -171,6 +189,7 @@ export default function ReporteSemanal() {
                   <td>{f.tipo}</td>
                   <td>{formatearDinero(f.bruto)}</td>
                   <td>{formatearDinero(f.bonos)}</td>
+                  <td>{f.bonoAsistencia > 0 ? formatearDinero(f.bonoAsistencia) : "—"}</td>
                   <td>-{formatearDinero(f.descuentoPrestamos)}</td>
                   <td style={{ fontWeight: 700 }}>{formatearDinero(f.neto)}</td>
                 </tr>

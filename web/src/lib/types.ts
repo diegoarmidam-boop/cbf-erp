@@ -289,6 +289,8 @@ export interface FilaReporteSemanal {
   tipo: "fijo" | "destajo";
   bruto: number;
   bonos: number;
+  // V1 P7: parte de `bonos` que es el Bono de Asistencia Semanal.
+  bonoAsistencia: number;
   descuentoPrestamos: number;
   neto: number;
   prestamosAplicados: { prestamoId: string; monto: number }[];
@@ -1466,4 +1468,53 @@ export interface ViveroPresupuestoSemilla {
   productoId: string;
   cantidadNecesaria: string;
   producto: Producto;
+}
+
+// ---- Bono de Asistencia Semanal (V1 P7, 21-sep-2026) ----
+export type MotivoDiaBono = "ajuste" | "destajo" | "horas" | "falta" | "horas_insuficientes";
+
+export interface DiaBonoAsistencia {
+  fecha: string;
+  cumple: boolean;
+  motivo: MotivoDiaBono;
+  horas: number;
+  minimoHoras: number;
+  hayRegistro: boolean;
+  tieneDestajo: boolean;
+}
+
+export interface FilaBonoAsistencia {
+  personalId: string;
+  nombreCompleto: string;
+  congelado: boolean;
+  resultado: { monto: number; cumple: boolean; motivoSinBono: "nunca" | "dias_incompletos" | null; dias: DiaBonoAsistencia[] };
+}
+
+export interface ResumenBonoAsistencia {
+  periodoNomina: { inicio: string; fin: string };
+  semanaBono: { inicio: string; fin: string; dias: string[] };
+  congelada: boolean;
+  filas: FilaBonoAsistencia[];
+}
+
+export interface AjusteAsistencia {
+  id: string;
+  personalId: string;
+  fecha: string;
+  diaCompleto: boolean;
+  justificado: boolean;
+  nota: string | null;
+  personal: { id: string; nombreCompleto: string };
+}
+
+export interface ConfigBonoAsistencia {
+  montos: { montoDefault: number; montoEspecial: number };
+  personas: {
+    id: string;
+    nombreCompleto: string;
+    tipo: string;
+    bonoAsistenciaNunca: boolean;
+    bonoAsistenciaMedioTiempo: boolean;
+    bonoAsistenciaMontoEspecial: boolean;
+  }[];
 }

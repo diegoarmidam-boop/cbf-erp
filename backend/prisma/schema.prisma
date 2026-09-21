@@ -395,8 +395,17 @@ model Personal {
   // partir de esta fecha; se limpia manualmente si vuelve a trabajar.
   noDisponibleDesde  DateTime?    @db.Date
 
+  // Configuración del Bono de Asistencia Semanal (V1 P7, 21-sep-2026), por
+  // persona: "nunca recibe bono" se revisa primero; medio tiempo cambia los
+  // mínimos de horas; monto especial usa el monto especial ($200) en vez del default ($400).
+  bonoAsistenciaNunca         Boolean @default(false)
+  bonoAsistenciaMedioTiempo   Boolean @default(false)
+  bonoAsistenciaMontoEspecial Boolean @default(false)
+
   usuario                      Usuario?
   liquidaciones                Liquidacion[]
+  bonoAsistenciaAjustes        BonoAsistenciaAjuste[]
+  bonoAsistenciaCongelados     BonoAsistenciaCongelado[]
   documentos                   PersonalDocumento[]
   grupoMiembros                GrupoMiembro[]
   registrosNomina              RegistroNomina[]
@@ -734,6 +743,44 @@ model BonoDiaEspecial {
   bonoId String
   bono   BonoConfig @relation(fields: [bonoId], references: [id])
   fecha  DateTime   @db.Date
+}
+
+// Ajustes de Asistencia (V1 P7): tienen la última palabra sobre lo que el
+// sistema calculó solo. Una fila por Persona + Fecha exacta (reemplaza el
+// cálculo de ese día). Justificado = falta que no rompe el bono.
+model BonoAsistenciaAjuste {
+  id             String   @id @default(uuid())
+  personalId     String
+  personal       Personal @relation(fields: [personalId], references: [id])
+  fecha          DateTime @db.Date
+  diaCompleto    Boolean
+  justificado    Boolean
+  nota           String?  @db.Text
+  capturadoPorId String
+  fechaCaptura   DateTime @default(now())
+
+  @@unique([personalId, fecha])
+  @@index([fecha])
+}
+
+// Bono de Asistencia congelado al cerrar la semana de Nómina (V1 P7): los
+// números (bono incluido) ya no se recalculan, igual que el pago normal.
+model BonoAsistenciaCongelado {
+  id              String   @id @default(uuid())
+  personalId      String
+  personal        Personal @relation(fields: [personalId], references: [id])
+  semanaNominaFin DateTime @db.Date // fin (jueves) de la semana de Nómina que se cerró
+  bonoInicio      DateTime @db.Date // lunes de la semana de asistencia evaluada
+  bonoFin         DateTime @db.Date // sábado
+  monto           Decimal  @db.Decimal(10, 2)
+  cumple          Boolean
+  motivoSinBono   String?
+  detalleDias     Json
+  congeladoEn     DateTime @default(now())
+  congeladoPorId  String
+
+  @@unique([personalId, semanaNominaFin])
+  @@index([semanaNominaFin])
 }
 
 // Si se ofrece un día extra y la persona acepta pero no se presenta, rompe

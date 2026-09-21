@@ -151,6 +151,7 @@ export async function generarPdfLiquidacion(liquidacionId: string): Promise<PDFK
     tipo: "destajo",
     bruto: Number(liquidacion.bruto),
     bonos: Number(liquidacion.bonos),
+    bonoAsistencia: 0,
     descuentoPrestamos: Number(liquidacion.descuentoPrestamos),
     neto: Number(liquidacion.neto),
     prestamosAplicados: [],

@@ -9,3 +9,4 @@ export * from "./fertilizantes/calculo.js";
 export * from "./ordenes/calculo.js";
 export * from "./compras/calculo.js";
 export * from "./texto/numeroALetra.js";
+export * from "./nomina/bonoAsistencia.js";

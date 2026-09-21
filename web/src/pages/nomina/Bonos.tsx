@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { api, ApiError } from "../../lib/api";
 import type { BonoConfig, BonoOtorgado, TipoBono } from "../../lib/types";
 import { formatearDinero } from "../../lib/numero";
+import BonoAsistenciaSemanal from "./BonoAsistenciaSemanal";
 
 export default function Bonos() {
   const [bonos, setBonos] = useState<BonoConfig[]>([]);
@@ -17,6 +18,8 @@ export default function Bonos() {
   const [multiplicador, setMultiplicador] = useState("2");
   const [fechasDobles, setFechasDobles] = useState("");
   const [editandoId, setEditandoId] = useState<string | null>(null);
+  // V1 P7: Nómina → Bonos → Bono de Asistencia Semanal (Semana / Ajustes / Configuración).
+  const [vista, setVista] = useState<"catalogo" | "asistencia">("asistencia");
 
   function cargar() {
     api.get<BonoConfig[]>("/nomina/bonos").then(setBonos);
@@ -101,6 +104,19 @@ export default function Bonos() {
   }
 
   return (
+    <div>
+      <div style={{ display: "flex", gap: 6, marginBottom: 16 }}>
+        <button className={vista === "asistencia" ? "btn-primary" : "btn-secondary"} onClick={() => setVista("asistencia")}>
+          Bono de Asistencia Semanal
+        </button>
+        <button className={vista === "catalogo" ? "btn-primary" : "btn-secondary"} onClick={() => setVista("catalogo")}>
+          Otros bonos (catálogo)
+        </button>
+      </div>
+
+      {vista === "asistencia" && <BonoAsistenciaSemanal />}
+
+      {vista === "catalogo" && (
     <div>
       <h3 style={{ marginBottom: 10 }}>Catálogo de bonos</h3>
       <form onSubmit={onSubmit} className="card" style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 16 }}>
@@ -239,6 +255,8 @@ export default function Bonos() {
           ))}
         </tbody>
       </table>
+    </div>
+      )}
     </div>
   );
 }

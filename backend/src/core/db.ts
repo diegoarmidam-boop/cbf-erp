@@ -27,6 +27,7 @@ const MODELOS_AUDITADOS = new Set([
   "PrestamoDescuento",
   "BonoConfig",
   "BonoOtorgado",
+  "BonoAsistenciaAjuste",
   "CompromisoEspecial",
   "FaltaInjustificada",
   "Equipo",

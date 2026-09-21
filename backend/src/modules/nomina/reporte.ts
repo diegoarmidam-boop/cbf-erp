@@ -3,6 +3,7 @@ import { prisma } from "../../core/db.js";
 import { obtenerConfigNomina } from "./config.js";
 import { gananciaDestajoEnRango } from "./captura.js";
 import { totalBonosAutorizadosPersonaEnPeriodo } from "./bonos.js";
+import { congelarBonosAsistencia, montosBonoPorPersona, resumenBonoAsistencia } from "./bonoAsistencia.js";
 import { aplicarDescuento, prestamoAplicaEnPeriodo } from "./prestamos.js";
 import { marcarSemanaConfirmada, semanaEstaConfirmada, SemanaConfirmadaError } from "./semana-confirmada.js";
 
@@ -11,7 +12,10 @@ export interface FilaReporteSemanal {
   nombreCompleto: string;
   tipo: "fijo" | "destajo";
   bruto: number;
+  // Incluye bonoAsistencia (abajo) más los bonos configurables ya autorizados.
   bonos: number;
+  // Bono de Asistencia Semanal (V1 P7): en vivo hasta cerrar la semana, congelado después.
+  bonoAsistencia: number;
   descuentoPrestamos: number;
   neto: number;
   prestamosAplicados: { prestamoId: string; monto: number; yaAplicado: boolean }[];
@@ -36,6 +40,8 @@ export async function generarReporteNominaSemanal(hoy: FechaISO, huertaId?: stri
   const semanaInfo = semanaDelMesDePeriodo(periodo.fin, config.diaCorteIndex);
 
   const personas = await prisma.personal.findMany({ where: { activo: true }, include: { puesto: true } });
+  // Bono de Asistencia Semanal: semana de asistencia anterior (Lun-Sáb), calculada al momento.
+  const bonoAsistenciaPorPersona = montosBonoPorPersona(await resumenBonoAsistencia(hoy));
 
   const filas: FilaReporteSemanal[] = [];
   for (const persona of personas) {
@@ -43,7 +49,8 @@ export async function generarReporteNominaSemanal(hoy: FechaISO, huertaId?: stri
     const gananciaDestajoPeriodo = await gananciaDestajoEnRango(persona.id, periodo.inicio, periodo.fin, persona.tipo === "destajo" ? huertaId : undefined);
     const debePagarseSueldoEstePeriodo =
       persona.tipo === "fijo" && persona.puesto ? fijoDebePagarseEnPeriodo(persona.puesto.periodicidad, periodo, semanaInfo) : false;
-    const bonos = await totalBonosAutorizadosPersonaEnPeriodo(persona.id, periodo.inicio, periodo.fin);
+    const bonoAsistencia = bonoAsistenciaPorPersona.get(persona.id) ?? 0;
+    const bonos = (await totalBonosAutorizadosPersonaEnPeriodo(persona.id, periodo.inicio, periodo.fin)) + bonoAsistencia;
 
     // Bug corregido (8-ago-2026): antes esto era pura proyección a partir de
     // proximoDescuento — en cuanto se aplicaba de verdad, proximoDescuento
@@ -84,6 +91,7 @@ export async function generarReporteNominaSemanal(hoy: FechaISO, huertaId?: stri
       tipo: persona.tipo,
       bruto,
       bonos,
+      bonoAsistencia,
       descuentoPrestamos,
       neto,
       prestamosAplicados,
@@ -119,5 +127,7 @@ export async function confirmarNominaSemanal(hoy: FechaISO, confirmadoPorId: str
     }
   }
 
+  // El bono de asistencia se congela junto con el resto de los números de la semana.
+  await congelarBonosAsistencia(hoy, confirmadoPorId);
   await marcarSemanaConfirmada(reporte.periodo.fin, confirmadoPorId);
 }
