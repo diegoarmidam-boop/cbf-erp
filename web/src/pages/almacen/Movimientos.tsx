@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { api, ApiError } from "../../lib/api";
 import { useProductos } from "../../lib/useProductos";
 import { useHuertas } from "../../lib/useHuertas";
@@ -11,6 +11,14 @@ type TipoSalida = "prestamo_rancho" | "merma" | "baja_caducidad" | "abono_sobran
 export default function Movimientos() {
   const { productos } = useProductos(true);
   const { huertas } = useHuertas();
+  // Existencia en Almacén Central por producto (P2, V1 20-sep-2026): Salida y
+  // Entregar solo ofrecen productos con existencia > 0; Entrada sigue con
+  // todo el catálogo (ahí es donde llega producto que aún no tiene).
+  const [existencia, setExistencia] = useState<Record<string, number>>({});
+  function cargarExistencia() {
+    api.get<Record<string, number>>("/almacen/movimientos/stock-todos").then(setExistencia).catch(() => {});
+  }
+  useEffect(cargarExistencia, []);
   const [accion, setAccion] = useState<Accion>("entrada");
   const [productoId, setProductoId] = useState("");
   const [cantidad, setCantidad] = useState("");
@@ -49,6 +57,7 @@ export default function Movimientos() {
         });
       }
       setMensaje("Movimiento registrado.");
+      cargarExistencia();
       setCantidad("");
       setLote("");
       setPrecioUnitario("");
@@ -62,13 +71,13 @@ export default function Movimientos() {
   return (
     <div>
       <div style={{ display: "flex", gap: 6, marginBottom: 16 }}>
-        <button className={accion === "entrada" ? "btn-primary" : "btn-secondary"} onClick={() => setAccion("entrada")}>
+        <button className={accion === "entrada" ? "btn-primary" : "btn-secondary"} onClick={() => { setAccion("entrada"); setProductoId(""); }}>
           Entrada (compra recibida)
         </button>
-        <button className={accion === "entregar" ? "btn-primary" : "btn-secondary"} onClick={() => setAccion("entregar")}>
+        <button className={accion === "entregar" ? "btn-primary" : "btn-secondary"} onClick={() => { setAccion("entregar"); setProductoId(""); }}>
           Entregar a Huerta
         </button>
-        <button className={accion === "salida" ? "btn-primary" : "btn-secondary"} onClick={() => setAccion("salida")}>
+        <button className={accion === "salida" ? "btn-primary" : "btn-secondary"} onClick={() => { setAccion("salida"); setProductoId(""); }}>
           Salida (merma/préstamo/ajuste)
         </button>
       </div>
@@ -78,7 +87,7 @@ export default function Movimientos() {
           Producto (autorizado)
           <select value={productoId} onChange={(e) => setProductoId(e.target.value)} required>
             <option value="">Selecciona…</option>
-            {productos.map((p) => (
+            {productos.filter((p) => accion === "entrada" || (existencia[p.id] ?? 0) > 0).map((p) => (
               <option key={p.id} value={p.id}>
                 {nombreConMarca(p)}
               </option>
