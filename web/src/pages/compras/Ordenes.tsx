@@ -783,6 +783,18 @@ export default function Ordenes() {
                                       {editandoOrdenId === l.ordenId ? "Cerrar" : "Editar"}
                                     </button>
                                   )}
+                                  {/* Regresión de V35 P3 corregida (21-sep-2026): al fusionar
+                                      "Por Orden" en "Por Solicitud" se perdieron Autorizar/Rechazar. */}
+                                  {l.estadoOrden === "pendiente_autorizar" && (
+                                    <>
+                                      <button className="btn-primary" onClick={() => autorizar(l.ordenId)}>
+                                        Autorizar
+                                      </button>
+                                      <button className="btn-secondary" onClick={() => rechazar(l.ordenId)}>
+                                        Rechazar
+                                      </button>
+                                    </>
+                                  )}
                                   {l.estadoOrden === "pendiente_cotizar" && (
                                     <button className="btn-secondary" onClick={() => irACotizar(l.ordenId)}>
                                       Cotizar
