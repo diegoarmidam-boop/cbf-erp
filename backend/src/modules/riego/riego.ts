@@ -256,15 +256,20 @@ export async function estadoRiegoTodasUPs(fecha: string, huertaIdAlcance?: strin
 
 const DIAS_SEMANA = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
 
-/** Lunes a domingo de la semana calendario que contiene `fechaRef` (para el historial visual — no es el periodo de Nómina). */
+/**
+ * Lunes a domingo de la semana calendario que contiene `fechaRef` (para el historial visual — no es el periodo de Nómina).
+ * Bug real corregido (V1, 21-sep-2026): esto usaba getDay/setDate en hora LOCAL sobre una fecha parseada como UTC medianoche
+ * ("2026-09-21" = 20-sep 18:00 en México), así que todos los días salían corridos uno hacia atrás — el jueves 17 aparecía
+ * bajo Miércoles y el lunes 21 bajo Domingo. Todo en UTC, igual que como se guardan las fechas (columna DATE).
+ */
 function semanaLunesADomingo(fechaRef: Date): Date[] {
-  const dow = fechaRef.getDay();
+  const dow = fechaRef.getUTCDay();
   const diffALunes = dow === 0 ? -6 : 1 - dow;
   const lunes = new Date(fechaRef);
-  lunes.setDate(lunes.getDate() + diffALunes);
+  lunes.setUTCDate(lunes.getUTCDate() + diffALunes);
   return Array.from({ length: 7 }, (_, i) => {
     const d = new Date(lunes);
-    d.setDate(d.getDate() + i);
+    d.setUTCDate(d.getUTCDate() + i);
     return d;
   });
 }
