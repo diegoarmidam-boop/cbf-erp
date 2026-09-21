@@ -1217,7 +1217,9 @@ export interface RiegoRegistroDiario {
 
 export interface FertirriegoActivo {
   fertirriegoId: string;
-  productos: Producto[];
+  // cantidadPorRiego: lo programado por riego para ESTA Sección (dosis × ha)
+  // — lo que registra "Inyección completa".
+  productos: (Producto & { cantidadPorRiego: number })[];
 }
 
 export interface RiegoDiaResponse {

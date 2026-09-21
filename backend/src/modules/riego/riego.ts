@@ -1,5 +1,6 @@
-import { diaMarcadoDiasSemana, ordenarPorNombreNumerico } from "@cbf/shared";
+import { calcularCantidadTotalFertirriego, diaMarcadoDiasSemana, ordenarPorNombreNumerico } from "@cbf/shared";
 import { prisma } from "../../core/db.js";
+import { hectareasDeSecciones } from "../fertilizantes/fertirriego.js";
 import type { TransactionClient } from "../../core/db.js";
 import { obtenerVersionVigente } from "../unidades-produccion/cuadros.js";
 import { lineasCintillaVigentes } from "../unidades-produccion/secciones-riego.js";
@@ -48,9 +49,19 @@ async function fertirriegoVigente(tx: TransactionClient | typeof prisma, seccion
 
 /** Para que la pantalla sepa si ofrecer la casilla "¿se metió el fertirriego?" (9.6), y con qué producto(s). */
 export async function fertirriegoActivoDeSeccion(seccionId: string, fecha: string) {
-  const fertirriego = await fertirriegoVigente(prisma, seccionId, new Date(fecha));
+  const fechaDate = new Date(fecha);
+  const fertirriego = await fertirriegoVigente(prisma, seccionId, fechaDate);
   if (!fertirriego) return null;
-  return { fertirriegoId: fertirriego.id, productos: fertirriego.productos.map((p) => p.producto) };
+  // Cantidad programada POR RIEGO para ESTA Sección (dosis × hectáreas de la
+  // Sección) -- es lo que "Inyección completa" registra sin capturar nada.
+  const hectareas = await hectareasDeSecciones([seccionId], fechaDate);
+  return {
+    fertirriegoId: fertirriego.id,
+    productos: fertirriego.productos.map((p) => ({
+      ...p.producto,
+      cantidadPorRiego: Math.round(calcularCantidadTotalFertirriego(Number(p.dosisValor), p.dosisUnidad, hectareas) * 10000) / 10000,
+    })),
+  };
 }
 
 export async function obtenerRiegoDiario(seccionId: string, fecha: string) {

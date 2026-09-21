@@ -26,7 +26,7 @@ import { ingredientesAutorizados, resolverProductoPreferidoPorNombre } from "../
 const DIAS_VENCIMIENTO = 15;
 
 /** Hectáreas totales de un conjunto de Secciones de Riego, a partir de sus Cuadros — no se persiste, se recalcula cada vez (mismo criterio de programarFertirriego). */
-async function hectareasDeSecciones(seccionIds: string[], fecha: Date): Promise<number> {
+export async function hectareasDeSecciones(seccionIds: string[], fecha: Date): Promise<number> {
   let hectareasTotales = 0;
   for (const seccionId of seccionIds) {
     const cuadrosSeccion = await prisma.seccionRiegoCuadro.findMany({ where: { seccionId } });

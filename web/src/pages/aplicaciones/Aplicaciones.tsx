@@ -15,7 +15,6 @@ import MezclaPorTanque from "../../components/MezclaPorTanque";
 import HistorialAplicaciones from "./HistorialAplicaciones";
 import OrdenAplicacionView from "../../components/OrdenAplicacionView";
 import ConfirmModal from "../../components/ConfirmModal";
-import CampoNumerico from "../../components/CampoNumerico";
 
 const ETIQUETAS_ESTADO: Record<string, string> = {
   programada: "Programada",
@@ -709,12 +708,18 @@ export default function Aplicaciones() {
                       ))}
                     </select>
                   </label>
-                  <CampoNumerico
-                    label="Concentración"
-                    value={p.concentracionValor}
-                    onChange={(v) => actualizarProductoForm(i, { concentracionValor: v })}
-                    disabled={!!recetaId && !puedeAjustarReceta}
-                  />
+                  <label className="field">
+                    Concentración
+                    <input
+                      type="number"
+                      min={0}
+                      step="any"
+                      inputMode="decimal"
+                      value={p.concentracionValor}
+                      onChange={(e) => actualizarProductoForm(i, { concentracionValor: e.target.value })}
+                      disabled={!!recetaId && !puedeAjustarReceta}
+                    />
+                  </label>
                   <label className="field">
                     Unidad
                     <select

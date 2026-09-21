@@ -64,7 +64,7 @@ riegoRouter.get("/:seccionId/:fecha", requirePermission("riego", "ver"), async (
 
 const cantidadProductoSchema = z.object({
   productoId: z.string().min(1),
-  cantidadAplicada: z.number().positive(),
+  cantidadAplicada: z.number().nonnegative(),
 });
 
 const registrarSchema = z.object({
