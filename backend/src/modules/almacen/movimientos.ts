@@ -54,7 +54,17 @@ export function lotesDeProducto(productoId: string) {
   return prisma.productoLote.findMany({ where: { productoId }, orderBy: { fechaCaducidad: "asc" } });
 }
 
+export class PrecioEntradaRequeridoError extends Error {
+  constructor() {
+    super("El precio unitario es obligatorio en toda Entrada — sin él no se puede costear lo que después consuma ese lote.");
+  }
+}
+
 interface OpcionesEntrada {
+  // Obligatorio (P1, V1 20-sep-2026): precio unitario en MXN.
+  precioUnitario: number;
+  // Solo en Entrada manual sin Orden de Compra ligada (la ruta lo exige).
+  motivoEntradaManual?: string;
   lote?: string;
   fechaCaducidad?: string;
   referenciaId?: string;
@@ -78,8 +88,9 @@ export async function registrarEntradaTx(
   productoId: string,
   cantidad: number,
   capturadoPorId: string,
-  opciones: OpcionesEntrada = {}
+  opciones: OpcionesEntrada
 ) {
+  if (!Number.isFinite(opciones.precioUnitario) || opciones.precioUnitario <= 0) throw new PrecioEntradaRequeridoError();
   const producto = await tx.producto.findUniqueOrThrow({ where: { id: productoId } });
   const claveLote = producto.requiereLote ? (opciones.lote ?? SIN_LOTE) : SIN_LOTE;
 
@@ -112,6 +123,8 @@ export async function registrarEntradaTx(
       tipo: "entrada_compra",
       cantidad,
       referenciaId: opciones.referenciaId,
+      precioUnitario: opciones.precioUnitario,
+      motivoAjuste: opciones.motivoEntradaManual,
       capturadoPorId,
     },
   });
@@ -119,7 +132,7 @@ export async function registrarEntradaTx(
 }
 
 /** Entrada real de inventario (9.15) cuando nadie más necesita compartir la transacción. */
-export async function registrarEntrada(productoId: string, cantidad: number, capturadoPorId: string, opciones: OpcionesEntrada = {}) {
+export async function registrarEntrada(productoId: string, cantidad: number, capturadoPorId: string, opciones: OpcionesEntrada) {
   return prisma.$transaction((tx) => registrarEntradaTx(tx, productoId, cantidad, capturadoPorId, opciones));
 }
 

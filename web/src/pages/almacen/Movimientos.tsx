@@ -15,6 +15,8 @@ export default function Movimientos() {
   const [productoId, setProductoId] = useState("");
   const [cantidad, setCantidad] = useState("");
   const [lote, setLote] = useState("");
+  const [precioUnitario, setPrecioUnitario] = useState("");
+  const [motivoEntrada, setMotivoEntrada] = useState("");
   const [fechaCaducidad, setFechaCaducidad] = useState("");
   const [huertaId, setHuertaId] = useState("");
   const [tipoSalida, setTipoSalida] = useState<TipoSalida>("merma");
@@ -31,6 +33,8 @@ export default function Movimientos() {
         await api.post("/almacen/movimientos/entrada", {
           productoId,
           cantidad: Number(cantidad),
+          precioUnitario: Number(precioUnitario),
+          motivo: motivoEntrada,
           lote: lote || undefined,
           fechaCaducidad: fechaCaducidad || undefined,
         });
@@ -47,6 +51,8 @@ export default function Movimientos() {
       setMensaje("Movimiento registrado.");
       setCantidad("");
       setLote("");
+      setPrecioUnitario("");
+      setMotivoEntrada("");
       setMotivoAjuste("");
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "No se pudo registrar.");
@@ -86,6 +92,14 @@ export default function Movimientos() {
 
         {accion === "entrada" && (
           <>
+            <label className="field">
+              Precio unitario (MXN)
+              <input type="number" min={0} step="0.0001" value={precioUnitario} onChange={(e) => setPrecioUnitario(e.target.value)} required />
+            </label>
+            <label className="field">
+              Motivo (por qué no viene de una Orden de Compra)
+              <input value={motivoEntrada} onChange={(e) => setMotivoEntrada(e.target.value)} required style={{ minWidth: 260 }} />
+            </label>
             <label className="field">
               Lote
               <input value={lote} onChange={(e) => setLote(e.target.value)} placeholder="Opcional" />

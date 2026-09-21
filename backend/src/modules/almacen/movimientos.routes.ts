@@ -40,6 +40,10 @@ movimientosRouter.get("/:productoId", requirePermission("almacen", "ver"), async
 const entradaSchema = z.object({
   productoId: z.string().min(1),
   cantidad: z.number().positive(),
+  // Obligatorios (P1, V1 20-sep-2026): toda Entrada manual (sin Orden de
+  // Compra ligada) lleva precio y el motivo de por qué no viene de una orden formal.
+  precioUnitario: z.number().positive({ message: "El precio unitario es obligatorio." }),
+  motivo: z.string().trim().min(1, "El motivo es obligatorio en una Entrada manual sin Orden de Compra."),
   lote: z.string().optional(),
   fechaCaducidad: z.string().optional(),
 });
@@ -50,8 +54,8 @@ movimientosRouter.post("/entrada", requirePermission("almacen", "capturar"), asy
     res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
     return;
   }
-  const { productoId, cantidad, ...opciones } = parsed.data;
-  res.status(201).json(await registrarEntrada(productoId, cantidad, req.usuario!.usuarioId, opciones));
+  const { productoId, cantidad, motivo, ...opciones } = parsed.data;
+  res.status(201).json(await registrarEntrada(productoId, cantidad, req.usuario!.usuarioId, { ...opciones, motivoEntradaManual: motivo }));
 });
 
 const entregaSchema = z.object({ productoId: z.string().min(1), huertaId: z.string().min(1), cantidad: z.number().positive() });

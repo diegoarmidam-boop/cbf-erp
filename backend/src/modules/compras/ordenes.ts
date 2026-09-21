@@ -879,6 +879,8 @@ export async function recibirOrden(
     // después, la entrada de inventario también se revierte. Siempre bajo
     // el producto que de verdad llegó, sea el pedido o un sustituto.
     await registrarEntradaTx(tx, productoRecibidoId, cantidadRecibida, recibidoPorId, {
+      // Toda orden generada ya trae precio (lo fija la cotización elegida).
+      precioUnitario: Number(orden.precioUnitario ?? 0),
       lote: opciones.lote,
       fechaCaducidad: opciones.fechaCaducidad,
       referenciaId: id,

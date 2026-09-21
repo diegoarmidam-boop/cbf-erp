@@ -1056,6 +1056,10 @@ model AlmacenCentralMovimiento {
   fecha           DateTime                     @default(now())
   capturadoPorId  String
   motivoAjuste    String? // requerido para merma/ajuste_manual (doble-check de Gerencia)
+  // Precio unitario (MXN) de la entrada (P1, 20-sep-2026) — obligatorio en toda
+  // entrada_compra: base del costeo de lo que después consuma ese lote. Null
+  // en las entradas históricas anteriores a este campo y en los demás tipos.
+  precioUnitario  Decimal?                     @db.Decimal(12, 4)
   // Firma digital de recepción de Bodega, por movimiento (15-ago-2026):
   // permite confirmar cada devolución de sobrante por separado — a
   // diferencia de Aplicacion.confirmacionBodegaPorId (un solo campo, para
