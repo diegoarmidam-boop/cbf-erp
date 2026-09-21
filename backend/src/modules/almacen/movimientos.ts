@@ -42,10 +42,35 @@ export async function stockComprometidoPendienteTodos(): Promise<Record<string, 
       })
     ).map((m) => m.referenciaId)
   );
-  const totales: Record<string, number> = {};
+  // Bug real (V1 P3, 21-sep-2026): esto sumaba TODO `salida_comprometida`
+  // sin restar lo que después se liberó (editar la programación quitando/
+  // bajando un producto, o liberar/cancelar) -- `liberarComprometido`
+  // regresa el stock al lote y deja un `ajuste_manual` con la misma
+  // referencia, pero el compromiso original seguía contando, así que la
+  // etiqueta "comprometido" nunca bajaba aunque la existencia sí. Se
+  // netea por (referencia, producto): comprometido - liberado, mínimo 0.
+  // (`ajuste_manual` con referenciaId solo lo crea liberarComprometido;
+  // la salida manual de Movimientos no lleva referencia.)
+  const liberaciones = await prisma.almacenCentralMovimiento.findMany({
+    where: { tipo: "ajuste_manual", referenciaId: { not: null } },
+    select: { productoId: true, cantidad: true, referenciaId: true },
+  });
+  const liberadoPorClave = new Map<string, number>();
+  for (const l of liberaciones) {
+    const clave = `${l.referenciaId}|${l.productoId}`;
+    liberadoPorClave.set(clave, (liberadoPorClave.get(clave) ?? 0) + Number(l.cantidad));
+  }
+  const comprometidoPorClave = new Map<string, { productoId: string; cantidad: number }>();
   for (const m of comprometidos) {
     if (m.referenciaId && referenciasEntregadas.has(m.referenciaId)) continue;
-    totales[m.productoId] = (totales[m.productoId] ?? 0) + Number(m.cantidad);
+    const clave = `${m.referenciaId}|${m.productoId}`;
+    const previo = comprometidoPorClave.get(clave);
+    comprometidoPorClave.set(clave, { productoId: m.productoId, cantidad: (previo?.cantidad ?? 0) + Number(m.cantidad) });
+  }
+  const totales: Record<string, number> = {};
+  for (const [clave, { productoId, cantidad }] of comprometidoPorClave) {
+    const vigente = cantidad - (liberadoPorClave.get(clave) ?? 0);
+    if (vigente > 0.0001) totales[productoId] = (totales[productoId] ?? 0) + vigente;
   }
   return totales;
 }
