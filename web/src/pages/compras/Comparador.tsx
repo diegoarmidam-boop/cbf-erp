@@ -81,6 +81,9 @@ export default function Comparador() {
   const [proveedores, setProveedores] = useState<Proveedor[]>([]);
   const [listaCompra, setListaCompra] = useState<OrdenCompra[]>([]);
   const [comparaciones, setComparaciones] = useState<ComparacionResumen[]>([]);
+  // Las ya compradas por completo no se listan (se haría interminable) --
+  // se piden aparte con este toggle.
+  const [mostrarCompradas, setMostrarCompradas] = useState(false);
   const [detalle, setDetalle] = useState<ComparacionCalculada | null>(null);
   const [mostrarForm, setMostrarForm] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -95,7 +98,7 @@ export default function Comparador() {
 
 
   function cargar() {
-    api.get<ComparacionResumen[]>("/compras/comparador").then(setComparaciones);
+    api.get<ComparacionResumen[]>(`/compras/comparador${mostrarCompradas ? "?incluirCompradas=true" : ""}`).then(setComparaciones);
     api.get<Proveedor[]>("/compras/proveedores").then(setProveedores);
     // "Lista de compra ya generada por el sistema" (1.1): órdenes ya
     // esperando cotización — de ahí se elige el Producto, sin volver a
@@ -103,7 +106,7 @@ export default function Comparador() {
     api.get<OrdenCompra[]>("/compras/ordenes?estado=pendiente_cotizar").then(setListaCompra);
   }
 
-  useEffect(cargar, []);
+  useEffect(cargar, [mostrarCompradas]);
 
   function verDetalle(id: string) {
     setError(null);
@@ -520,6 +523,11 @@ export default function Comparador() {
       )}
 
       {error && <div className="tag tag-danger" style={{ display: "block", padding: "8px 12px", marginBottom: 12 }}>{error}</div>}
+
+      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "var(--ink-soft)", marginBottom: 10 }}>
+        <input type="checkbox" checked={mostrarCompradas} onChange={(e) => setMostrarCompradas(e.target.checked)} />
+        Mostrar ya compradas
+      </label>
 
       <table>
         <thead>

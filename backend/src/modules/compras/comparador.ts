@@ -65,8 +65,20 @@ const INCLUDE_COMPARACION = {
   cotizaciones: { include: { proveedor: true, zona: true, productoComercial: true }, orderBy: { fechaCreacion: "asc" as const } },
 };
 
-export function listarComparaciones() {
-  return prisma.comparacion.findMany({ include: INCLUDE_COMPARACION, orderBy: { fechaCreacion: "desc" } });
+/**
+ * Por default NO trae las Comparaciones cuya necesidad ya quedó cubierta
+ * por completo con órdenes de compra generadas (20-sep-2026, pedido de
+ * Diego: la lista se haría interminable). Siguen existiendo (histórico,
+ * Proveedores → histórico las usa); `incluirCompradas` las trae de vuelta.
+ * Si una orden se cancela, la necesidad regresa a pendiente_cotizar y la
+ * Comparación reaparece sola.
+ */
+export function listarComparaciones(incluirCompradas = false) {
+  return prisma.comparacion.findMany({
+    where: incluirCompradas ? {} : { NOT: { ordenCompra: { is: { estado: "cubierta" } } } },
+    include: INCLUDE_COMPARACION,
+    orderBy: { fechaCreacion: "desc" },
+  });
 }
 
 /**

@@ -20,8 +20,8 @@ export const comparadorRouter = Router();
 comparadorRouter.use(requireAuth);
 
 // Acceso abierto a todo el que ve Compras (9.14/4.5) — sin restricción adicional.
-comparadorRouter.get("/", requirePermission("compras", "ver"), async (_req, res) => {
-  res.json(await listarComparaciones());
+comparadorRouter.get("/", requirePermission("compras", "ver"), async (req, res) => {
+  res.json(await listarComparaciones(req.query.incluirCompradas === "true"));
 });
 
 comparadorRouter.get("/por-orden/:ordenCompraId", requirePermission("compras", "ver"), async (req, res) => {
