@@ -4,6 +4,7 @@ import { useCuadros } from "../../lib/useCuadros";
 import type { SeccionRiego, SeccionRiegoLineasCintilla } from "../../lib/types";
 import { useHuertaSeleccionada } from "./HuertaSeleccionadaContext";
 import ConfirmModal from "../../components/ConfirmModal";
+import { formatearFecha } from "../../lib/fecha";
 import FechaInput from "../../components/FechaInput";
 
 function hoyISO(): string {
@@ -25,6 +26,7 @@ export default function SeccionesRiego() {
   // por sección — solo informativo aquí; el histórico completo vive en la
   // base de datos, no hace falta mostrarlo en esta tabla.
   const [lineasVigentes, setLineasVigentes] = useState<Record<string, number | null>>({});
+  const [lineasDesde, setLineasDesde] = useState<Record<string, string | null>>({});
   const [editandoLineasId, setEditandoLineasId] = useState<string | null>(null);
   const [lineasForm, setLineasForm] = useState("");
   const [vigenteDesdeForm, setVigenteDesdeForm] = useState(hoyISO());
@@ -44,9 +46,18 @@ export default function SeccionesRiego() {
     api
       .get<SeccionRiegoLineasCintilla[]>(`/secciones-riego/${seccionId}/lineas-cintilla`)
       .then((historial) => {
+        // Bug real (V1 P4, 21-sep-2026): el backend manda estas fechas como
+        // "2026-09-19T00:00:00.000Z" y aquí se comparaban como texto contra
+        // "2026-09-19" -- el mismo día NO cumplía "<=" (el texto más largo es
+        // mayor), así que un valor capturado con vigencia hoy (el default)
+        // parecía no haberse guardado. Se comparan solo los 10 caracteres de fecha.
         const hoy = hoyISO();
-        const vigente = historial.find((h) => h.vigenteDesde <= hoy && (h.vigenteHasta == null || h.vigenteHasta >= hoy));
-        setLineasVigentes((prev) => ({ ...prev, [seccionId]: vigente?.lineas ?? null }));
+        const dia = (f: string | null) => (f ? f.slice(0, 10) : null);
+        const vigente = historial.find((h) => dia(h.vigenteDesde)! <= hoy && (h.vigenteHasta == null || dia(h.vigenteHasta)! >= hoy));
+        // Sin vigente hoy pero con una captura a futuro: se muestra esa (con su fecha) en vez de "sin capturar".
+        const proxima = vigente ? undefined : historial.find((h) => dia(h.vigenteDesde)! > hoy);
+        setLineasVigentes((prev) => ({ ...prev, [seccionId]: vigente?.lineas ?? proxima?.lineas ?? null }));
+        setLineasDesde((prev) => ({ ...prev, [seccionId]: proxima ? dia(proxima.vigenteDesde) : null }));
       })
       .catch(() => {});
   }
@@ -158,7 +169,8 @@ export default function SeccionesRiego() {
                   </div>
                 ) : (
                   <span>
-                    {lineasVigentes[s.id] ?? "— (sin capturar)"}{" "}
+                    {lineasVigentes[s.id] ?? "— (sin capturar)"}
+                    {lineasDesde[s.id] && <span style={{ fontSize: 11, color: "var(--ink-soft)" }}> (desde {formatearFecha(lineasDesde[s.id]!)})</span>}{" "}
                     <button
                       className="btn-secondary"
                       style={{ fontSize: 11, padding: "2px 8px" }}

@@ -47,6 +47,11 @@ export async function lineasCintillaVigentes(seccionId: string, fecha: Date): Pr
  */
 export async function actualizarLineasCintilla(seccionId: string, lineas: number, vigenteDesde: string) {
   return prisma.$transaction(async (tx) => {
+    // Guardar otra vez con la MISMA fecha de vigencia corrige ese registro en
+    // vez de abrir uno nuevo (antes dejaba una fila con vigenteHasta < vigenteDesde).
+    const mismaFecha = await tx.seccionRiegoLineasCintilla.findFirst({ where: { seccionId, vigenteDesde: new Date(vigenteDesde) } });
+    if (mismaFecha) return tx.seccionRiegoLineasCintilla.update({ where: { id: mismaFecha.id }, data: { lineas } });
+
     const anterior = await tx.seccionRiegoLineasCintilla.findFirst({ where: { seccionId, vigenteHasta: null } });
     if (anterior) {
       const diaAnterior = new Date(vigenteDesde);
