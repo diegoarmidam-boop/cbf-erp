@@ -82,8 +82,32 @@ model Usuario {
   auditoriaEntradas     AuditoriaLog[]
   solicitudesPropuestas SolicitudPendiente[] @relation("propuestoPor")
   solicitudesResueltas  SolicitudPendiente[] @relation("resueltoPor")
+  notificacionesVistas  NotificacionVista[]
 
   @@index([rol])
+}
+
+// Alertas INFORMATIVAS ya vistas por un usuario (V1 P6, 21-sep-2026): se
+// marcan a mano o solas a los 7 días, desaparecen de "Otras alertas" y
+// quedan aquí como historial consultable. Las alertas que requieren acción
+// NO viven aquí -- se calculan en vivo y se quedan hasta que la acción se
+// resuelva. Se guarda una foto de título/detalle/enlace porque la alerta en
+// vivo deja de calcularse.
+model NotificacionVista {
+  id            String   @id @default(uuid())
+  usuarioId     String
+  usuario       Usuario  @relation(fields: [usuarioId], references: [id])
+  clave         String // id estable de la alerta, ej. orden-recibida-<ordenId>
+  tipo          String
+  titulo        String
+  detalle       String   @db.Text
+  enlace        String
+  fechaEvento   DateTime
+  vistaEn       DateTime
+  automatica    Boolean  @default(false)
+
+  @@unique([usuarioId, clave])
+  @@index([usuarioId, vistaEn])
 }
 
 // Bitácora genérica de auditoría — capa transversal, no espera al módulo de

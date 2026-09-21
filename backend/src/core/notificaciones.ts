@@ -36,6 +36,8 @@ export interface Notificacion {
   urgente: boolean;
   fecha: string;
   enlace: string;
+  // V1 P6: true = informativa (se puede marcar vista); false = requiere acción.
+  informativa?: boolean;
 }
 
 /**
@@ -44,7 +46,98 @@ export interface Notificacion {
  * propone/autoriza, también alertas operativas (CxP, vencimientos de 15
  * días, descuadres de Almacén Local, cierres de Nómina pendientes).
  */
-export async function obtenerNotificaciones(rol: Rol, huertaIdAlcance: string | null): Promise<Notificacion[]> {
+export async function obtenerNotificaciones(rol: Rol, huertaIdAlcance: string | null, usuarioId: string): Promise<Notificacion[]> {
+  const todas = await calcularNotificaciones(rol, huertaIdAlcance);
+  return (await aplicarCicloDeVida(todas, usuarioId)).map((n) => ({ ...n, informativa: INFORMATIVAS.has(n.tipo) }));
+}
+
+/**
+ * Ciclo de vida (V1 P6, 21-sep-2026). Dos tipos de alerta:
+ *
+ * 6.1 Las que REQUIEREN ACCIÓN (pendientes de autorizar, CxP por vencer,
+ * aplicaciones vencidas, descuadres, cierres pendientes...) se calculan en
+ * vivo a partir del estado real: se quedan mientras la acción siga sin
+ * resolverse y desaparecen solo cuando se resuelve. NUNCA se archivan por
+ * tiempo -- por eso no pasan por el mecanismo de "vistas".
+ *
+ * 6.2 Las INFORMATIVAS (lista de abajo) se pueden marcar como vistas a mano
+ * y, si nadie las marca, se marcan solas a los 7 días. Al marcarse salen de
+ * "Otras alertas" y quedan en el historial (NotificacionVista).
+ */
+export const INFORMATIVAS = new Set(["orden_recibida"]);
+export const DIAS_AUTO_VISTA = 7;
+const MS_DIA = 86_400_000;
+
+async function aplicarCicloDeVida(todas: Notificacion[], usuarioId: string): Promise<Notificacion[]> {
+  const informativas = todas.filter((n) => INFORMATIVAS.has(n.tipo));
+  if (informativas.length === 0) return todas;
+
+  const vistas = new Set((await prisma.notificacionVista.findMany({ where: { usuarioId }, select: { clave: true } })).map((v) => v.clave));
+  const ahora = Date.now();
+  const ocultas = new Set<string>();
+  for (const n of informativas) {
+    if (vistas.has(n.id)) {
+      ocultas.add(n.id);
+      continue;
+    }
+    const vencimiento = new Date(n.fecha).getTime() + DIAS_AUTO_VISTA * MS_DIA;
+    if (vencimiento <= ahora) {
+      // Auto-vista: la fecha efectiva de "vista" es la del vencimiento (7 días
+      // después del evento), no el momento en que alguien abrió la pantalla.
+      await prisma.notificacionVista.upsert({
+        where: { usuarioId_clave: { usuarioId, clave: n.id } },
+        update: {},
+        create: {
+          usuarioId,
+          clave: n.id,
+          tipo: n.tipo,
+          titulo: n.titulo,
+          detalle: n.detalle,
+          enlace: n.enlace,
+          fechaEvento: new Date(n.fecha),
+          vistaEn: new Date(vencimiento),
+          automatica: true,
+        },
+      });
+      ocultas.add(n.id);
+    }
+  }
+  return todas.filter((n) => !ocultas.has(n.id));
+}
+
+export class AlertaNoInformativaError extends Error {
+  constructor() {
+    super("Esta alerta requiere una acción — se quita sola cuando se resuelve, no se marca como vista.");
+  }
+}
+
+/** Marca una alerta INFORMATIVA como vista (manual) — la foto se toma de la alerta en vivo. */
+export async function marcarNotificacionVista(clave: string, rol: Rol, huertaIdAlcance: string | null, usuarioId: string) {
+  const alerta = (await calcularNotificaciones(rol, huertaIdAlcance)).find((n) => n.id === clave);
+  if (!alerta) throw new Error("La alerta ya no existe.");
+  if (!INFORMATIVAS.has(alerta.tipo)) throw new AlertaNoInformativaError();
+  return prisma.notificacionVista.upsert({
+    where: { usuarioId_clave: { usuarioId, clave } },
+    update: {},
+    create: {
+      usuarioId,
+      clave,
+      tipo: alerta.tipo,
+      titulo: alerta.titulo,
+      detalle: alerta.detalle,
+      enlace: alerta.enlace,
+      fechaEvento: new Date(alerta.fecha),
+      vistaEn: new Date(),
+      automatica: false,
+    },
+  });
+}
+
+export function historialNotificaciones(usuarioId: string) {
+  return prisma.notificacionVista.findMany({ where: { usuarioId }, orderBy: { vistaEn: "desc" }, take: 200 });
+}
+
+async function calcularNotificaciones(rol: Rol, huertaIdAlcance: string | null): Promise<Notificacion[]> {
   const notificaciones: Notificacion[] = [];
 
   // 1) Solicitudes propone/autoriza (mecanismo genérico ya existente).
@@ -88,16 +181,17 @@ export async function obtenerNotificaciones(rol: Rol, huertaIdAlcance: string | 
   // ej. CxP próxima a vencer) porque una recepción no tiene un estado
   // futuro que la "resuelva" — a diferencia de una autorización pendiente,
   // sin ventana se quedaría como aviso para siempre.
+  // V1 P6 (21-sep-2026): ya no hay ventana fija de 3 días -- es una alerta
+  // INFORMATIVA con ciclo de vida propio (ver `INFORMATIVAS` abajo): se
+  // marca vista a mano o sola a los 7 días.
   if (await tienePermiso(rol, "compras", "ver")) {
-    const DIAS_AVISO_RECIBIDA = 3;
-    const limite = Date.now() - DIAS_AVISO_RECIBIDA * 86_400_000;
     const recibidas = await listarOrdenes("recibida");
     for (const o of recibidas) {
       const ultimaRecepcion = o.recepciones.reduce(
         (mas, r) => (mas && mas.fechaRecepcion > r.fechaRecepcion ? mas : r),
         o.recepciones[0]
       );
-      if (!ultimaRecepcion || ultimaRecepcion.fechaRecepcion.getTime() < limite) continue;
+      if (!ultimaRecepcion) continue;
       notificaciones.push({
         id: `orden-recibida-${o.id}`,
         tipo: "orden_recibida",

@@ -504,6 +504,21 @@ export interface Notificacion {
   urgente: boolean;
   fecha: string;
   enlace: string;
+  // V1 P6: true = informativa (se puede marcar vista); false/omitido = requiere acción.
+  informativa?: boolean;
+}
+
+// Historial de alertas informativas ya vistas (V1 P6).
+export interface NotificacionVista {
+  id: string;
+  clave: string;
+  tipo: string;
+  titulo: string;
+  detalle: string;
+  enlace: string;
+  fechaEvento: string;
+  vistaEn: string;
+  automatica: boolean;
 }
 
 export interface Proveedor {

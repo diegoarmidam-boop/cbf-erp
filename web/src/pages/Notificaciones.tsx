@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, ApiError } from "../lib/api";
-import type { Notificacion, SolicitudPendiente } from "../lib/types";
+import type { Notificacion, NotificacionVista, SolicitudPendiente } from "../lib/types";
+import { formatearFecha } from "../lib/fecha";
 
 const ETIQUETAS_TIPO_SOLICITUD: Record<string, string> = {
   actividad_alta: "Nueva actividad",
@@ -23,6 +24,7 @@ export default function Notificaciones() {
   const [solicitudes, setSolicitudes] = useState<SolicitudPendiente[]>([]);
   const [alertas, setAlertas] = useState<Notificacion[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [historial, setHistorial] = useState<NotificacionVista[] | null>(null);
   const [motivoRechazo, setMotivoRechazo] = useState<Record<string, string>>({});
 
   function cargar() {
@@ -37,6 +39,25 @@ export default function Notificaciones() {
   }
 
   useEffect(cargar, []);
+
+  function cargarHistorial() {
+    api
+      .get<NotificacionVista[]>("/notificaciones/historial")
+      .then(setHistorial)
+      .catch(() => setHistorial([]));
+  }
+
+  // V1 P6: solo las informativas se marcan vistas; las de acción se quitan solas al resolverse.
+  async function marcarVista(id: string) {
+    setError(null);
+    try {
+      await api.post("/notificaciones/vista", { id });
+      cargar();
+      if (historial) cargarHistorial();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "No se pudo marcar como vista.");
+    }
+  }
 
   async function autorizar(id: string) {
     setError(null);
@@ -105,21 +126,42 @@ export default function Notificaciones() {
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {alertas.map((n) => (
-            <Link
-              key={n.id}
-              to={n.enlace}
-              className="card"
-              style={{ display: "flex", justifyContent: "space-between", alignItems: "center", textDecoration: "none", color: "inherit" }}
-            >
-              <div>
+            <div key={n.id} className="card" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+              <Link to={n.enlace} style={{ flex: 1, textDecoration: "none", color: "inherit" }}>
                 <span className={`tag ${n.urgente ? "tag-danger" : "tag-neutral"}`}>{n.titulo}</span>
                 <div style={{ fontSize: 12, color: "var(--ink-soft)", marginTop: 4 }}>{n.detalle}</div>
-              </div>
-              <span style={{ fontSize: 18, color: "var(--ink-soft)" }}>→</span>
-            </Link>
+              </Link>
+              {n.informativa ? (
+                <button className="btn-secondary" onClick={() => marcarVista(n.id)}>
+                  Marcar como vista
+                </button>
+              ) : (
+                <span style={{ fontSize: 18, color: "var(--ink-soft)" }}>→</span>
+              )}
+            </div>
           ))}
         </div>
       )}
+
+      <div style={{ marginTop: 20 }}>
+        <button className="btn-secondary" onClick={() => (historial ? setHistorial(null) : cargarHistorial())}>
+          {historial ? "Ocultar historial" : "Ver historial de alertas vistas"}
+        </button>
+        {historial && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 12 }}>
+            {historial.length === 0 && <p style={{ color: "var(--ink-soft)" }}>Todavía no hay alertas vistas.</p>}
+            {historial.map((h) => (
+              <Link key={h.id} to={h.enlace} className="card" style={{ textDecoration: "none", color: "inherit" }}>
+                <span className="tag tag-neutral">{h.titulo}</span>
+                <div style={{ fontSize: 12, color: "var(--ink-soft)", marginTop: 4 }}>{h.detalle}</div>
+                <div style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 2 }}>
+                  {formatearFecha(h.fechaEvento)} · vista {formatearFecha(h.vistaEn)} ({h.automatica ? "automática a los 7 días" : "manual"})
+                </div>
+              </Link>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
