@@ -337,7 +337,8 @@ function Configuracion() {
       </div>
       <p style={{ fontSize: 12.5, color: "var(--ink-soft)", marginBottom: 10 }}>
         Por persona: <strong>Nunca recibe bono</strong> se revisa primero, antes que cualquier otra cosa. <strong>Medio tiempo</strong> baja el mínimo de horas
-        (5.33 h entre semana, 4 h sábado, en vez de 8 h / 5.33 h). <strong>Monto especial</strong> usa el monto especial en vez del default.
+        (5.33 h entre semana, 4 h sábado, en vez de 8 h / 5.33 h). <strong>Monto especial</strong> usa el monto especial en vez del default. Solo se listan las
+        personas con al menos una asistencia en la semana que se está viendo.
       </p>
       {error && <div className="tag tag-danger" style={{ display: "block", padding: "8px 12px", marginBottom: 12 }}>{error}</div>}
       {mensaje && <div className="tag tag-success" style={{ display: "block", padding: "8px 12px", marginBottom: 12 }}>{mensaje}</div>}

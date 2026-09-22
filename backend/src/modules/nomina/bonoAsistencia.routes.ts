@@ -123,8 +123,9 @@ bonoAsistenciaRouter.delete("/ajustes/:id", requirePermission("nomina", "captura
 });
 
 // ---- Configuración (7.7) ----
-bonoAsistenciaRouter.get("/config", requirePermission("nomina", "ver"), async (_req, res) => {
-  res.json({ montos: await obtenerMontosBonoAsistencia(), personas: await listarConfigPersonasBono() });
+bonoAsistenciaRouter.get("/config", requirePermission("nomina", "ver"), async (req, res) => {
+  const { semana } = await semanaDelBonoParaHoy(hoyQuery(req));
+  res.json({ montos: await obtenerMontosBonoAsistencia(), personas: await listarConfigPersonasBono(semana) });
 });
 
 const montosSchema = z.object({ montoDefault: z.number().nonnegative().optional(), montoEspecial: z.number().nonnegative().optional() });

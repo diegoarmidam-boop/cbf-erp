@@ -340,13 +340,24 @@ export default function CapturaDelDia() {
   const personalDisponible = personal.filter((p) => !tarjetas.some((t) => t.key === `p:${p.id}`));
   const gruposDisponibles = grupos.filter((g) => !tarjetas.some((t) => t.key === `g:${g.id}`));
 
+  // Contador de tarjetas + total del día (pedido por Diego, 21-sep-2026) —
+  // mismo cálculo en vivo/informativo que ya usa cada tarjeta
+  // (totalEstimadoTarjeta), solo sumado. "Incompleto" (actividad sin
+  // tarifa general configurada) no bloquea la suma, esa tarjeta simplemente
+  // no aporta al total, igual que ya hace la nota por tarjeta.
+  const totalDelDia = tarjetas.reduce((s, t) => s + totalEstimadoTarjeta(t, actividades, tarifaGeneralHora).total, 0);
+
   return (
     <div>
-      <div style={{ display: "flex", gap: 12, marginBottom: 16, alignItems: "flex-end" }}>
+      <div style={{ display: "flex", gap: 12, marginBottom: 16, alignItems: "flex-end", flexWrap: "wrap" }}>
         <label className="field" style={{ maxWidth: 180 }}>
           Fecha
           <FechaInput value={fecha} onChange={setFecha} />
         </label>
+        <span className="tag tag-neutral">
+          {tarjetas.length} persona{tarjetas.length === 1 ? "" : "s"}
+        </span>
+        <span className="tag tag-neutral">Total del día: {formatearDinero(totalDelDia)}</span>
         {multiRancho && <span className="tag tag-neutral">Todas UPs — {datos.length} Ranchos</span>}
       </div>
 

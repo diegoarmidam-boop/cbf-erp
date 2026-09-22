@@ -249,9 +249,37 @@ export interface ConfigPersonaBono {
   bonoAsistenciaMontoEspecial?: boolean;
 }
 
-export function listarConfigPersonasBono() {
+/**
+ * Ids de personas con al menos una asistencia (registro directo, vía
+ * miembro de Grupo de Pago, o un Ajuste de Asistencia) dentro de la
+ * semana -- mismo criterio "candidatos" que evaluarBonoAsistenciaSemana,
+ * factorizado aparte para no volver a calcular el detalle día por día
+ * cuando solo hace falta saber quién estuvo (pedido por Diego, 21-sep-2026:
+ * la lista de Configuración no debe mostrar a quien no vino en toda la semana).
+ */
+export async function personasConAsistenciaEnSemana(semana: SemanaBono): Promise<Set<string>> {
+  const desde = new Date(semana.inicio);
+  const hasta = new Date(semana.fin);
+  const [registros, ajustes] = await Promise.all([
+    prisma.registroNomina.findMany({
+      where: { fecha: { gte: desde, lte: hasta } },
+      select: { personalId: true, grupo: { select: { miembros: { select: { personalId: true } } } } },
+    }),
+    prisma.bonoAsistenciaAjuste.findMany({ where: { fecha: { gte: desde, lte: hasta } }, select: { personalId: true } }),
+  ]);
+  const candidatos = new Set<string>();
+  for (const r of registros) {
+    if (r.personalId) candidatos.add(r.personalId);
+    for (const m of r.grupo?.miembros ?? []) candidatos.add(m.personalId);
+  }
+  for (const a of ajustes) candidatos.add(a.personalId);
+  return candidatos;
+}
+
+export async function listarConfigPersonasBono(semana: SemanaBono) {
+  const candidatos = await personasConAsistenciaEnSemana(semana);
   return prisma.personal.findMany({
-    where: { activo: true },
+    where: { activo: true, id: { in: [...candidatos] } },
     select: { id: true, nombreCompleto: true, tipo: true, bonoAsistenciaNunca: true, bonoAsistenciaMedioTiempo: true, bonoAsistenciaMontoEspecial: true },
     orderBy: { nombreCompleto: "asc" },
   });
