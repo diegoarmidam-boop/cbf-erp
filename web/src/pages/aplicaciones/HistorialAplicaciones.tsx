@@ -16,7 +16,10 @@ interface Entrada {
 }
 
 function nombreProducto(a: Aplicacion) {
-  return a.productos.map((p) => p.producto.ingredienteActivo ?? p.producto.nombreComercial).join(" + ");
+  return a.grupos
+    .flatMap((g) => g.productos)
+    .map((p) => p.producto.ingredienteActivo ?? p.producto.nombreComercial)
+    .join(" + ");
 }
 
 /**
@@ -115,7 +118,11 @@ export default function HistorialAplicaciones() {
                 {r ? (
                   <>
                     <div style={{ fontSize: 12, color: "var(--ink-soft)", marginTop: 4 }}>
-                      Cuadros: {r.cuadros.map((c) => `${c.cuadro.nombre} (${formatearNumero(Number(c.hectareas))} ha)`).join(", ") || "—"}
+                      {formatearNumero(Number(r.hectareas))} ha —{" "}
+                      {r.grupos
+                        .flatMap((g) => g.cuadros)
+                        .map((c) => `${c.cuadro.nombre}${c.variedad ? ` (${c.variedad})` : ""}: ${formatearNumero(Number(c.hectareasAtribuidas))} ha`)
+                        .join(", ") || "—"}
                     </div>
                     {r.lineas.map((l) => (
                       <div key={l.id} style={{ fontSize: 12, color: "var(--ink-soft)" }}>

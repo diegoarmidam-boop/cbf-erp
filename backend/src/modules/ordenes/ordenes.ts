@@ -35,6 +35,12 @@ export class OrdenSinCapacidadTanqueError extends Error {
   }
 }
 
+export class OrdenConVariosGruposError extends Error {
+  constructor() {
+    super("Esta Orden de Aplicación todavía solo soporta programaciones de un único Grupo de dosis — con varios Grupos, genera la mezcla por tanque desde la pantalla de Aplicaciones.");
+  }
+}
+
 /**
  * Orden de Aplicación (9.7, 25-ago-2026): documento de salida para el
  * Encargado de Fumigación, diseñado a partir del formato Excel real de la
@@ -44,12 +50,16 @@ export class OrdenSinCapacidadTanqueError extends Error {
  */
 export async function construirOrdenAplicacion(aplicacionId: string) {
   const aplicacion = await obtenerAplicacion(aplicacionId);
-  if (aplicacion.capacidadTanque == null || !aplicacion.mezclaPorTanque) {
+  if (aplicacion.grupos.length !== 1) throw new OrdenConVariosGruposError();
+  const grupo = aplicacion.grupos[0]!;
+  const mezclaPorTanqueGrupo = aplicacion.mezclaPorTanque?.find((m) => m.grupoId === grupo.id) ?? null;
+  if (aplicacion.capacidadTanque == null || !mezclaPorTanqueGrupo) {
     throw new OrdenSinCapacidadTanqueError();
   }
+  const mezclaPorTanque = mezclaPorTanqueGrupo.productos;
 
-  const hectareasTotales = Number(aplicacion.hectareasTotalesProgramadas);
-  const litrosMezclaPorHa = Number(aplicacion.litrosMezclaPorHa);
+  const hectareasTotales = Number(grupo.hectareasProgramadas);
+  const litrosMezclaPorHa = Number(grupo.litrosMezclaPorHa);
   const capacidadTanque = Number(aplicacion.capacidadTanque);
   const volumenTotalAguaL = litrosMezclaPorHa * hectareasTotales;
   const fechaInicioISO = aplicacion.fechaInicio.toISOString().slice(0, 10);
@@ -62,29 +72,31 @@ export async function construirOrdenAplicacion(aplicacionId: string) {
   });
 
   // Plantas a tratar: suma del Marco de Plantación vigente (a la fecha de
-  // inicio) de cada Cuadro programado — null si a ALGUNO le falta Marco de
-  // Plantación configurado (mejor no mostrar un total incompleto/engañoso
-  // que inventar un dato).
+  // inicio) de cada Cuadro programado, con sus hectáreas PROGRAMADAS en
+  // este Grupo (V1 P2, 25-sep-2026: ya no la superficie completa del
+  // Cuadro, puede ser menor) — null si a ALGUNO le falta Marco de
+  // Plantación configurado.
   let plantasATratar: number | null = 0;
-  for (const { cuadroId } of aplicacion.cuadros) {
+  const cuadrosDelGrupo = grupo.cuadros.length > 0 ? grupo.cuadros.map((c) => ({ cuadroId: c.cuadroId, hectareas: Number(c.hectareas) })) : grupo.variedades.map((v) => ({ cuadroId: v.cuadroId, hectareas: Number(v.hectareas) }));
+  for (const { cuadroId, hectareas } of cuadrosDelGrupo) {
     const version = await obtenerVersionVigente(cuadroId, aplicacion.fechaInicio);
     if (!version || !version.distSurcosM || !version.distPlantasM) {
       plantasATratar = null;
       break;
     }
-    plantasATratar! += plantasTotalesCuadro(Number(version.hectareas), Number(version.distSurcosM), Number(version.distPlantasM));
+    plantasATratar! += plantasTotalesCuadro(hectareas, Number(version.distSurcosM), Number(version.distPlantasM));
   }
 
-  const tanquesCompletos = aplicacion.mezclaPorTanque[0]?.tanquesCompletos ?? 0;
-  const hayParcial = aplicacion.mezclaPorTanque.some((m) => m.tanqueParcial != null);
+  const tanquesCompletos = mezclaPorTanque[0]?.tanquesCompletos ?? 0;
+  const hayParcial = mezclaPorTanque.some((m) => m.tanqueParcial != null);
   const tanquesAPreparar = tanquesCompletos + (hayParcial ? 1 : 0);
-  const hectareasPorTanque = aplicacion.mezclaPorTanque[0]?.hectareasPorTanque ?? 0;
+  const hectareasPorTanque = mezclaPorTanque[0]?.hectareasPorTanque ?? 0;
 
   const tipoAplicacionNombre = aplicacion.tipoAplicacion?.nombre ?? null;
   const esDrench = tipoAplicacionNombre?.trim().toLowerCase() === "drench";
 
-  const productos = aplicacion.productos.map((p, i) => {
-    const mezcla = aplicacion.mezclaPorTanque!.find((m) => m.productoId === p.productoId) ?? aplicacion.mezclaPorTanque![i]!;
+  const productos = grupo.productos.map((p, i) => {
+    const mezcla = mezclaPorTanque.find((m) => m.productoId === p.productoId) ?? mezclaPorTanque[i]!;
     const cantidadUltimoTanqueBase = mezcla.tanqueParcial ? mezcla.tanqueParcial.cantidadProducto : mezcla.cantidadProductoPorTanqueCompleto;
     return {
       numero: i + 1,
@@ -103,7 +115,7 @@ export async function construirOrdenAplicacion(aplicacionId: string) {
   // Aplicación de menos de 1 tanque completo).
   const clausulaCompletos = tanquesCompletos > 0 ? `${tanquesCompletos} tanque${tanquesCompletos === 1 ? "" : "s"} completo${tanquesCompletos === 1 ? "" : "s"} de ${capacidadTanque} L` : null;
   const clausulaParcial = hayParcial
-    ? `1 tanque parcial de ${Math.round((aplicacion.mezclaPorTanque[0]!.tanqueParcial!.volumenMezcla + Number.EPSILON) * 100) / 100} L`
+    ? `1 tanque parcial de ${Math.round((mezclaPorTanque[0]!.tanqueParcial!.volumenMezcla + Number.EPSILON) * 100) / 100} L`
     : null;
   const resumenPreparar = `PREPARAR: ${[clausulaCompletos, clausulaParcial].filter(Boolean).join(" + ")}`;
   const resumenPrepararConDrench =

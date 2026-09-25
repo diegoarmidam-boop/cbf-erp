@@ -6,7 +6,7 @@ import { useHuertas } from "../../lib/useHuertas";
 import { usePersonal } from "../../lib/usePersonal";
 import { useRecetas } from "../../lib/useRecetas";
 import { useCatalogoAbierto } from "../../lib/useCatalogoAbierto";
-import type { Aplicacion, AplicacionRealizadaLinea, ConcentracionUnidad, Cuadro, Equipo, IngredienteAutorizado, ModalidadAplicacion, OrdenAplicacion } from "../../lib/types";
+import type { Aplicacion, AplicacionRealizadaLinea, ConcentracionUnidad, Cuadro, Equipo, IngredienteAutorizado, ModalidadAplicacion, OrdenAplicacion, TanquePendienteProducto } from "../../lib/types";
 import FechaInput from "../../components/FechaInput";
 import { formatearFecha, formatearInstante } from "../../lib/fecha";
 import { formatearNumero } from "../../lib/numero";
@@ -133,7 +133,7 @@ function NotaTanquePendiente({
   nota,
   productos,
 }: {
-  nota: NonNullable<Aplicacion["notaTanquePendiente"]>;
+  nota: TanquePendienteProducto[];
   productos: { productoId: string; ingredienteActivo: string | null; nombreComercial: string; concentracionUnidad: ConcentracionUnidad }[];
 }) {
   const { tanquesNecesarios, tanquesPreparados } = nota[0]!;
@@ -191,6 +191,7 @@ export default function Aplicaciones() {
   // reutiliza el mismo formulario de arriba, sin poder cambiar de Huerta.
   const [editandoProgramadaId, setEditandoProgramadaId] = useState<string | null>(null);
   const [confirmando, setConfirmando] = useState<{ tipo: "liberar" | "cancelar"; id: string } | null>(null);
+  const [notaCancelacion, setNotaCancelacion] = useState("");
 
   // ---- Confirmar entrega con selección de lote (V1 P1, 25-sep-2026, regla e) ----
   const [entregandoId, setEntregandoId] = useState<string | null>(null);
@@ -223,13 +224,13 @@ export default function Aplicaciones() {
   // ---- Registrar realizada ----
   const [registrando, setRegistrando] = useState<string | null>(null);
   const [fechaReal, setFechaReal] = useState(hoyISO());
-  const [avanceCuadros, setAvanceCuadros] = useState<Record<string, string>>({});
+  const [avanceHectareas, setAvanceHectareas] = useState("");
   const [lineas, setLineas] = useState<LineaForm[]>([lineaVacia()]);
   const [comentario, setComentario] = useState("");
 
   // ---- Editar reporte existente ----
   const [editando, setEditando] = useState<string | null>(null);
-  const [editAvanceCuadros, setEditAvanceCuadros] = useState<Record<string, string>>({});
+  const [editAvanceHectareas, setEditAvanceHectareas] = useState("");
   const [editLineas, setEditLineas] = useState<LineaForm[]>([]);
   const [editComentario, setEditComentario] = useState("");
 
@@ -333,16 +334,29 @@ export default function Aplicaciones() {
     });
   }
 
+  // V1 P2 (25-sep-2026, Bloque 3): esta pantalla todavía arma un único Grupo
+  // con todos los Cuadros elegidos (a su superficie completa) — el modelo
+  // ya soporta varios Grupos/modo Por Variedad, la pantalla para armarlos
+  // queda pendiente.
   function construirPayload(actualizarRecetaOriginal?: boolean) {
     return {
-      cuadroIds,
-      productos: productosForm.map((p) => ({
-        ingredienteActivoNombre: p.ingredienteActivoNombre,
-        concentracionValor: Number(p.concentracionValor),
-        concentracionUnidad: p.concentracionUnidad,
-      })),
+      modo: "por_cuadro" as const,
+      grupos: [
+        {
+          litrosMezclaPorHa: Number(litrosMezclaPorHa),
+          cuadros: cuadroIds.map((cuadroId) => {
+            const cuadro = cuadrosHuerta.find((c) => c.id === cuadroId);
+            const vigente = cuadro?.versiones.find((v) => v.vigenteHasta == null) ?? cuadro?.versiones[0];
+            return { cuadroId, hectareas: Number(vigente?.hectareas ?? 0) };
+          }),
+          productos: productosForm.map((p) => ({
+            ingredienteActivoNombre: p.ingredienteActivoNombre,
+            concentracionValor: Number(p.concentracionValor),
+            concentracionUnidad: p.concentracionUnidad,
+          })),
+        },
+      ],
       recursoSugerido,
-      litrosMezclaPorHa: Number(litrosMezclaPorHa),
       fechaInicio,
       fechaFin,
       recetaId: recetaId || undefined,
@@ -394,19 +408,23 @@ export default function Aplicaciones() {
     enviarProgramacion(false);
   }
 
+  // Edición asume un único Grupo (mismo alcance que el formulario — ver
+  // nota en construirPayload). Si la Aplicación ya tiene varios Grupos
+  // (creados por otra vía), edítala solo si de verdad es de un Grupo.
   function iniciarEdicionProgramada(a: Aplicacion) {
+    const grupo = a.grupos[0];
     setEditandoProgramadaId(a.id);
     setHuertaId(a.huertaId);
-    setCuadroIds(a.cuadros.map((c) => c.cuadro.id));
+    setCuadroIds(grupo ? grupo.cuadros.map((c) => c.cuadro.id) : []);
     setProductosForm(
-      a.productos.map((p) => ({
+      (grupo?.productos ?? []).map((p) => ({
         ingredienteActivoNombre: p.producto.ingredienteActivo ?? "",
         concentracionValor: String(p.concentracionValor),
         concentracionUnidad: p.concentracionUnidad,
       }))
     );
     setRecursoSugerido(a.recursoSugerido);
-    setLitrosMezclaPorHa(String(a.litrosMezclaPorHa));
+    setLitrosMezclaPorHa(grupo ? String(grupo.litrosMezclaPorHa) : "");
     setFechaInicio(a.fechaInicio.slice(0, 10));
     setFechaFin(a.fechaFin.slice(0, 10));
     setRecetaId(a.recetaId ?? "");
@@ -487,32 +505,10 @@ export default function Aplicaciones() {
   function abrirRegistrar(a: Aplicacion) {
     setRegistrando(a.id);
     setFechaReal(hoyISO());
-    setAvanceCuadros({});
+    setAvanceHectareas("");
     setComentario("");
     const ultimo = a.realizadas[0];
     setLineas(ultimo ? lineasDesdeExistentes(ultimo.lineas) : [lineaVacia()]);
-  }
-
-  function cuadrosDesdeMapa(mapa: Record<string, string>, restantes: Record<string, number> | undefined): { cuadroId: string; hectareas: number }[] {
-    return Object.entries(mapa)
-      .filter(([, hectareas]) => hectareas !== undefined)
-      .map(([cuadroId, hectareas]) => ({
-        cuadroId,
-        hectareas: hectareas === "" ? restantes?.[cuadroId] ?? 0 : Number(hectareas),
-      }))
-      .filter((c) => c.hectareas > 0);
-  }
-
-  function resumenConfirmacion(a: Aplicacion, mapa: Record<string, string>): string {
-    const lineasResumen = Object.entries(mapa)
-      .filter(([, hectareas]) => hectareas === "")
-      .map(([cuadroId]) => {
-        const nombre = a.cuadros.find((c) => c.cuadro.id === cuadroId)?.cuadro.nombre ?? cuadroId;
-        const ha = a.restantesPorCuadro?.[cuadroId] ?? 0;
-        return `${nombre}: se marca completo (${ha.toFixed(2)} ha)`;
-      });
-    if (lineasResumen.length === 0) return "";
-    return `Vas a dar por completados estos Cuadros:\n\n${lineasResumen.join("\n")}\n\n¿Confirmar?`;
   }
 
   function lineasParaEnviar(form: LineaForm[]) {
@@ -528,9 +524,8 @@ export default function Aplicaciones() {
 
   async function confirmarRegistrar(a: Aplicacion) {
     setError(null);
-    const cuadros = cuadrosDesdeMapa(avanceCuadros, a.restantesPorCuadro);
-    if (cuadros.length === 0) {
-      setError("Falta capturar qué Cuadro(s) se avanzaron y sus hectáreas en este reporte.");
+    if (!avanceHectareas || Number(avanceHectareas) <= 0) {
+      setError("Captura las hectáreas avanzadas en este reporte.");
       return;
     }
     const errorLineas = validarLineasForm(lineas);
@@ -538,11 +533,14 @@ export default function Aplicaciones() {
       setError(errorLineas);
       return;
     }
-    const resumen = resumenConfirmacion(a, avanceCuadros);
-    if (resumen && !confirm(resumen)) return;
 
     try {
-      await api.post(`/aplicaciones/${a.id}/realizada`, { fechaReal, cuadros, lineas: lineasParaEnviar(lineas), comentario: comentario.trim() || undefined });
+      await api.post(`/aplicaciones/${a.id}/realizada`, {
+        fechaReal,
+        hectareas: Number(avanceHectareas),
+        lineas: lineasParaEnviar(lineas),
+        comentario: comentario.trim() || undefined,
+      });
       setRegistrando(null);
       cargar();
     } catch (err) {
@@ -552,9 +550,7 @@ export default function Aplicaciones() {
 
   function abrirEditar(a: Aplicacion, r: Aplicacion["realizadas"][number]) {
     setEditando(r.id);
-    const mapa: Record<string, string> = {};
-    for (const c of r.cuadros) mapa[c.cuadroId] = c.hectareas;
-    setEditAvanceCuadros(mapa);
+    setEditAvanceHectareas(r.hectareas);
     setEditLineas(lineasDesdeExistentes(r.lineas));
     setEditComentario(r.comentario ?? "");
     void a;
@@ -562,9 +558,8 @@ export default function Aplicaciones() {
 
   async function confirmarEditar(a: Aplicacion, realizadaId: string) {
     setError(null);
-    const cuadros = cuadrosDesdeMapa(editAvanceCuadros, a.restantesPorCuadro);
-    if (cuadros.length === 0) {
-      setError("Falta capturar qué Cuadro(s) se avanzaron y sus hectáreas en este reporte.");
+    if (!editAvanceHectareas || Number(editAvanceHectareas) <= 0) {
+      setError("Captura las hectáreas avanzadas en este reporte.");
       return;
     }
     const errorLineas = validarLineasForm(editLineas);
@@ -573,7 +568,11 @@ export default function Aplicaciones() {
       return;
     }
     try {
-      await api.patch(`/aplicaciones/realizada/${realizadaId}`, { cuadros, lineas: lineasParaEnviar(editLineas), comentario: editComentario.trim() || undefined });
+      await api.patch(`/aplicaciones/realizada/${realizadaId}`, {
+        hectareas: Number(editAvanceHectareas),
+        lineas: lineasParaEnviar(editLineas),
+        comentario: editComentario.trim() || undefined,
+      });
       setEditando(null);
       cargar();
     } catch (err) {
@@ -581,14 +580,10 @@ export default function Aplicaciones() {
     }
   }
 
-  async function cancelar(id: string) {
+  async function cancelar(id: string, nota: string) {
     setError(null);
-    try {
-      await api.post(`/aplicaciones/${id}/cancelar`);
-      cargar();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "No se pudo cancelar.");
-    }
+    await api.post(`/aplicaciones/${id}/cancelar`, { nota });
+    cargar();
   }
 
   async function confirmarRecepcion(id: string) {
@@ -810,8 +805,8 @@ export default function Aplicaciones() {
             </label>
             <label className="field">
               Tipo de aplicación
-              <select value={tipoAplicacionId} onChange={(e) => setTipoAplicacionId(e.target.value)}>
-                <option value="">Sin especificar</option>
+              <select value={tipoAplicacionId} onChange={(e) => setTipoAplicacionId(e.target.value)} required>
+                <option value="">Selecciona…</option>
                 {tiposAplicacion.map((t) => (
                   <option key={t.id} value={t.id}>
                     {t.nombre}
@@ -906,53 +901,63 @@ export default function Aplicaciones() {
                   {!a.comprometido && a.estado === "programada" && <span className="tag tag-neutral">Esperando compra automática</span>}{" "}
                   {a.alertaVencimiento && <span className="tag tag-danger">15+ días sin entregar</span>}{" "}
                   {a.alertaPendienteAplicar && <span className="tag tag-danger">15+ días entregada sin aplicar</span>}
-                  <div style={{ fontSize: 13, fontWeight: 600, marginTop: 6 }}>
-                    {a.huerta.nombre} — {a.productos.map((p) => p.producto.ingredienteActivo ?? p.producto.nombreComercial).join(" + ")}
-                  </div>
-                  <div style={{ fontSize: 12, color: "var(--ink-soft)" }}>
-                    Cuadros: {a.cuadros.map((c) => c.cuadro.nombre).join(", ") || "—"}
-                  </div>
-                  {a.productos.map((p) => (
-                    <div key={p.id} style={{ fontSize: 12, color: "var(--ink-soft)" }}>
-                      {p.producto.ingredienteActivo ?? p.producto.nombreComercial}: {formatearNumero(p.cantidadTotalCalculada)} {p.producto.unidad} · {p.concentracionValor}{" "}
-                      {p.concentracionUnidad.replace("_", "/")}
-                    </div>
-                  ))}
-                  <div style={{ fontSize: 12, color: "var(--ink-soft)" }}>
-                    {a.litrosMezclaPorHa} L mezcla/ha · Sugerido: {ETIQUETAS_MODALIDAD[a.recursoSugerido]} · {formatearFecha(a.fechaInicio)} a{" "}
-                    {formatearFecha(a.fechaFin)}
-                  </div>
-                  {a.mezclaPorTanque && a.mezclaPorTanque.length > 0 && (
-                    <div style={{ marginTop: 8, maxWidth: 460 }}>
-                      <MezclaPorTanque
-                        mezcla={a.mezclaPorTanque}
-                        capacidadTanque={Number(a.capacidadTanque)}
-                        productos={a.productos.map((p) => ({
-                          productoId: p.productoId,
-                          ingredienteActivo: p.producto.ingredienteActivo,
-                          nombreComercial: p.producto.nombreComercial,
-                          concentracionUnidad: p.concentracionUnidad,
-                        }))}
-                      />
-                    </div>
-                  )}
-                  {a.realizadas.length > 0 && (
-                    <div style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: 4 }}>
-                      {(a.porcentajeAvance ?? 0).toFixed(1)}% avance · {formatearNumero(a.horasHombreTotales ?? 0)} horas-hombre totales · {a.realizadas.length}{" "}
-                      reporte{a.realizadas.length === 1 ? "" : "s"}
-                    </div>
-                  )}
-                  {a.notaTanquePendiente && a.notaTanquePendiente.length > 0 && (
-                    <NotaTanquePendiente
-                      nota={a.notaTanquePendiente}
-                      productos={a.productos.map((p) => ({
-                        productoId: p.productoId,
-                        ingredienteActivo: p.producto.ingredienteActivo,
-                        nombreComercial: p.producto.nombreComercial,
-                        concentracionUnidad: p.concentracionUnidad,
-                      }))}
-                    />
-                  )}
+                  {(() => {
+                    const productos = a.grupos.flatMap((g) => g.productos);
+                    const cuadrosNombres = a.grupos.flatMap((g) => (g.cuadros.length > 0 ? g.cuadros.map((c) => c.cuadro.nombre) : g.variedades.map((v) => `${v.cuadro.nombre} (${v.variedad})`)));
+                    return (
+                      <>
+                        <div style={{ fontSize: 13, fontWeight: 600, marginTop: 6 }}>
+                          {a.huerta.nombre} — {productos.map((p) => p.producto.ingredienteActivo ?? p.producto.nombreComercial).join(" + ")}
+                        </div>
+                        <div style={{ fontSize: 12, color: "var(--ink-soft)" }}>
+                          {a.modo === "por_variedad" ? "Variedades" : "Cuadros"}: {cuadrosNombres.join(", ") || "—"}
+                          {a.grupos.length > 1 && ` · ${a.grupos.length} Grupos de dosis`}
+                        </div>
+                        {productos.map((p) => (
+                          <div key={p.id} style={{ fontSize: 12, color: "var(--ink-soft)" }}>
+                            {p.producto.ingredienteActivo ?? p.producto.nombreComercial}: {formatearNumero(p.cantidadTotalCalculada)} {p.producto.unidad} · {p.concentracionValor}{" "}
+                            {p.concentracionUnidad.replace("_", "/")}
+                          </div>
+                        ))}
+                        <div style={{ fontSize: 12, color: "var(--ink-soft)" }}>
+                          {a.grupos.map((g) => `${g.litrosMezclaPorHa} L/ha`).join(" · ")} · Sugerido: {ETIQUETAS_MODALIDAD[a.recursoSugerido]} · {formatearFecha(a.fechaInicio)} a{" "}
+                          {formatearFecha(a.fechaFin)}
+                        </div>
+                        {a.mezclaPorTanque?.map((m) => m.productos.length > 0 && (
+                          <div key={m.grupoId} style={{ marginTop: 8, maxWidth: 460 }}>
+                            <MezclaPorTanque
+                              mezcla={m.productos}
+                              capacidadTanque={Number(a.capacidadTanque)}
+                              productos={productos.map((p) => ({
+                                productoId: p.productoId,
+                                ingredienteActivo: p.producto.ingredienteActivo,
+                                nombreComercial: p.producto.nombreComercial,
+                                concentracionUnidad: p.concentracionUnidad,
+                              }))}
+                            />
+                          </div>
+                        ))}
+                        {a.realizadas.length > 0 && (
+                          <div style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: 4 }}>
+                            {(a.porcentajeAvance ?? 0).toFixed(1)}% avance · {formatearNumero(a.horasHombreTotales ?? 0)} horas-hombre totales · {a.realizadas.length}{" "}
+                            reporte{a.realizadas.length === 1 ? "" : "s"}
+                          </div>
+                        )}
+                        {a.notaTanquePendiente?.map((n) => n.productos.length > 0 && (
+                          <NotaTanquePendiente
+                            key={n.grupoId}
+                            nota={n.productos}
+                            productos={productos.map((p) => ({
+                              productoId: p.productoId,
+                              ingredienteActivo: p.producto.ingredienteActivo,
+                              nombreComercial: p.producto.nombreComercial,
+                              concentracionUnidad: p.concentracionUnidad,
+                            }))}
+                          />
+                        ))}
+                      </>
+                    );
+                  })()}
                   {a.estado === "cancelada" && (
                     <div style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: 4 }}>
                       Cancelada el {formatearInstante(a.fechaCancelacion)}
@@ -1009,41 +1014,19 @@ export default function Aplicaciones() {
                     <FechaInput value={fechaReal} onChange={setFechaReal} />
                   </label>
 
-                  <div style={{ fontSize: 11.5, color: "var(--ink-soft)", marginBottom: 6 }}>
-                    ¿Qué Cuadro(s) se avanzaron en este reporte, y cuántas hectáreas de cada uno? (deja el número en blanco para marcarlo completo)
-                  </div>
-                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
-                    {a.cuadros.map(({ cuadro }) => {
-                      const restan = a.restantesPorCuadro?.[cuadro.id];
-                      return (
-                        <label key={cuadro.id} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5 }}>
-                          <input
-                            type="checkbox"
-                            checked={avanceCuadros[cuadro.id] !== undefined}
-                            onChange={(e) =>
-                              setAvanceCuadros((prev) => {
-                                const copia = { ...prev };
-                                if (e.target.checked) copia[cuadro.id] = "";
-                                else delete copia[cuadro.id];
-                                return copia;
-                              })
-                            }
-                          />
-                          {cuadro.nombre} {restan !== undefined && <span style={{ color: "var(--ink-soft)" }}>(quedan {restan.toFixed(2)} ha)</span>}
-                          {avanceCuadros[cuadro.id] !== undefined && (
-                            <input
-                              type="number"
-                              min={0}
-                              step="0.0001"
-                              placeholder={restan !== undefined ? `${restan.toFixed(2)} (completo)` : "ha"}
-                              style={{ width: 110 }}
-                              value={avanceCuadros[cuadro.id]}
-                              onChange={(e) => setAvanceCuadros((prev) => ({ ...prev, [cuadro.id]: e.target.value }))}
-                            />
-                          )}
-                        </label>
-                      );
-                    })}
+                  <label className="field" style={{ maxWidth: 220, marginBottom: 10 }}>
+                    Hectáreas avanzadas en este reporte
+                    <input
+                      type="number"
+                      min={0}
+                      step="0.0001"
+                      value={avanceHectareas}
+                      onChange={(e) => setAvanceHectareas(e.target.value)}
+                    />
+                  </label>
+                  <div style={{ fontSize: 11.5, color: "var(--ink-soft)", marginBottom: 10 }}>
+                    Programadas: {a.hectareasTotalesProgramadas} ha · Avanzadas hasta ahora: {formatearNumero(a.hectareasAvanzadas ?? 0)} ha — el
+                    sistema reparte solo entre los Cuadros/Grupos, en proporción a lo programado.
                   </div>
 
                   <LineasEditor lineas={lineas} setLineas={setLineas} tractores={tractores} implementos={implementos} personal={personal} />
@@ -1077,7 +1060,8 @@ export default function Aplicaciones() {
                       <tr>
                         <th>Fecha</th>
                         <th>Líneas</th>
-                        <th>Cuadros avanzados</th>
+                        <th>Hectáreas</th>
+                        <th>Reparto (calculado)</th>
                         <th>Comentario</th>
                         <th></th>
                       </tr>
@@ -1097,7 +1081,13 @@ export default function Aplicaciones() {
                                 )
                                 .join(" + ") || "—"}
                             </td>
-                            <td>{r.cuadros.map((c) => `${c.cuadro.nombre} (${c.hectareas} ha)`).join(", ") || "—"}</td>
+                            <td>{r.hectareas} ha</td>
+                            <td>
+                              {r.grupos
+                                .flatMap((g) => g.cuadros)
+                                .map((c) => `${c.cuadro.nombre}${c.variedad ? ` (${c.variedad})` : ""}: ${c.hectareasAtribuidas} ha`)
+                                .join(", ") || "—"}
+                            </td>
                             <td>{r.comentario || "—"}</td>
                             <td>
                               {editando !== r.id && (
@@ -1109,40 +1099,17 @@ export default function Aplicaciones() {
                           </tr>
                           {editando === r.id && (
                             <tr>
-                              <td colSpan={5}>
-                                <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 8 }}>
-                                  {a.cuadros.map(({ cuadro }) => {
-                                    const restan = a.restantesPorCuadro?.[cuadro.id];
-                                    return (
-                                      <label key={cuadro.id} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5 }}>
-                                        <input
-                                          type="checkbox"
-                                          checked={editAvanceCuadros[cuadro.id] !== undefined}
-                                          onChange={(e) =>
-                                            setEditAvanceCuadros((prev) => {
-                                              const copia = { ...prev };
-                                              if (e.target.checked) copia[cuadro.id] = "";
-                                              else delete copia[cuadro.id];
-                                              return copia;
-                                            })
-                                          }
-                                        />
-                                        {cuadro.nombre} {restan !== undefined && <span style={{ color: "var(--ink-soft)" }}>(quedan {restan.toFixed(2)} ha)</span>}
-                                        {editAvanceCuadros[cuadro.id] !== undefined && (
-                                          <input
-                                            type="number"
-                                            min={0}
-                                            step="0.0001"
-                                            placeholder="ha"
-                                            style={{ width: 80 }}
-                                            value={editAvanceCuadros[cuadro.id]}
-                                            onChange={(e) => setEditAvanceCuadros((prev) => ({ ...prev, [cuadro.id]: e.target.value }))}
-                                          />
-                                        )}
-                                      </label>
-                                    );
-                                  })}
-                                </div>
+                              <td colSpan={6}>
+                                <label className="field" style={{ maxWidth: 220, marginBottom: 10 }}>
+                                  Hectáreas avanzadas en este reporte
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    step="0.0001"
+                                    value={editAvanceHectareas}
+                                    onChange={(e) => setEditAvanceHectareas(e.target.value)}
+                                  />
+                                </label>
 
                                 <LineasEditor lineas={editLineas} setLineas={setEditLineas} tractores={tractores} implementos={implementos} personal={personal} />
 
@@ -1197,16 +1164,42 @@ export default function Aplicaciones() {
         />
       )}
       {confirmando && confirmando.tipo === "cancelar" && (
-        <ConfirmModal
-          titulo="Cancelar aplicación"
-          mensaje="Se regresará a bodega central el producto no aplicado y se generará un abono al Rancho. ¿Confirmar?"
-          peligroso
-          onCancelar={() => setConfirmando(null)}
-          onConfirmar={async () => {
-            await cancelar(confirmando.id);
-            setConfirmando(null);
-          }}
-        />
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200, padding: 12 }}>
+          <div className="card" style={{ width: 420, maxWidth: "100%" }}>
+            <h3 style={{ marginBottom: 10 }}>Cancelar aplicación (cierre por debajo de 100%)</h3>
+            <p style={{ fontSize: 12.5, color: "var(--ink-soft)" }}>
+              Se regresará a bodega central el producto no aplicado y se generará un abono al Rancho. Captura la nota obligatoria de por qué se cierra sin llegar al 100%.
+            </p>
+            <label className="field" style={{ marginTop: 8 }}>
+              Nota (obligatoria)
+              <textarea rows={2} value={notaCancelacion} onChange={(e) => setNotaCancelacion(e.target.value)} />
+            </label>
+            {error && <p style={{ fontSize: 12.5, color: "var(--danger)", marginTop: 8 }}>{error}</p>}
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+              <button className="btn-secondary" onClick={() => { setConfirmando(null); setNotaCancelacion(""); }}>
+                Cancelar
+              </button>
+              <button
+                className="btn-danger"
+                onClick={async () => {
+                  if (!notaCancelacion.trim()) {
+                    setError("La nota es obligatoria.");
+                    return;
+                  }
+                  try {
+                    await cancelar(confirmando.id, notaCancelacion.trim());
+                    setConfirmando(null);
+                    setNotaCancelacion("");
+                  } catch (err) {
+                    setError(err instanceof ApiError ? err.message : "No se pudo cancelar.");
+                  }
+                }}
+              >
+                Sí, cancelar
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {entregandoId && (
@@ -1217,9 +1210,11 @@ export default function Aplicaciones() {
               Por default se entrega del lote que el sistema apartó al programar. Si Bodega ya sabe que salió (o debe salir) de otro
               lote, elígelo abajo y captura el motivo.
             </p>
-            {aplicaciones
-              .find((a) => a.id === entregandoId)
-              ?.productos.map((p) => {
+            {(() => {
+              const productos = aplicaciones.find((a) => a.id === entregandoId)?.grupos.flatMap((g) => g.productos) ?? [];
+              const unicos = [...new Map(productos.map((p) => [p.productoId, p])).values()];
+              return unicos;
+            })().map((p) => {
                 const opciones = opcionesEntrega.find((o) => o.productoId === p.productoId);
                 const override = overridesEntrega[p.productoId];
                 return (

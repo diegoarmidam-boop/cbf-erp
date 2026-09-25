@@ -173,18 +173,28 @@ const productoAplicacionSchema = z.object({
   concentracionUnidad: z.enum(["ml_l", "g_l", "kg_l"]),
 });
 
+const grupoCuadroSchema = z.object({ cuadroId: z.string().min(1), hectareas: z.number().positive() });
+const grupoVariedadSchema = z.object({ cuadroId: z.string().min(1), variedad: z.string().min(1) });
+
+const grupoAplicacionSchema = z.object({
+  litrosMezclaPorHa: z.number().positive(),
+  cuadros: z.array(grupoCuadroSchema).optional(),
+  variedades: z.array(grupoVariedadSchema).optional(),
+  productos: z.array(productoAplicacionSchema).min(1),
+});
+
 const programarSchema = z.object({
   huertaId: z.string().min(1),
-  cuadroIds: z.array(z.string().min(1)).min(1),
-  productos: z.array(productoAplicacionSchema).min(1),
+  modo: z.enum(["por_cuadro", "por_variedad"]),
+  grupos: z.array(grupoAplicacionSchema).min(1),
   recursoSugerido: z.enum(["mochila", "turbina", "aguilon"]),
-  litrosMezclaPorHa: z.number().positive(),
   fechaInicio: z.string(),
   fechaFin: z.string(),
+  comentario: z.string().optional(),
   recetaId: z.string().optional(),
   capacidadTanque: z.number().positive().optional(),
   actualizarRecetaOriginal: z.boolean().optional(),
-  tipoAplicacionId: z.string().optional(),
+  tipoAplicacionId: z.string().min(1),
 });
 
 aplicacionesRouter.post("/", requirePermission("aplicaciones", "capturar"), async (req, res) => {
@@ -279,8 +289,6 @@ aplicacionesRouter.post("/:id/entregar", requirePermissionAny(["almacen", "captu
   }
 });
 
-const cuadroAvanceSchema = z.object({ cuadroId: z.string().min(1), hectareas: z.number().positive() });
-
 const lineaRealizadaSchema = z.object({
   modalidad: z.enum(["mochila", "turbina", "aguilon"]),
   tractorId: z.string().optional(),
@@ -292,7 +300,7 @@ const lineaRealizadaSchema = z.object({
 
 const realizadaSchema = z.object({
   fechaReal: z.string(),
-  cuadros: z.array(cuadroAvanceSchema).min(1),
+  hectareas: z.number().positive(),
   lineas: z.array(lineaRealizadaSchema).min(1),
   comentario: z.string().optional(),
 });
@@ -344,7 +352,7 @@ aplicacionesRouter.post("/:id/realizada", requirePermissionAny(["aplicaciones", 
 });
 
 const editarRealizadaSchema = z.object({
-  cuadros: z.array(cuadroAvanceSchema).min(1),
+  hectareas: z.number().positive(),
   lineas: z.array(lineaRealizadaSchema).min(1),
   comentario: z.string().optional(),
 });
@@ -392,11 +400,20 @@ aplicacionesRouter.post("/:id/liberar", requirePermission("aplicaciones", "captu
   }
 });
 
-// Protocolo de cancelación de aplicación entregada y vencida a 15 días (9.7) — solo Director/Gerente Técnico.
+// Protocolo de cancelación de aplicación entregada y vencida a 15 días
+// (9.7) — solo Director/Gerente Técnico, con nota obligatoria (V1 P2, regla
+// "cierre por debajo de 100%").
+const cancelarSchema = z.object({ nota: z.string().min(1, "La nota es obligatoria para cerrar por debajo de 100%.") });
+
 aplicacionesRouter.post("/:id/cancelar", requirePermission("aplicaciones", "capturar"), async (req, res) => {
   if (!verificarRol(req, res, ROLES_CANCELAR)) return;
+  const parsed = cancelarSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
+    return;
+  }
   try {
-    const aplicacion = await cancelarAplicacionEntregada(unoSolo(req.params.id), req.usuario!.usuarioId);
+    const aplicacion = await cancelarAplicacionEntregada(unoSolo(req.params.id), req.usuario!.usuarioId, parsed.data.nota);
     res.json(aplicacion);
   } catch (err) {
     if (err instanceof NoSePuedeCancelarError) {

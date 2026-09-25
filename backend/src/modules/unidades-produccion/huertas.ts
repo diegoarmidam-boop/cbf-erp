@@ -56,6 +56,10 @@ export async function eliminarHuertaCompleta(huertaId: string) {
     const almacenLocalIds = (await tx.almacenLocal.findMany({ where: { huertaId }, select: { id: true } })).map((a) => a.id);
     const riegoIds = (await tx.riegoRegistroDiario.findMany({ where: { seccionId: { in: seccionIds } }, select: { id: true } })).map((r) => r.id);
     const aplicacionRealizadaIds = (await tx.aplicacionRealizada.findMany({ where: { aplicacionId: { in: aplicacionIds } }, select: { id: true } })).map((r) => r.id);
+    const aplicacionGrupoIds = (await tx.aplicacionGrupo.findMany({ where: { aplicacionId: { in: aplicacionIds } }, select: { id: true } })).map((g) => g.id);
+    const aplicacionRealizadaGrupoIds = (
+      await tx.aplicacionRealizadaGrupo.findMany({ where: { realizadaId: { in: aplicacionRealizadaIds } }, select: { id: true } })
+    ).map((g) => g.id);
     const aplicacionLineaIds = (
       await tx.aplicacionRealizadaLinea.findMany({ where: { realizadaId: { in: aplicacionRealizadaIds } }, select: { id: true } })
     ).map((l) => l.id);
@@ -79,7 +83,8 @@ export async function eliminarHuertaCompleta(huertaId: string) {
     await tx.aplicacionRealizadaLinea.deleteMany({ where: { id: { in: aplicacionLineaIds } } });
     await tx.actividadRealizadaLinea.deleteMany({ where: { id: { in: actividadLineaIds } } });
     await tx.riegoRegistroDiario.deleteMany({ where: { id: { in: riegoIds } } });
-    await tx.aplicacionRealizadaCuadro.deleteMany({ where: { realizadaId: { in: aplicacionRealizadaIds } } });
+    await tx.aplicacionRealizadaGrupoCuadro.deleteMany({ where: { realizadaGrupoId: { in: aplicacionRealizadaGrupoIds } } });
+    await tx.aplicacionRealizadaGrupo.deleteMany({ where: { id: { in: aplicacionRealizadaGrupoIds } } });
     await tx.fertilizacionGranularRealizadaCuadro.deleteMany({ where: { realizadaId: { in: fertilizacionRealizadaIds } } });
     await tx.actividadRealizadaCuadro.deleteMany({ where: { realizadaId: { in: actividadRealizadaIds } } });
 
@@ -99,7 +104,9 @@ export async function eliminarHuertaCompleta(huertaId: string) {
 
     // Programaciones y su detalle (productos/cuadros/secciones).
     await tx.aplicacionProducto.deleteMany({ where: { aplicacionId: { in: aplicacionIds } } });
-    await tx.aplicacionCuadro.deleteMany({ where: { aplicacionId: { in: aplicacionIds } } });
+    await tx.aplicacionGrupoCuadro.deleteMany({ where: { grupoId: { in: aplicacionGrupoIds } } });
+    await tx.aplicacionGrupoVariedad.deleteMany({ where: { grupoId: { in: aplicacionGrupoIds } } });
+    await tx.aplicacionGrupo.deleteMany({ where: { id: { in: aplicacionGrupoIds } } });
     await tx.fertilizacionGranularProducto.deleteMany({ where: { fertilizacionId: { in: fertilizacionIds } } });
     await tx.fertilizacionGranularCuadro.deleteMany({ where: { fertilizacionId: { in: fertilizacionIds } } });
     await tx.fertirriegoProgramacionProducto.deleteMany({ where: { fertirriegoId: { in: fertirriegoIds } } });

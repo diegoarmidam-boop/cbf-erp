@@ -206,9 +206,10 @@ model Cuadro {
   registrosNomina                       RegistroNomina[]
   actividadProgramadaCuadros            ActividadProgramadaCuadro[]
   actividadRealizadaCuadros             ActividadRealizadaCuadro[]
-  aplicacionCuadros                     AplicacionCuadro[]
+  aplicacionGrupoCuadros                 AplicacionGrupoCuadro[]
+  aplicacionGrupoVariedades              AplicacionGrupoVariedad[]
+  aplicacionRealizadaGrupoCuadros        AplicacionRealizadaGrupoCuadro[]
   fertilizacionGranularCuadros          FertilizacionGranularCuadro[]
-  aplicacionRealizadaCuadros            AplicacionRealizadaCuadro[]
   fertilizacionGranularRealizadaCuadros FertilizacionGranularRealizadaCuadro[]
   viveroTraspasos                        ViveroTraspaso[]
 
@@ -1600,6 +1601,14 @@ model ActividadRealizadaCuadro {
   @@index([cuadroId])
 }
 
+// Modo de programación por Cuadro o por Variedad (V1 P2, 25-sep-2026,
+// Bloque 3) — compartido por Aplicaciones, Granular y Actividades. Una
+// misma programación nunca mezcla los dos modos.
+enum ModoProgramacionCuadro {
+  por_cuadro
+  por_variedad
+}
+
 // ============================================================
 // APLICACIONES — agroquímicos (9.7)
 // ============================================================
@@ -1688,55 +1697,119 @@ model RecetaProducto {
   @@index([recetaId])
 }
 
+// Programar (V1 P2, 25-sep-2026, Bloque 3, 9.4/9.7): Huerta + modo (por
+// Cuadro o por Variedad, sin mezclar), repartido en uno o más Grupos de
+// dosis (ver AplicacionGrupo) — sin grupos capturados, el frontend arma un
+// único Grupo con todo. hectareasTotalesProgramadas es la suma estable de
+// los Grupos, fija desde Paso 1 (no se recalcula si un Cuadro cambia de
+// superficie después) — sigue siendo la base del % de avance.
 model Aplicacion {
-  id                          String              @id @default(uuid())
+  id                          String                 @id @default(uuid())
   huertaId                    String
-  huerta                      Huerta              @relation(fields: [huertaId], references: [id])
+  huerta                      Huerta                 @relation(fields: [huertaId], references: [id])
+  modo                        ModoProgramacionCuadro @default(por_cuadro)
   recursoSugerido             ModalidadAplicacion // referencia de cómo se planea hacer — no fija, ver ModalidadAplicacion
-  // Litros de mezcla/ha compartidos por todos los productos de esta
-  // Aplicación (10-ago-2026, varios productos en el mismo tanque) — un solo
-  // tanque, una sola densidad para toda la mezcla. Cada producto conserva
-  // su propia concentración/cantidad, ver AplicacionProducto.
-  litrosMezclaPorHa           Decimal             @db.Decimal(10, 4)
   // Recetario (20-ago-2026): referencia de trazabilidad a la receta usada
   // como base — nulo si se programó libre por Ingrediente Activo, como
   // siempre. La dosis realmente aplicada vive en AplicacionProducto (puede
-  // diferir de la receta si se ajustó "solo por esta vez").
+  // diferir de la receta si se ajustó "solo por esta vez"). Desde V1 P2 solo
+  // puede aplicar cuando la programación tiene un único Grupo.
   recetaId                    String?
-  receta                      Receta?             @relation(fields: [recetaId], references: [id])
-  // Capacidad del tanque/recipiente usado ese día (20-ago-2026) — se
-  // captura cada vez que se programa, nunca un catálogo fijo (varía según
-  // qué tanque/turbina esté disponible). Nula si no se usó el cálculo de
-  // mezcla por tanque.
-  capacidadTanque             Decimal?            @db.Decimal(10, 2)
-  // Tipo de aplicación (25-ago-2026, Orden de Aplicación): campo propio de
-  // la Aplicación, independiente de si se usó Receta o no — precargado
-  // desde la receta cuando aplica, pero siempre editable y necesario para
-  // saber si esta Aplicación es Drench (dato exclusivo de la Orden).
-  tipoAplicacionId            String?
-  tipoAplicacion              TipoAplicacion?     @relation(fields: [tipoAplicacionId], references: [id])
-  fechaInicio                 DateTime            @db.Date
-  fechaFin                    DateTime            @db.Date
-  hectareasTotalesProgramadas Decimal             @db.Decimal(10, 4) // base estable del % de avance y del descuento proporcional — fija desde Paso 1, no recalculada si el Cuadro cambia de superficie después
-  estado                      EstadoAplicacion    @default(programada)
+  receta                      Receta?                @relation(fields: [recetaId], references: [id])
+  // Capacidad del tanque/recipiente usado ese día (20-ago-2026) — compartida
+  // por todos los Grupos (es el recipiente físico, no cambia por dosis).
+  capacidadTanque             Decimal?               @db.Decimal(10, 2)
+  // Tipo de aplicación — obligatorio desde V1 P2 (antes precargado de la
+  // receta pero editable/opcional).
+  tipoAplicacionId            String
+  tipoAplicacion              TipoAplicacion         @relation(fields: [tipoAplicacionId], references: [id])
+  // Comentarios libres de la programación (V1 P2, 25-sep-2026) — distinto
+  // del comentario por reporte de avance (AplicacionRealizada.comentario).
+  comentario                  String?                @db.Text
+  fechaInicio                 DateTime               @db.Date
+  fechaFin                    DateTime               @db.Date
+  hectareasTotalesProgramadas Decimal                @db.Decimal(10, 4)
+  estado                      EstadoAplicacion       @default(programada)
   creadoPorId                 String
-  fechaCreacion               DateTime            @default(now())
+  fechaCreacion                DateTime               @default(now())
   canceladaPorId              String? // protocolo de cancelación de aplicación entregada y vencida a 15 días (9.7) — Director/Gerente Técnico
   fechaCancelacion            DateTime?
+  // Cierre por debajo de 100% (V1 P2, regla): solo Dirección General o
+  // Gerente Técnico, con nota obligatoria — se guarda junto con la cancelación.
+  notaCierre                  String?                @db.Text
   confirmacionBodegaPorId     String? // firma digital de recepción del Encargado de Bodega — no bloquea el ajuste de inventario, que ya ocurrió al cancelar
   fechaConfirmacionBodega     DateTime?
 
-  productos  AplicacionProducto[]
-  cuadros    AplicacionCuadro[]
+  grupos     AplicacionGrupo[]
   realizadas AplicacionRealizada[]
+  // Denormalizado desde AplicacionProducto.aplicacionId (ver ese modelo) —
+  // no se usa para navegar, solo satisface la relación inversa de Prisma.
+  productosDenormalizado AplicacionProducto[]
 }
 
-// Varios productos en la misma Aplicación (10-ago-2026, 9.7): cada uno se
-// autoriza, aparta y descuenta del Almacén por separado, aunque se
-// programen y apliquen juntos en el mismo tanque (litrosMezclaPorHa vive en
-// Aplicacion, compartido) — cada producto conserva su propia concentración.
+// Grupo de dosis (V1 P2, 25-sep-2026): cada Grupo tiene su propia receta
+// (concentración + litros de mezcla/ha, ver AplicacionProducto) y sus
+// propios Cuadros (por_cuadro) o Cuadro+Variedad (por_variedad). Sin
+// grupos capturados por el usuario, la programación es un solo Grupo con
+// todo — el modelo no distingue ese caso, siempre hay al menos un Grupo.
+model AplicacionGrupo {
+  id                  String   @id @default(uuid())
+  aplicacionId        String
+  aplicacion          Aplicacion @relation(fields: [aplicacionId], references: [id])
+  orden               Int // 1, 2, 3... solo para mostrar en orden estable
+  litrosMezclaPorHa   Decimal  @db.Decimal(10, 4)
+  // Suma estable de sus miembros (Cuadros o Cuadro+Variedad) — fija desde
+  // Paso 1, base del reparto proporcional de cada avance.
+  hectareasProgramadas Decimal @db.Decimal(10, 4)
+
+  cuadros    AplicacionGrupoCuadro[]
+  variedades AplicacionGrupoVariedad[]
+  productos  AplicacionProducto[]
+  realizados AplicacionRealizadaGrupo[]
+
+  @@index([aplicacionId])
+}
+
+// Miembro de un Grupo en modo "por Cuadro" — hectareas puede ser MENOR a la
+// superficie total del Cuadro (regla: "a cualquier Cuadro se le pueden
+// poner menos hectáreas de las que mide").
+model AplicacionGrupoCuadro {
+  id        String          @id @default(uuid())
+  grupoId   String
+  grupo     AplicacionGrupo @relation(fields: [grupoId], references: [id])
+  cuadroId  String
+  cuadro    Cuadro          @relation(fields: [cuadroId], references: [id])
+  hectareas Decimal         @db.Decimal(10, 4)
+
+  @@unique([grupoId, cuadroId])
+  @@index([cuadroId])
+}
+
+// Miembro de un Grupo en modo "por Variedad" — toma TODA la superficie de
+// esa variedad en ese Cuadro según la composición varietal del Ciclo
+// (CicloVariedad) al momento de programar; hectareas es una foto fija de
+// ese valor (mismo criterio que hectareasProgramadas de arriba).
+model AplicacionGrupoVariedad {
+  id        String          @id @default(uuid())
+  grupoId   String
+  grupo     AplicacionGrupo @relation(fields: [grupoId], references: [id])
+  cuadroId  String
+  cuadro    Cuadro          @relation(fields: [cuadroId], references: [id])
+  variedad  String
+  hectareas Decimal         @db.Decimal(10, 4)
+
+  @@unique([grupoId, cuadroId, variedad])
+  @@index([cuadroId])
+}
+
+// Varios productos en el mismo Grupo (10-ago-2026, 9.7, movido a Grupo en
+// V1 P2): cada uno se autoriza, aparta y descuenta del Almacén por
+// separado — `aplicacionId` queda denormalizado para el compromiso/compra
+// automática a nivel Almacén Central, que no distingue Grupos.
 model AplicacionProducto {
   id                     String              @id @default(uuid())
+  grupoId                String
+  grupo                  AplicacionGrupo     @relation(fields: [grupoId], references: [id])
   aplicacionId           String
   aplicacion             Aplicacion          @relation(fields: [aplicacionId], references: [id])
   productoId             String
@@ -1745,51 +1818,65 @@ model AplicacionProducto {
   concentracionUnidad    ConcentracionUnidad
   cantidadTotalCalculada Decimal             @db.Decimal(12, 4)
 
+  @@index([grupoId])
   @@index([aplicacionId])
   @@index([productoId])
 }
 
-model AplicacionCuadro {
-  aplicacionId String
-  aplicacion   Aplicacion @relation(fields: [aplicacionId], references: [id])
-  cuadroId     String
-  cuadro       Cuadro     @relation(fields: [cuadroId], references: [id])
-
-  @@id([aplicacionId, cuadroId])
-}
-
-// Solo puede existir después de que Almacén entregó el producto a la Huerta.
-// Genera mano de obra en Nómina (origen=automatico_aplicacion) y descuenta
-// el Almacén Local proporcionalmente a las hectáreas avanzadas en ESTE
-// reporte. Quién/cómo se hizo vive por línea (ver AplicacionRealizadaLinea,
-// corrección 8-ago-2026) — un mismo reporte puede combinar varias líneas
-// (ej. una cuadrilla con Mochila y otra con Aguilón el mismo día).
+// Solo puede existir después de que Almacén entregó el producto a la
+// Huerta. El avance ya NO indica Cuadro/Variedad/Grupo (V1 P2, 25-sep-2026)
+// — solo hectáreas totales de ESTE reporte; el sistema reparte a Grupos y
+// de ahí a Cuadros/Variedades en proporción a lo programado (ver
+// AplicacionRealizadaGrupo) y ese reparto se GUARDA calculado, nunca se
+// recalcula después. Genera mano de obra en Nómina
+// (origen=automatico_aplicacion) y descuenta el Almacén Local
+// proporcionalmente. Quién/cómo se hizo vive por línea (ver
+// AplicacionRealizadaLinea).
 model AplicacionRealizada {
   id              String     @id @default(uuid())
   aplicacionId    String
   aplicacion      Aplicacion @relation(fields: [aplicacionId], references: [id])
   fechaReal       DateTime   @db.Date
   registradoPorId String
+  hectareas       Decimal    @db.Decimal(10, 4)
   // Comentario libre por reporte (8-sep-2026) — ver ActividadRealizada.comentario.
   comentario      String?    @db.Text
 
-  cuadros AplicacionRealizadaCuadro[]
-  lineas  AplicacionRealizadaLinea[]
+  grupos AplicacionRealizadaGrupo[]
+  lineas AplicacionRealizadaLinea[]
 
   @@index([aplicacionId])
 }
 
-// Cuadro(s) trabajados y hectáreas avanzadas en un reporte específico — un
-// mismo Cuadro puede aparecer en varios reportes distintos (avance parcial).
-model AplicacionRealizadaCuadro {
-  id          String              @id @default(uuid())
-  realizadaId String
-  realizada   AplicacionRealizada @relation(fields: [realizadaId], references: [id])
-  cuadroId    String
-  cuadro      Cuadro              @relation(fields: [cuadroId], references: [id])
-  hectareas   Decimal             @db.Decimal(10, 4)
+// Reparto calculado de un reporte a nivel Grupo (V1 P2) — hectareasAtribuidas
+// = hectareas del reporte × (grupo.hectareasProgramadas / hectareasTotalesProgramadas).
+model AplicacionRealizadaGrupo {
+  id                  String              @id @default(uuid())
+  realizadaId         String
+  realizada           AplicacionRealizada @relation(fields: [realizadaId], references: [id])
+  grupoId             String
+  grupo               AplicacionGrupo     @relation(fields: [grupoId], references: [id])
+  hectareasAtribuidas Decimal             @db.Decimal(10, 4)
+
+  cuadros AplicacionRealizadaGrupoCuadro[]
 
   @@index([realizadaId])
+  @@index([grupoId])
+}
+
+// Reparto calculado dentro del Grupo, a Cuadro (por_cuadro) o Cuadro+Variedad
+// (por_variedad) — base para "el costo baja hasta Cuadro" (indicadores,
+// costeo). `variedad` queda null en modo por_cuadro.
+model AplicacionRealizadaGrupoCuadro {
+  id                  String                   @id @default(uuid())
+  realizadaGrupoId    String
+  realizadaGrupo      AplicacionRealizadaGrupo @relation(fields: [realizadaGrupoId], references: [id])
+  cuadroId            String
+  cuadro              Cuadro                   @relation(fields: [cuadroId], references: [id])
+  variedad            String?
+  hectareasAtribuidas Decimal                  @db.Decimal(10, 4)
+
+  @@index([realizadaGrupoId])
   @@index([cuadroId])
 }
 

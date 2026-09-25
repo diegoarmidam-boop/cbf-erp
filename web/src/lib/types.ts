@@ -1033,6 +1033,49 @@ export interface RealizadaCuadro {
   hectareas: string;
 }
 
+// V1 P2 (25-sep-2026, Bloque 3): Grupos de dosis + modo Por Cuadro/Por Variedad.
+export type ModoProgramacionCuadro = "por_cuadro" | "por_variedad";
+
+export interface AplicacionGrupoCuadro {
+  id: string;
+  cuadroId: string;
+  cuadro: Cuadro;
+  hectareas: string;
+}
+
+export interface AplicacionGrupoVariedad {
+  id: string;
+  cuadroId: string;
+  cuadro: Cuadro;
+  variedad: string;
+  hectareas: string;
+}
+
+export interface AplicacionGrupo {
+  id: string;
+  orden: number;
+  litrosMezclaPorHa: string;
+  hectareasProgramadas: string;
+  cuadros: AplicacionGrupoCuadro[];
+  variedades: AplicacionGrupoVariedad[];
+  productos: AplicacionProducto[];
+}
+
+export interface AplicacionRealizadaGrupoCuadro {
+  id: string;
+  cuadroId: string;
+  cuadro: Cuadro;
+  variedad: string | null;
+  hectareasAtribuidas: string;
+}
+
+export interface AplicacionRealizadaGrupo {
+  id: string;
+  grupoId: string;
+  hectareasAtribuidas: string;
+  cuadros: AplicacionRealizadaGrupoCuadro[];
+}
+
 export interface LineaRealizadaPersona {
   personalId: string;
   personal: Personal;
@@ -1058,7 +1101,8 @@ export interface AplicacionRealizada {
   fechaReal: string;
   registradoPorId: string;
   comentario: string | null;
-  cuadros: RealizadaCuadro[];
+  hectareas: string;
+  grupos: AplicacionRealizadaGrupo[];
   lineas: AplicacionRealizadaLinea[];
 }
 
@@ -1129,13 +1173,14 @@ export interface Aplicacion {
   id: string;
   huertaId: string;
   huerta: Huerta;
-  productos: AplicacionProducto[];
+  modo: ModoProgramacionCuadro;
+  grupos: AplicacionGrupo[];
   recursoSugerido: ModalidadAplicacion;
-  litrosMezclaPorHa: string;
   recetaId: string | null;
   capacidadTanque: string | null;
-  tipoAplicacionId: string | null;
+  tipoAplicacionId: string;
   tipoAplicacion: TipoAplicacion | null;
+  comentario: string | null;
   fechaInicio: string;
   fechaFin: string;
   hectareasTotalesProgramadas: string;
@@ -1143,9 +1188,9 @@ export interface Aplicacion {
   fechaCreacion: string;
   canceladaPorId: string | null;
   fechaCancelacion: string | null;
+  notaCierre: string | null;
   confirmacionBodegaPorId: string | null;
   fechaConfirmacionBodega: string | null;
-  cuadros: { cuadro: Cuadro }[];
   realizadas: AplicacionRealizada[];
   comprometido?: boolean;
   diasSinEntregar?: number | null;
@@ -1155,9 +1200,9 @@ export interface Aplicacion {
   hectareasAvanzadas?: number;
   horasHombreTotales?: number;
   porcentajeAvance?: number;
-  restantesPorCuadro?: Record<string, number>;
-  mezclaPorTanque?: MezclaTanqueProducto[] | null;
-  notaTanquePendiente?: TanquePendienteProducto[] | null;
+  restantesPorMiembro?: Record<string, number>;
+  mezclaPorTanque?: { grupoId: string; productos: MezclaTanqueProducto[] }[] | null;
+  notaTanquePendiente?: { grupoId: string; productos: TanquePendienteProducto[] }[] | null;
 }
 
 export type ModoDosisGranular = "kg_ha" | "g_planta";

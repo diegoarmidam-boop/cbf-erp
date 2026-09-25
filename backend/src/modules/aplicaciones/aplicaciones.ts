@@ -1,4 +1,15 @@
-import { calcularCantidadTotal, calcularMezclaPorTanque, calcularTanquePendiente, ordenarPorNombreNumerico, tarifaEfectiva, type ConcentracionUnidad } from "@cbf/shared";
+import {
+  calcularCantidadTotal,
+  calcularMezclaPorTanque,
+  calcularRepartoAvance,
+  calcularTanquePendiente,
+  ordenarPorNombreNumerico,
+  proporcionDelGrupo,
+  repartirMontoPorHectareas,
+  tarifaEfectiva,
+  type ConcentracionUnidad,
+  type GrupoPrograma,
+} from "@cbf/shared";
 import type { Prisma, Rol } from "@prisma/client";
 import { prisma } from "../../core/db.js";
 import type { TransactionClient } from "../../core/db.js";
@@ -90,31 +101,131 @@ async function resolverIngredientesAplicacion(productos: ProductoAplicacionInput
   );
 }
 
+export type ModoProgramacionCuadro = "por_cuadro" | "por_variedad";
+
+export interface GrupoCuadroInput {
+  cuadroId: string;
+  hectareas: number;
+}
+
+export interface GrupoVariedadInput {
+  cuadroId: string;
+  variedad: string; // hectáreas se resuelven de la composición varietal del Ciclo, no se capturan
+}
+
+export interface GrupoAplicacionInput {
+  litrosMezclaPorHa: number;
+  cuadros?: GrupoCuadroInput[]; // modo por_cuadro
+  variedades?: GrupoVariedadInput[]; // modo por_variedad
+  productos: ProductoAplicacionInput[];
+}
+
 export interface ProgramarAplicacionInput {
   huertaId: string;
-  cuadroIds: string[];
-  productos: ProductoAplicacionInput[];
+  modo: ModoProgramacionCuadro;
+  // Grupos de dosis (V1 P2, 25-sep-2026, Bloque 3) — al menos uno; si el
+  // usuario no arma grupos, el frontend manda un solo Grupo con todo.
+  grupos: GrupoAplicacionInput[];
   recursoSugerido: ModalidadAplicacion;
-  litrosMezclaPorHa: number;
   fechaInicio: string;
   fechaFin: string;
+  comentario?: string;
   // Recetario (20-ago-2026): recetaId es solo trazabilidad de "de dónde
-  // salió esta programación" — los productos/dosis reales a aplicar siguen
-  // viniendo de `productos`/`litrosMezclaPorHa` de arriba (precargados de la
-  // receta en el frontend, editables). capacidadTanque es opcional y
-  // universal — aplica con o sin receta, cualquier Aplicación con producto
-  // líquido por hectárea puede pedir el desglose por tanque.
+  // salió esta programación" — solo aplica si hay un único Grupo (la receta
+  // es de un tanque, no de varios grupos con dosis distinta).
   recetaId?: string;
   capacidadTanque?: number;
   // Si viene una receta y el rol autorizado ajustó la dosis: además de usar
   // la dosis nueva en esta programación, actualiza también la receta
   // maestra para las próximas veces.
   actualizarRecetaOriginal?: boolean;
-  // Tipo de aplicación (25-ago-2026, Orden de Aplicación): propio de la
-  // Aplicación, no solo de la receta — precargado desde la receta cuando
-  // aplica, pero siempre capturable/editable aunque no se use receta.
-  tipoAplicacionId?: string;
+  // Tipo de aplicación — obligatorio desde V1 P2 (antes precargado de la
+  // receta pero opcional).
+  tipoAplicacionId: string;
 }
+
+export class ModoYaTieneGrupoConOtroModoError extends Error {
+  constructor() {
+    super("Todos los Grupos de una misma programación deben usar el mismo modo (por Cuadro o por Variedad), sin mezclarlos.");
+  }
+}
+
+/** Hectáreas de una variedad en un Cuadro según la composición varietal vigente del Ciclo — hectareas si se capturó directo, si no porcentaje × superficie del Cuadro. */
+async function hectareasDeVariedad(huertaId: string, cuadroId: string, variedad: string, fechaRef: Date): Promise<number> {
+  const ciclo = await prisma.ciclo.findFirst({ where: { huertaId, activo: true }, include: { variedades: true } });
+  const fila = ciclo?.variedades.find((v) => v.cuadroId === cuadroId && v.variedad === variedad);
+  if (!fila) throw new Error(`No se encontró la variedad "${variedad}" en el Cuadro elegido, dentro del Ciclo activo de esta Huerta.`);
+  if (fila.hectareas != null) return Number(fila.hectareas);
+  if (fila.porcentaje != null) {
+    const version = await obtenerVersionVigente(cuadroId, fechaRef);
+    if (!version) throw new Error("El Cuadro elegido no tiene una configuración vigente para la fecha de inicio.");
+    return (Number(fila.porcentaje) / 100) * Number(version.hectareas);
+  }
+  throw new Error(`La variedad "${variedad}" del Cuadro elegido no tiene hectáreas ni porcentaje capturados en el Ciclo.`);
+}
+
+/** Resuelve los miembros (Cuadro o Cuadro+Variedad) de un Grupo con sus hectáreas, y su suma. */
+async function resolverMiembrosGrupo(
+  huertaId: string,
+  modo: ModoProgramacionCuadro,
+  grupo: GrupoAplicacionInput,
+  fechaRef: Date
+): Promise<{ hectareasProgramadas: number; cuadros: { cuadroId: string; hectareas: number }[]; variedades: { cuadroId: string; variedad: string; hectareas: number }[] }> {
+  if (modo === "por_cuadro") {
+    if (!grupo.cuadros || grupo.cuadros.length === 0) throw new Error("Cada Grupo necesita al menos un Cuadro.");
+    for (const c of grupo.cuadros) {
+      const version = await obtenerVersionVigente(c.cuadroId, fechaRef);
+      if (!version) throw new Error("Uno de los Cuadros elegidos no tiene una configuración vigente para la fecha de inicio.");
+      if (c.hectareas <= 0 || c.hectareas > Number(version.hectareas) + 0.0001) {
+        throw new Error(`Hectáreas inválidas para uno de los Cuadros: no pueden ser 0 ni exceder su superficie (${version.hectareas} ha).`);
+      }
+    }
+    return { hectareasProgramadas: grupo.cuadros.reduce((s, c) => s + c.hectareas, 0), cuadros: grupo.cuadros, variedades: [] };
+  }
+
+  if (!grupo.variedades || grupo.variedades.length === 0) throw new Error("Cada Grupo necesita al menos una Variedad.");
+  const variedades = await Promise.all(
+    grupo.variedades.map(async (v) => ({ cuadroId: v.cuadroId, variedad: v.variedad, hectareas: await hectareasDeVariedad(huertaId, v.cuadroId, v.variedad, fechaRef) }))
+  );
+  return { hectareasProgramadas: variedades.reduce((s, v) => s + v.hectareas, 0), cuadros: [], variedades };
+}
+
+/** Codifica un miembro de Grupo como clave única — Cuadro solo, o Cuadro+Variedad ("::" no aparece en un cuadroId/variedad reales). */
+function claveMiembro(cuadroId: string, variedad: string | null): string {
+  return variedad ? `${cuadroId}::${variedad}` : cuadroId;
+}
+function parseClaveMiembro(clave: string): { cuadroId: string; variedad: string | null } {
+  const idx = clave.indexOf("::");
+  return idx === -1 ? { cuadroId: clave, variedad: null } : { cuadroId: clave.slice(0, idx), variedad: clave.slice(idx + 2) };
+}
+
+interface AplicacionGrupoParaReparto {
+  id: string;
+  hectareasProgramadas: Prisma.Decimal;
+  cuadros: { cuadroId: string; hectareas: Prisma.Decimal }[];
+  variedades: { cuadroId: string; variedad: string; hectareas: Prisma.Decimal }[];
+}
+
+/** Arma la entrada de `calcularRepartoAvance` (@cbf/shared) a partir de los Grupos ya guardados de una Aplicación. */
+function gruposParaReparto(grupos: AplicacionGrupoParaReparto[]): GrupoPrograma<string>[] {
+  return grupos.map((g) => ({
+    grupoId: g.id,
+    hectareasProgramadas: Number(g.hectareasProgramadas),
+    miembros:
+      g.cuadros.length > 0
+        ? g.cuadros.map((c) => ({ clave: claveMiembro(c.cuadroId, null), hectareasProgramadas: Number(c.hectareas) }))
+        : g.variedades.map((v) => ({ clave: claveMiembro(v.cuadroId, v.variedad), hectareasProgramadas: Number(v.hectareas) })),
+  }));
+}
+
+/**
+ * Paso 1, Programar (9.7, V1 P2 25-sep-2026): Huerta + modo (Por Cuadro o
+ * Por Variedad, sin mezclar) repartido en uno o más Grupos de dosis, cada
+ * uno con su propia receta (litros de mezcla/ha + concentración por
+ * producto). Calcula la cantidad total de cada producto POR GRUPO, y para
+ * cada uno, si el Almacén alcanza la aparta de inmediato ("comprometido");
+ * si no alcanza, genera automático una orden de Compras por el faltante.
+ */
 
 export class RolNoPuedeAjustarRecetaError extends Error {
   constructor() {
@@ -164,79 +275,107 @@ async function validarUsoDeReceta(
  * producto se autoriza/aparta/compra por separado, aunque se programen juntos.
  */
 export async function programarAplicacion(input: ProgramarAplicacionInput, creadoPorId: string, usuarioRol: Rol) {
-  if (input.cuadroIds.length === 0) {
-    throw new Error("Elige al menos un Cuadro.");
-  }
-  if (!input.productos || input.productos.length === 0) {
-    throw new Error("Elige al menos un producto.");
-  }
-  // Ingrediente Activo, nunca marca (Prioridad 1) — se resuelve al Producto
-  // preferido de cada Ingrediente aquí, una sola vez; el resto de esta
-  // función sigue operando con productoId exactamente como antes.
-  const productosResueltos = await resolverIngredientesAplicacion(input.productos);
-  const productos = await prisma.producto.findMany({ where: { id: { in: productosResueltos.map((p) => p.productoId) } } });
-  for (const p of productos) {
-    if (!(await categoriaRequiereIngredienteActivo(p.categoria)) || !p.autorizado) {
-      throw new ProductoNoAutorizadoAplicacionError();
-    }
-  }
+  if (!input.grupos || input.grupos.length === 0) throw new Error("Falta al menos un Grupo (si no armas Grupos, se programa como uno solo con todo).");
+  if (input.recetaId && input.grupos.length > 1) throw new Error("Una Receta solo se puede usar cuando la programación tiene un único Grupo.");
+
+  const fechaRef = new Date(input.fechaInicio);
+  const gruposResueltos = await Promise.all(
+    input.grupos.map(async (g) => {
+      if (!g.productos || g.productos.length === 0) throw new Error("Cada Grupo necesita al menos un producto.");
+      const miembros = await resolverMiembrosGrupo(input.huertaId, input.modo, g, fechaRef);
+      const productosResueltos = await resolverIngredientesAplicacion(g.productos);
+      const productos = await prisma.producto.findMany({ where: { id: { in: productosResueltos.map((p) => p.productoId) } } });
+      for (const p of productos) {
+        if (!(await categoriaRequiereIngredienteActivo(p.categoria)) || !p.autorizado) throw new ProductoNoAutorizadoAplicacionError();
+      }
+      return { input: g, miembros, productosResueltos };
+    })
+  );
 
   if (input.recetaId) {
-    await validarUsoDeReceta(input.recetaId, usuarioRol, input.litrosMezclaPorHa, input.productos);
+    const g = gruposResueltos[0]!;
+    await validarUsoDeReceta(input.recetaId, usuarioRol, g.input.litrosMezclaPorHa, g.input.productos);
     if (input.actualizarRecetaOriginal) {
-      for (const p of productosResueltos) {
+      for (const p of g.productosResueltos) {
         await actualizarDosisProductoEnReceta(input.recetaId, p.productoId, p.concentracionValor, p.concentracionUnidad);
       }
     }
   }
 
-  let hectareasTotales = 0;
-  const fechaRef = new Date(input.fechaInicio);
-  for (const cuadroId of input.cuadroIds) {
-    const version = await obtenerVersionVigente(cuadroId, fechaRef);
-    if (!version) throw new Error(`El Cuadro elegido no tiene una configuración vigente para la fecha de inicio.`);
-    hectareasTotales += Number(version.hectareas);
-  }
+  const hectareasTotales = gruposResueltos.reduce((s, g) => s + g.miembros.hectareasProgramadas, 0);
 
   return prisma.$transaction(async (tx) => {
     const aplicacion = await tx.aplicacion.create({
       data: {
         huertaId: input.huertaId,
+        modo: input.modo,
         recursoSugerido: input.recursoSugerido,
-        litrosMezclaPorHa: input.litrosMezclaPorHa,
         recetaId: input.recetaId,
         capacidadTanque: input.capacidadTanque,
         tipoAplicacionId: input.tipoAplicacionId,
+        comentario: input.comentario,
         fechaInicio: fechaRef,
         fechaFin: new Date(input.fechaFin),
         hectareasTotalesProgramadas: hectareasTotales,
         creadoPorId,
       },
     });
-    await tx.aplicacionCuadro.createMany({
-      data: input.cuadroIds.map((cuadroId) => ({ aplicacionId: aplicacion.id, cuadroId })),
-    });
 
-    for (const p of productosResueltos) {
-      const cantidadTotalCalculada = calcularCantidadTotal(p.concentracionValor, p.concentracionUnidad, input.litrosMezclaPorHa, hectareasTotales);
-      await tx.aplicacionProducto.create({
+    for (let i = 0; i < gruposResueltos.length; i++) {
+      const g = gruposResueltos[i]!;
+      const grupo = await tx.aplicacionGrupo.create({
         data: {
           aplicacionId: aplicacion.id,
-          productoId: p.productoId,
-          concentracionValor: p.concentracionValor,
-          concentracionUnidad: p.concentracionUnidad,
-          cantidadTotalCalculada,
+          orden: i + 1,
+          litrosMezclaPorHa: g.input.litrosMezclaPorHa,
+          hectareasProgramadas: g.miembros.hectareasProgramadas,
         },
       });
+      if (input.modo === "por_cuadro") {
+        await tx.aplicacionGrupoCuadro.createMany({
+          data: g.miembros.cuadros.map((c) => ({ grupoId: grupo.id, cuadroId: c.cuadroId, hectareas: c.hectareas })),
+        });
+      } else {
+        await tx.aplicacionGrupoVariedad.createMany({
+          data: g.miembros.variedades.map((v) => ({ grupoId: grupo.id, cuadroId: v.cuadroId, variedad: v.variedad, hectareas: v.hectareas })),
+        });
+      }
 
-      const comprometido = await intentarComprometer(tx, p.productoId, cantidadTotalCalculada, aplicacion.id, creadoPorId);
+      for (const p of g.productosResueltos) {
+        const cantidadTotalCalculada = calcularCantidadTotal(p.concentracionValor, p.concentracionUnidad, g.input.litrosMezclaPorHa, g.miembros.hectareasProgramadas);
+        await tx.aplicacionProducto.create({
+          data: {
+            grupoId: grupo.id,
+            aplicacionId: aplicacion.id,
+            productoId: p.productoId,
+            concentracionValor: p.concentracionValor,
+            concentracionUnidad: p.concentracionUnidad,
+            cantidadTotalCalculada,
+          },
+        });
+      }
+    }
+
+    // Comprometer/comprar por producto ÚNICO, sumado a través de TODOS los
+    // Grupos (Almacén Central no distingue Grupos) — si el mismo producto
+    // aparece en 2+ Grupos, se apartaría/compraría dos veces si se hiciera
+    // por Grupo (intentarComprometer es idempotente por referenciaId+producto).
+    const cantidadTotalPorProducto = new Map<string, number>();
+    for (const g of gruposResueltos) {
+      for (const p of g.productosResueltos) {
+        const cantidad = calcularCantidadTotal(p.concentracionValor, p.concentracionUnidad, g.input.litrosMezclaPorHa, g.miembros.hectareasProgramadas);
+        cantidadTotalPorProducto.set(p.productoId, (cantidadTotalPorProducto.get(p.productoId) ?? 0) + cantidad);
+      }
+    }
+    for (const [productoId, cantidadTotalCalculada] of cantidadTotalPorProducto) {
+      const comprometido = await intentarComprometer(tx, productoId, cantidadTotalCalculada, aplicacion.id, creadoPorId);
       if (!comprometido) {
-        const disponible = await stockTotalProductoTx(tx, p.productoId);
+        const disponible = await stockTotalProductoTx(tx, productoId);
         const faltante = cantidadTotalCalculada - disponible;
         await tx.ordenCompra.create({
           data: {
             origen: "automatica",
-            productoId: p.productoId,
+            productoId,
             cantidadSolicitada: faltante,
             estado: "pendiente_cotizar",
             referenciaAplicacionId: aplicacion.id,
@@ -257,109 +396,123 @@ export class YaHayAvanceReportadoError extends Error {
 
 /**
  * Editar el Paso 1 de una Aplicación ya programada/entregada (9.7,
- * 15-ago-2026, reabre decisión previa): permitido mientras no exista ningún
- * reporte de avance todavía (nada se ha usado de verdad, así que se puede
- * ajustar el 100% de cada producto sin cálculos proporcionales). Por
- * producto, según cómo cambia la cantidad total:
- * - Sube: intenta apartar la diferencia del Almacén Central; si no alcanza,
- *   genera automático el pendiente en Compras por la diferencia completa
- *   (mismo criterio que programar por primera vez). Si la Aplicación ya
- *   estaba "entregada", la diferencia apartada se entrega de inmediato
- *   también — no se deja a medio entregar.
- * - Baja: el sobrante se libera. Si todavía no se había entregado, basta
- *   con liberar el compromiso (el producto nunca salió de la bodega). Si ya
- *   se había entregado, el sobrante se regresa del Almacén Local de la
- *   Huerta al Central como abono — mismo mecanismo que la cancelación,
- *   pero queda marcado `confirmado: false` hasta que Bodega confirme que
- *   ya le llegó físicamente de vuelta.
- * Productos quitados de la edición se tratan como baja completa; productos
- * nuevos, como alta completa.
+ * 15-ago-2026, reabre decisión previa; V1 P2 25-sep-2026: ahora sobre
+ * Grupos): permitido mientras no exista ningún reporte de avance todavía.
+ * Se borran y recrean TODOS los Grupos/miembros/productos — el ajuste de
+ * Almacén se calcula agregando por productoId a través de todos los Grupos
+ * (antes vs. después), igual criterio que antes de que existieran Grupos:
+ * - Sube: intenta apartar la diferencia; si no alcanza, genera compra
+ *   automática. Si ya estaba "entregada", la diferencia se entrega también.
+ * - Baja: libera el compromiso, o si ya se entregó, regresa el sobrante del
+ *   Almacén Local al Central como abono (sin confirmar hasta que Bodega lo
+ *   reciba físicamente de vuelta).
  */
 export async function editarAplicacionProgramada(aplicacionId: string, input: Omit<ProgramarAplicacionInput, "huertaId">, editadoPorId: string, usuarioRol: Rol) {
-  if (input.cuadroIds.length === 0) throw new Error("Elige al menos un Cuadro.");
-  if (!input.productos || input.productos.length === 0) throw new Error("Elige al menos un producto.");
+  if (!input.grupos || input.grupos.length === 0) throw new Error("Falta al menos un Grupo.");
+  if (input.recetaId && input.grupos.length > 1) throw new Error("Una Receta solo se puede usar cuando la programación tiene un único Grupo.");
 
   const aplicacion = await prisma.aplicacion.findUniqueOrThrow({
     where: { id: aplicacionId },
-    include: { productos: true, realizadas: true },
+    include: { productosDenormalizado: true, realizadas: true, huerta: true },
   });
   if (aplicacion.estado !== "programada" && aplicacion.estado !== "entregada") {
     throw new TransicionAplicacionInvalidaError("programada o entregada");
   }
   if (aplicacion.realizadas.length > 0) throw new YaHayAvanceReportadoError();
 
-  const productosResueltos = await resolverIngredientesAplicacion(input.productos);
-  const productosNuevos = await prisma.producto.findMany({ where: { id: { in: productosResueltos.map((p) => p.productoId) } } });
-  for (const p of productosNuevos) {
-    if (!(await categoriaRequiereIngredienteActivo(p.categoria)) || !p.autorizado) throw new ProductoNoAutorizadoAplicacionError();
-  }
+  const fechaRef = new Date(input.fechaInicio);
+  const gruposResueltos = await Promise.all(
+    input.grupos.map(async (g) => {
+      if (!g.productos || g.productos.length === 0) throw new Error("Cada Grupo necesita al menos un producto.");
+      const miembros = await resolverMiembrosGrupo(aplicacion.huertaId, input.modo, g, fechaRef);
+      const productosResueltos = await resolverIngredientesAplicacion(g.productos);
+      const productosNuevos = await prisma.producto.findMany({ where: { id: { in: productosResueltos.map((p) => p.productoId) } } });
+      for (const p of productosNuevos) {
+        if (!(await categoriaRequiereIngredienteActivo(p.categoria)) || !p.autorizado) throw new ProductoNoAutorizadoAplicacionError();
+      }
+      return { input: g, miembros, productosResueltos };
+    })
+  );
 
   const recetaId = input.recetaId ?? aplicacion.recetaId ?? undefined;
   if (recetaId) {
-    await validarUsoDeReceta(recetaId, usuarioRol, input.litrosMezclaPorHa, input.productos);
+    const g = gruposResueltos[0]!;
+    await validarUsoDeReceta(recetaId, usuarioRol, g.input.litrosMezclaPorHa, g.input.productos);
     if (input.actualizarRecetaOriginal) {
-      for (const p of productosResueltos) {
+      for (const p of g.productosResueltos) {
         await actualizarDosisProductoEnReceta(recetaId, p.productoId, p.concentracionValor, p.concentracionUnidad);
       }
     }
   }
 
-  let hectareasTotales = 0;
-  const fechaRef = new Date(input.fechaInicio);
-  for (const cuadroId of input.cuadroIds) {
-    const version = await obtenerVersionVigente(cuadroId, fechaRef);
-    if (!version) throw new Error("El Cuadro elegido no tiene una configuración vigente para la fecha de inicio.");
-    hectareasTotales += Number(version.hectareas);
-  }
-
+  const hectareasTotales = gruposResueltos.reduce((s, g) => s + g.miembros.hectareasProgramadas, 0);
   const entregada = aplicacion.estado === "entregada";
 
-  return prisma.$transaction(async (tx) => {
-    const productosAnteriores = new Map(aplicacion.productos.map((p) => [p.productoId, p]));
-    const productoIdsNuevos = new Set(productosResueltos.map((p) => p.productoId));
+  // Cantidad anterior/nueva por producto, agregada a través de TODOS los Grupos.
+  const cantidadAnteriorPorProducto = new Map<string, number>();
+  for (const p of aplicacion.productosDenormalizado) {
+    cantidadAnteriorPorProducto.set(p.productoId, (cantidadAnteriorPorProducto.get(p.productoId) ?? 0) + Number(p.cantidadTotalCalculada));
+  }
+  const cantidadNuevaPorProducto = new Map<string, number>();
+  for (const g of gruposResueltos) {
+    for (const p of g.productosResueltos) {
+      const cantidad = calcularCantidadTotal(p.concentracionValor, p.concentracionUnidad, g.input.litrosMezclaPorHa, g.miembros.hectareasProgramadas);
+      cantidadNuevaPorProducto.set(p.productoId, (cantidadNuevaPorProducto.get(p.productoId) ?? 0) + cantidad);
+    }
+  }
+  const productoIdsTocados = new Set([...cantidadAnteriorPorProducto.keys(), ...cantidadNuevaPorProducto.keys()]);
 
-    // Productos quitados por completo de la edición: baja de 100% de lo apartado.
-    for (const anterior of aplicacion.productos) {
-      if (productoIdsNuevos.has(anterior.productoId)) continue;
-      await ajustarCantidadProducto(tx, aplicacion.huertaId, aplicacionId, anterior.productoId, Number(anterior.cantidadTotalCalculada), 0, entregada, editadoPorId);
-      await tx.aplicacionProducto.delete({ where: { id: anterior.id } });
+  return prisma.$transaction(async (tx) => {
+    for (const productoId of productoIdsTocados) {
+      const anterior = cantidadAnteriorPorProducto.get(productoId) ?? 0;
+      const nueva = cantidadNuevaPorProducto.get(productoId) ?? 0;
+      await ajustarCantidadProducto(tx, aplicacion.huertaId, aplicacionId, productoId, anterior, nueva, entregada, editadoPorId);
     }
 
-    for (const p of productosResueltos) {
-      const cantidadNueva = calcularCantidadTotal(p.concentracionValor, p.concentracionUnidad, input.litrosMezclaPorHa, hectareasTotales);
-      const anterior = productosAnteriores.get(p.productoId);
-      const cantidadAnterior = anterior ? Number(anterior.cantidadTotalCalculada) : 0;
-
-      await ajustarCantidadProducto(tx, aplicacion.huertaId, aplicacionId, p.productoId, cantidadAnterior, cantidadNueva, entregada, editadoPorId);
-
-      if (anterior) {
-        await tx.aplicacionProducto.update({
-          where: { id: anterior.id },
-          data: { concentracionValor: p.concentracionValor, concentracionUnidad: p.concentracionUnidad, cantidadTotalCalculada: cantidadNueva },
+    // Borra y recrea Grupos/miembros/productos completos (más simple/seguro que diferenciar Grupo por Grupo).
+    const gruposViejos = await tx.aplicacionGrupo.findMany({ where: { aplicacionId }, select: { id: true } });
+    const grupoIdsViejos = gruposViejos.map((g) => g.id);
+    await tx.aplicacionProducto.deleteMany({ where: { aplicacionId } });
+    await tx.aplicacionGrupoCuadro.deleteMany({ where: { grupoId: { in: grupoIdsViejos } } });
+    await tx.aplicacionGrupoVariedad.deleteMany({ where: { grupoId: { in: grupoIdsViejos } } });
+    await tx.aplicacionGrupo.deleteMany({ where: { aplicacionId } });
+    for (let i = 0; i < gruposResueltos.length; i++) {
+      const g = gruposResueltos[i]!;
+      const grupo = await tx.aplicacionGrupo.create({
+        data: { aplicacionId, orden: i + 1, litrosMezclaPorHa: g.input.litrosMezclaPorHa, hectareasProgramadas: g.miembros.hectareasProgramadas },
+      });
+      if (input.modo === "por_cuadro") {
+        await tx.aplicacionGrupoCuadro.createMany({
+          data: g.miembros.cuadros.map((c) => ({ grupoId: grupo.id, cuadroId: c.cuadroId, hectareas: c.hectareas })),
         });
       } else {
+        await tx.aplicacionGrupoVariedad.createMany({
+          data: g.miembros.variedades.map((v) => ({ grupoId: grupo.id, cuadroId: v.cuadroId, variedad: v.variedad, hectareas: v.hectareas })),
+        });
+      }
+      for (const p of g.productosResueltos) {
+        const cantidadTotalCalculada = calcularCantidadTotal(p.concentracionValor, p.concentracionUnidad, g.input.litrosMezclaPorHa, g.miembros.hectareasProgramadas);
         await tx.aplicacionProducto.create({
           data: {
+            grupoId: grupo.id,
             aplicacionId,
             productoId: p.productoId,
             concentracionValor: p.concentracionValor,
             concentracionUnidad: p.concentracionUnidad,
-            cantidadTotalCalculada: cantidadNueva,
+            cantidadTotalCalculada,
           },
         });
       }
     }
 
-    await tx.aplicacionCuadro.deleteMany({ where: { aplicacionId } });
-    await tx.aplicacionCuadro.createMany({ data: input.cuadroIds.map((cuadroId) => ({ aplicacionId, cuadroId })) });
-
     return tx.aplicacion.update({
       where: { id: aplicacionId },
       data: {
+        modo: input.modo,
         recursoSugerido: input.recursoSugerido,
-        litrosMezclaPorHa: input.litrosMezclaPorHa,
         capacidadTanque: input.capacidadTanque,
         tipoAplicacionId: input.tipoAplicacionId,
+        comentario: input.comentario,
         fechaInicio: fechaRef,
         fechaFin: new Date(input.fechaFin),
         hectareasTotalesProgramadas: hectareasTotales,
@@ -377,23 +530,25 @@ export async function editarAplicacionProgramada(aplicacionId: string, input: Om
  */
 const INCLUDE_LINEA = { tractor: true, operador: true, implemento: true, personas: { include: { personal: true } } };
 
+const INCLUDE_GRUPO = {
+  cuadros: { include: { cuadro: true } },
+  variedades: { include: { cuadro: true } },
+  productos: { include: { producto: true } },
+};
+
 const INCLUDE_APLICACION = {
   huerta: true,
   tipoAplicacion: true,
-  productos: { include: { producto: true } },
-  cuadros: { include: { cuadro: true } },
+  grupos: { include: INCLUDE_GRUPO, orderBy: { orden: "asc" as const } },
   realizadas: {
-    include: { cuadros: { include: { cuadro: true } }, lineas: { include: INCLUDE_LINEA } },
+    include: { grupos: { include: { cuadros: { include: { cuadro: true } } } }, lineas: { include: INCLUDE_LINEA } },
     orderBy: { fechaReal: "desc" as const },
   },
 };
 
-/** 9.15 (31-ago-2026): Cuadros en orden numérico ("Cuadro 2" antes que "Cuadro 10"), no alfabético. */
-function ordenarCuadrosDe<T extends { cuadros: { cuadro: { nombre: string } }[]; realizadas: { cuadros: { cuadro: { nombre: string } }[] }[] }>(
-  item: T
-): T {
-  item.cuadros = ordenarPorNombreNumerico(item.cuadros, (c) => c.cuadro.nombre);
-  for (const r of item.realizadas) r.cuadros = ordenarPorNombreNumerico(r.cuadros, (c) => c.cuadro.nombre);
+/** 9.15 (31-ago-2026): Cuadros en orden numérico ("Cuadro 2" antes que "Cuadro 10"), no alfabético — dentro de cada Grupo. */
+function ordenarCuadrosDe<T extends { grupos: { cuadros: { cuadro: { nombre: string } }[] }[] }>(item: T): T {
+  for (const g of item.grupos) g.cuadros = ordenarPorNombreNumerico(g.cuadros, (c) => c.cuadro.nombre);
   return item;
 }
 
@@ -414,100 +569,123 @@ export async function listarAplicaciones(huertaId?: string, incluirCerradas?: bo
   return Promise.all(aplicaciones.map((a) => enriquecerConAlertas(a)));
 }
 
+type GrupoConRealizadas = {
+  id: string;
+  litrosMezclaPorHa: Prisma.Decimal;
+  hectareasProgramadas: Prisma.Decimal;
+  cuadros: { cuadroId: string; hectareas: Prisma.Decimal; cuadro: { nombre: string } }[];
+  variedades: { cuadroId: string; variedad: string; hectareas: Prisma.Decimal }[];
+  productos: { productoId: string; cantidadTotalCalculada: Prisma.Decimal; concentracionValor: Prisma.Decimal; concentracionUnidad: ConcentracionUnidad }[];
+};
+
 type AplicacionConRealizadas = {
   id: string;
   estado: string;
-  fechaCreacion: Date;
+  fechaInicio: Date;
+  fechaFin: Date;
   hectareasTotalesProgramadas: Prisma.Decimal;
-  litrosMezclaPorHa: Prisma.Decimal;
   capacidadTanque: Prisma.Decimal | null;
-  productos: { productoId: string; cantidadTotalCalculada: Prisma.Decimal; concentracionValor: Prisma.Decimal; concentracionUnidad: ConcentracionUnidad }[];
-  cuadros: { cuadroId: string; cuadro: { nombre: string } }[];
-  realizadas: { id: string; cuadros: { cuadroId: string; hectareas: Prisma.Decimal }[]; lineas: { horas: Prisma.Decimal }[] }[];
+  grupos: GrupoConRealizadas[];
+  realizadas: { id: string; hectareas: Prisma.Decimal; grupos: { grupoId: string; hectareasAtribuidas: Prisma.Decimal; cuadros: { cuadroId: string; variedad: string | null; hectareasAtribuidas: Prisma.Decimal }[] }[]; lineas: { horas: Prisma.Decimal }[] }[];
 };
 
 /**
- * Mezcla por tanque (bloque nuevo, 20-ago-2026): calculado al vuelo a
- * partir de datos ya guardados (concentración, litros de mezcla/ha,
- * hectáreas totales, capacidad del tanque) — no se persiste, para que
- * nunca quede desactualizado si algo de eso cambia. Null si esta
- * Aplicación no capturó capacidad de tanque (sigue funcionando igual sin
- * el desglose, es opcional).
+ * Mezcla por tanque (bloque nuevo, 20-ago-2026; V1 P2 25-sep-2026: por
+ * Grupo, cada uno con su propia receta) — calculado al vuelo, no se
+ * persiste. Null si esta Aplicación no capturó capacidad de tanque.
  */
 function calcularMezclaPorTanqueDeAplicacion(aplicacion: AplicacionConRealizadas) {
   if (aplicacion.capacidadTanque == null) return null;
-  const litrosMezclaPorHa = Number(aplicacion.litrosMezclaPorHa);
   const capacidadTanque = Number(aplicacion.capacidadTanque);
-  const hectareasTotales = Number(aplicacion.hectareasTotalesProgramadas);
-  return aplicacion.productos.map((p) => ({
-    productoId: p.productoId,
-    ...calcularMezclaPorTanque(Number(p.concentracionValor), p.concentracionUnidad, litrosMezclaPorHa, capacidadTanque, hectareasTotales),
+  return aplicacion.grupos.map((g) => ({
+    grupoId: g.id,
+    productos: g.productos.map((p) => ({
+      productoId: p.productoId,
+      ...calcularMezclaPorTanque(Number(p.concentracionValor), p.concentracionUnidad, Number(g.litrosMezclaPorHa), capacidadTanque, Number(g.hectareasProgramadas)),
+    })),
   }));
 }
 
 /**
- * Nota estimada de tanque pendiente (Prioridad 2, 3-sep-2026) — mismo
- * cálculo que se muestra espejo en Almacén Local (ver almacen-local.ts,
- * `notaTanquePendienteDeAplicaciones`). Null si no hay capacidad de tanque
- * capturada, o si no hay nada pendiente (ver `calcularTanquePendiente`).
+ * Nota estimada de tanque pendiente (Prioridad 2, 3-sep-2026; V1 P2
+ * 25-sep-2026: por Grupo — regla "Nota de tanque a medias: por grupo").
+ * `hectareasAtribuidasPorGrupo` viene de sumar lo ya reportado a cada Grupo.
  */
 type AplicacionParaNotaTanque = {
   capacidadTanque: Prisma.Decimal | null;
-  litrosMezclaPorHa: Prisma.Decimal;
-  productos: { productoId: string; concentracionValor: Prisma.Decimal; concentracionUnidad: ConcentracionUnidad }[];
+  grupos: { id: string; litrosMezclaPorHa: Prisma.Decimal; productos: { productoId: string; concentracionValor: Prisma.Decimal; concentracionUnidad: ConcentracionUnidad }[] }[];
 };
 
-function calcularNotaTanquePendienteDeAplicacion(aplicacion: AplicacionParaNotaTanque, hectareasAvanzadas: number) {
+function calcularNotaTanquePendienteDeAplicacion(aplicacion: AplicacionParaNotaTanque, hectareasAtribuidasPorGrupo: Map<string, number>) {
   if (aplicacion.capacidadTanque == null) return null;
-  const litrosMezclaPorHa = Number(aplicacion.litrosMezclaPorHa);
   const capacidadTanque = Number(aplicacion.capacidadTanque);
-  const porProducto = aplicacion.productos
-    .map((p) => ({
-      productoId: p.productoId,
-      ...calcularTanquePendiente(Number(p.concentracionValor), p.concentracionUnidad, litrosMezclaPorHa, capacidadTanque, hectareasAvanzadas),
-    }))
-    .filter((p): p is { productoId: string } & NonNullable<ReturnType<typeof calcularTanquePendiente>> => p.tanquesNecesarios != null);
-  return porProducto.length > 0 ? porProducto : null;
+  const resultado: { grupoId: string; productos: { productoId: string; tanquesNecesarios: number; cantidadProductoPendiente: number }[] }[] = [];
+  for (const g of aplicacion.grupos) {
+    const avanzadas = hectareasAtribuidasPorGrupo.get(g.id) ?? 0;
+    const porProducto = g.productos
+      .map((p) => ({
+        productoId: p.productoId,
+        ...calcularTanquePendiente(Number(p.concentracionValor), p.concentracionUnidad, Number(g.litrosMezclaPorHa), capacidadTanque, avanzadas),
+      }))
+      .filter((p): p is { productoId: string } & NonNullable<ReturnType<typeof calcularTanquePendiente>> => p.tanquesNecesarios != null);
+    if (porProducto.length > 0) resultado.push({ grupoId: g.id, productos: porProducto });
+  }
+  return resultado.length > 0 ? resultado : null;
 }
 
 /**
  * Nota de tanque pendiente por Huerta+Producto (Prioridad 2, 3-sep-2026) —
- * mismo cálculo que se muestra en la tarjeta de Aplicaciones
- * (`calcularNotaTanquePendienteDeAplicacion`), aquí sumado entre TODAS las
- * Aplicaciones activas de una Huerta que usan ese producto, para mostrarlo
- * junto al total simple de Almacén Local (ver almacen-local.ts). "Activa"
- * = mismo criterio que la lista por default de Aplicaciones (ni vencida ni
- * cancelada) — una Aplicación ya 100% reportada no tiene nada pendiente en
- * tanque de todas formas (fracciónPendiente sale 0, se filtra sola).
+ * sumado entre TODAS las Aplicaciones/Grupos activos de una Huerta que
+ * usan ese producto, para mostrarlo junto al total simple de Almacén Local.
  */
 export async function notaTanquePendientePorHuertaProducto(huertaId: string): Promise<Record<string, number>> {
   const aplicaciones = await prisma.aplicacion.findMany({
     where: { huertaId, estado: { notIn: ["vencida", "cancelada"] }, capacidadTanque: { not: null } },
-    include: { productos: true, realizadas: { include: { cuadros: true } } },
+    include: { grupos: { include: { productos: true } }, realizadas: { include: { grupos: true } } },
   });
 
   const totales: Record<string, number> = {};
   for (const aplicacion of aplicaciones) {
-    const hectareasAvanzadas = aplicacion.realizadas.reduce((s, r) => s + r.cuadros.reduce((s2, c) => s2 + Number(c.hectareas), 0), 0);
-    const nota = calcularNotaTanquePendienteDeAplicacion(aplicacion, hectareasAvanzadas);
+    const hectareasAtribuidasPorGrupo = new Map<string, number>();
+    for (const r of aplicacion.realizadas) {
+      for (const rg of r.grupos) {
+        hectareasAtribuidasPorGrupo.set(rg.grupoId, (hectareasAtribuidasPorGrupo.get(rg.grupoId) ?? 0) + Number(rg.hectareasAtribuidas));
+      }
+    }
+    const nota = calcularNotaTanquePendienteDeAplicacion(aplicacion, hectareasAtribuidasPorGrupo);
     if (!nota) continue;
-    for (const p of nota) {
-      totales[p.productoId] = (totales[p.productoId] ?? 0) + p.cantidadProductoPendiente;
+    for (const g of nota) {
+      for (const p of g.productos) {
+        totales[p.productoId] = (totales[p.productoId] ?? 0) + p.cantidadProductoPendiente;
+      }
     }
   }
   return totales;
 }
 
-/** Hectáreas restantes por Cuadro (9.7, 8-ago-2026): lo que falta de reportar de cada Cuadro programado, para mostrarlo visible en el siguiente reporte y no obligar al Supervisor a calcularlo de memoria. `excluirRealizadaId` se usa al editar un reporte existente. */
-async function hectareasRestantesPorCuadro(aplicacion: AplicacionConRealizadas, excluirRealizadaId?: string): Promise<Record<string, number>> {
+/** Hectáreas restantes por Cuadro/Variedad (9.7, 8-ago-2026; V1 P2 25-sep-2026): lo que falta de reportar de cada miembro programado, para mostrarlo visible. `excluirRealizadaId` se usa al editar un reporte existente. */
+function hectareasRestantesPorMiembro(aplicacion: AplicacionConRealizadas, excluirRealizadaId?: string): Record<string, number> {
+  const programadoPorClave = new Map<string, number>();
+  for (const g of aplicacion.grupos) {
+    if (g.cuadros.length > 0) {
+      for (const c of g.cuadros) programadoPorClave.set(claveMiembro(c.cuadroId, null), (programadoPorClave.get(claveMiembro(c.cuadroId, null)) ?? 0) + Number(c.hectareas));
+    } else {
+      for (const v of g.variedades) programadoPorClave.set(claveMiembro(v.cuadroId, v.variedad), (programadoPorClave.get(claveMiembro(v.cuadroId, v.variedad)) ?? 0) + Number(v.hectareas));
+    }
+  }
+  const reportadoPorClave = new Map<string, number>();
+  for (const r of aplicacion.realizadas) {
+    if (r.id === excluirRealizadaId) continue;
+    for (const rg of r.grupos) {
+      for (const rc of rg.cuadros) {
+        const clave = claveMiembro(rc.cuadroId, rc.variedad);
+        reportadoPorClave.set(clave, (reportadoPorClave.get(clave) ?? 0) + Number(rc.hectareasAtribuidas));
+      }
+    }
+  }
   const restantes: Record<string, number> = {};
-  for (const { cuadroId } of aplicacion.cuadros) {
-    const version = await obtenerVersionVigente(cuadroId);
-    const totalCuadro = version ? Number(version.hectareas) : 0;
-    const reportadas = aplicacion.realizadas
-      .filter((r) => r.id !== excluirRealizadaId)
-      .reduce((s, r) => s + r.cuadros.filter((c) => c.cuadroId === cuadroId).reduce((s2, c) => s2 + Number(c.hectareas), 0), 0);
-    restantes[cuadroId] = Math.max(0, totalCuadro - reportadas);
+  for (const [clave, total] of programadoPorClave) {
+    restantes[clave] = Math.max(0, total - (reportadoPorClave.get(clave) ?? 0));
   }
   return restantes;
 }
@@ -516,25 +694,36 @@ async function enriquecerConAlertas<T extends AplicacionConRealizadas>(aplicacio
   // Comprometido/entregado a nivel Aplicación = TODOS sus productos lo están
   // (10-ago-2026, varios productos): si uno todavía espera compra, la
   // Aplicación completa se queda en "programada" hasta que los demás alcancen.
+  const productos = aplicacion.grupos.flatMap((g) => g.productos);
   const movimientosComprometido = await tx.almacenCentralMovimiento.findMany({
     where: { referenciaId: aplicacion.id, tipo: "salida_comprometida" },
   });
   const movimientosEntrega = await tx.almacenCentralMovimiento.findMany({
     where: { referenciaId: aplicacion.id, tipo: "salida_real" },
   });
-  const comprometido = aplicacion.productos.every((p) => movimientosComprometido.some((m) => m.productoId === p.productoId));
+  const comprometido = productos.every((p) => movimientosComprometido.some((m) => m.productoId === p.productoId));
   const entrega = movimientosEntrega[0];
 
-  const diasSinEntregar = aplicacion.estado === "programada" ? Math.floor((Date.now() - aplicacion.fechaCreacion.getTime()) / 86_400_000) : null;
+  // Plazos (V1 P2, 25-sep-2026): "nunca salió de bodega" cuenta desde
+  // FECHA DE INICIO de la programación (antes: fechaCreacion); "entregado
+  // y no aplicado al 100%" cuenta desde FECHA FIN (antes: fecha real de la
+  // entrega) — ambos anclados a lo que el usuario programó, no a cuándo
+  // pasaron los pasos internos.
+  const diasSinEntregar = aplicacion.estado === "programada" ? Math.floor((Date.now() - aplicacion.fechaInicio.getTime()) / 86_400_000) : null;
   const diasSinAplicar =
-    (aplicacion.estado === "entregada" || aplicacion.estado === "realizada") && entrega
-      ? Math.floor((Date.now() - entrega.fecha.getTime()) / 86_400_000)
+    aplicacion.estado === "entregada" || aplicacion.estado === "realizada"
+      ? Math.floor((Date.now() - aplicacion.fechaFin.getTime()) / 86_400_000)
       : null;
 
-  const hectareasAvanzadas = aplicacion.realizadas.reduce((s, r) => s + r.cuadros.reduce((s2, c) => s2 + Number(c.hectareas), 0), 0);
+  const hectareasAvanzadas = aplicacion.realizadas.reduce((s, r) => s + Number(r.hectareas), 0);
   const horasHombreTotales = aplicacion.realizadas.reduce((s, r) => s + r.lineas.reduce((s2, l) => s2 + Number(l.horas), 0), 0);
   const porcentajeAvance = Number(aplicacion.hectareasTotalesProgramadas) > 0 ? (hectareasAvanzadas / Number(aplicacion.hectareasTotalesProgramadas)) * 100 : 0;
-  const restantesPorCuadro = await hectareasRestantesPorCuadro(aplicacion);
+  const restantesPorMiembro = hectareasRestantesPorMiembro(aplicacion);
+
+  const hectareasAtribuidasPorGrupo = new Map<string, number>();
+  for (const r of aplicacion.realizadas) {
+    for (const rg of r.grupos) hectareasAtribuidasPorGrupo.set(rg.grupoId, (hectareasAtribuidasPorGrupo.get(rg.grupoId) ?? 0) + Number(rg.hectareasAtribuidas));
+  }
 
   return {
     ...aplicacion,
@@ -546,9 +735,9 @@ async function enriquecerConAlertas<T extends AplicacionConRealizadas>(aplicacio
     hectareasAvanzadas,
     horasHombreTotales,
     porcentajeAvance,
-    restantesPorCuadro,
+    restantesPorMiembro,
     mezclaPorTanque: calcularMezclaPorTanqueDeAplicacion(aplicacion),
-    notaTanquePendiente: calcularNotaTanquePendienteDeAplicacion(aplicacion, hectareasAvanzadas),
+    notaTanquePendiente: calcularNotaTanquePendienteDeAplicacion(aplicacion, hectareasAtribuidasPorGrupo),
   };
 }
 
@@ -576,26 +765,25 @@ export async function confirmarEntrega(
   capturadoPorId: string,
   overridesPorProducto?: Record<string, { loteIdElegido: string; motivo: string }>
 ) {
-  const aplicacion = await prisma.aplicacion.findUniqueOrThrow({ where: { id: aplicacionId }, include: { productos: true } });
+  const aplicacion = await prisma.aplicacion.findUniqueOrThrow({ where: { id: aplicacionId }, include: { productosDenormalizado: true } });
   if (aplicacion.estado !== "programada") throw new TransicionAplicacionInvalidaError("programada");
+
+  // Por producto ÚNICO, sumado a través de todos los Grupos (Almacén
+  // Central no distingue Grupos — ver mismo criterio en programarAplicacion).
+  const cantidadPorProducto = new Map<string, number>();
+  for (const p of aplicacion.productosDenormalizado) {
+    cantidadPorProducto.set(p.productoId, (cantidadPorProducto.get(p.productoId) ?? 0) + Number(p.cantidadTotalCalculada));
+  }
 
   return prisma.$transaction(async (tx) => {
     const comprometidos = await tx.almacenCentralMovimiento.findMany({
       where: { referenciaId: aplicacionId, tipo: "salida_comprometida" },
     });
-    const faltaAlguno = aplicacion.productos.some((p) => !comprometidos.some((m) => m.productoId === p.productoId));
+    const faltaAlguno = [...cantidadPorProducto.keys()].some((productoId) => !comprometidos.some((m) => m.productoId === productoId));
     if (faltaAlguno) throw new StockNoComprometidoError();
 
-    for (const p of aplicacion.productos) {
-      await confirmarEntregaComprometida(
-        tx,
-        p.productoId,
-        aplicacion.huertaId,
-        Number(p.cantidadTotalCalculada),
-        aplicacionId,
-        capturadoPorId,
-        overridesPorProducto?.[p.productoId]
-      );
+    for (const [productoId, cantidad] of cantidadPorProducto) {
+      await confirmarEntregaComprometida(tx, productoId, aplicacion.huertaId, cantidad, aplicacionId, capturadoPorId, overridesPorProducto?.[productoId]);
     }
     return tx.aplicacion.update({ where: { id: aplicacionId }, data: { estado: "entregada" } });
   });
@@ -607,29 +795,25 @@ export async function confirmarEntrega(
  * existencia) hay disponibles por si Bodega quiere elegir otro (regla e).
  */
 export async function opcionesLoteParaEntrega(aplicacionId: string) {
-  const aplicacion = await prisma.aplicacion.findUniqueOrThrow({ where: { id: aplicacionId }, include: { productos: true } });
+  const aplicacion = await prisma.aplicacion.findUniqueOrThrow({ where: { id: aplicacionId }, include: { productosDenormalizado: true } });
+  const productoIdsUnicos = [...new Set(aplicacion.productosDenormalizado.map((p) => p.productoId))];
   const resultado = [];
-  for (const p of aplicacion.productos) {
+  for (const productoId of productoIdsUnicos) {
     const comprometidos = await prisma.almacenCentralMovimiento.findMany({
-      where: { referenciaId: aplicacionId, productoId: p.productoId, tipo: "salida_comprometida", loteId: { not: null } },
+      where: { referenciaId: aplicacionId, productoId, tipo: "salida_comprometida", loteId: { not: null } },
       include: { lote: true },
     });
     const otrosLotes = await prisma.productoLote.findMany({
-      where: { productoId: p.productoId, cantidadActual: { gt: 0 } },
+      where: { productoId, cantidadActual: { gt: 0 } },
       orderBy: { fechaLlegada: "asc" },
     });
     resultado.push({
-      productoId: p.productoId,
+      productoId,
       loteSugerido: comprometidos.map((m) => ({ loteId: m.loteId, numeroLote: m.lote?.numeroLote ?? null, cantidad: Number(m.cantidad) })),
       otrosLotesConExistencia: otrosLotes.map((l) => ({ loteId: l.id, numeroLote: l.numeroLote, cantidadActual: Number(l.cantidadActual) })),
     });
   }
   return resultado;
-}
-
-export interface CuadroAvanceInput {
-  cuadroId: string;
-  hectareas: number;
 }
 
 export interface LineaRealizadaInput {
@@ -643,7 +827,9 @@ export interface LineaRealizadaInput {
 
 export interface RegistrarRealizadaInput {
   fechaReal: string;
-  cuadros: CuadroAvanceInput[];
+  // V1 P2, 25-sep-2026: el avance ya NO indica Cuadro/Variedad/Grupo — solo
+  // hectáreas totales de este reporte; el sistema reparte el resto.
+  hectareas: number;
   lineas: LineaRealizadaInput[];
   casoExtraordinario?: boolean;
   comentario?: string;
@@ -695,48 +881,33 @@ export class DiaCerradoRequiereCasoExtraordinarioError extends Error {
   }
 }
 
-/**
- * Candado (9.7): la suma acumulada de hectáreas reportadas de un mismo
- * Cuadro, a través de TODOS los reportes de una Aplicación, no puede
- * exceder la superficie vigente de ese Cuadro. `excluirRealizadaId` se usa
- * al editar un reporte existente, para no contar sus propias hectáreas
- * previas dos veces contra el candado.
- */
-async function validarCandadoCuadrosReporte(aplicacionId: string, cuadros: CuadroAvanceInput[], excluirRealizadaId?: string) {
-  for (const c of cuadros) {
-    const yaReportadas = await prisma.aplicacionRealizadaCuadro.aggregate({
-      _sum: { hectareas: true },
-      where: {
-        cuadroId: c.cuadroId,
-        realizada: { aplicacionId, ...(excluirRealizadaId ? { id: { not: excluirRealizadaId } } : {}) },
-      },
-    });
-    const acumuladas = Number(yaReportadas._sum.hectareas ?? 0) + c.hectareas;
-    const version = await obtenerVersionVigente(c.cuadroId);
-    if (version && acumuladas > Number(version.hectareas) + 0.0001) {
-      const cuadro = await prisma.cuadro.findUnique({ where: { id: c.cuadroId } });
-      throw new SuperficieExcedeCuadroReporteError(cuadro?.nombre ?? c.cuadroId, Number(version.hectareas), acumuladas);
-    }
+export class SuperficieExcedeProgramadoError extends Error {
+  constructor(hectareasProgramadas: number, hectareasAcumuladas: number) {
+    super(
+      `Esta Aplicación tiene ${hectareasProgramadas} ha programadas, pero entre todos los reportes se acumularían ${hectareasAcumuladas.toFixed(4)} ha — la suma no puede exceder lo programado.`
+    );
   }
 }
 
 /**
- * Descuenta el Almacén Local de cada producto de la Aplicación, proporcional
- * al avance de ESTE reporte (10-ago-2026, varios productos): el avance por
- * Cuadro/hectáreas es uno solo, compartido para toda la mezcla — pero el
- * descuento de inventario es individual, cada producto de su propio saldo.
+ * Descuenta el Almacén Local de cada producto de UN Grupo, proporcional a
+ * lo atribuido a ESE Grupo en este reporte (V1 P2, 25-sep-2026, regla:
+ * "cada avance descuenta del Almacén Local lo proporcional — hectáreas
+ * atribuidas al grupo × dosis del grupo"; el descuento "una sola vez al
+ * marcar realizada" que pedía eliminarse nunca existió aquí — este cálculo
+ * proporcional por reporte ya era así desde el 10-ago-2026).
  */
-async function descontarAlmacenLocalPorProductos(
+async function descontarAlmacenLocalPorGrupo(
   tx: TransactionClient,
   huertaId: string,
   productos: { productoId: string; cantidadTotalCalculada: Prisma.Decimal }[],
-  hectareasEsteReporte: number,
-  hectareasTotalesProgramadas: number,
+  hectareasAtribuidasGrupo: number,
+  hectareasProgramadasGrupo: number,
   referenciaId: string,
   capturadoPorId: string
 ) {
   for (const p of productos) {
-    const cantidadEsteReporte = (hectareasEsteReporte / hectareasTotalesProgramadas) * Number(p.cantidadTotalCalculada);
+    const cantidadEsteReporte = proporcionDelGrupo(hectareasAtribuidasGrupo, hectareasProgramadasGrupo, Number(p.cantidadTotalCalculada));
     const local = await tx.almacenLocal.upsert({
       where: { huertaId_productoId: { huertaId, productoId: p.productoId } },
       update: { cantidadReportadaAcumulada: { increment: cantidadEsteReporte } },
@@ -749,28 +920,33 @@ async function descontarAlmacenLocalPorProductos(
 }
 
 /**
- * Paso 2, Registrar como realizada (9.7) — solo después de la entrega.
- * Cada reporte captura qué Cuadro(s) se avanzaron y cuántas hectáreas de
- * cada uno (corrección de fondo 8-ago-2026): el descuento del Almacén
- * Local es proporcional a lo avanzado en ESE reporte específico, no el
- * total de la aplicación de un jalón — una aplicación casi nunca se hace
- * en un solo día.
+ * Paso 2, Registrar como realizada (9.7, V1 P2 25-sep-2026) — solo después
+ * de la entrega. El reporte YA NO indica Cuadro/Variedad/Grupo, solo
+ * hectáreas totales — el sistema reparte a Grupos y de ahí a
+ * Cuadros/Variedades en proporción a lo programado (ver
+ * calcularRepartoAvance en @cbf/shared) y GUARDA ese reparto calculado —
+ * nunca se recalculan reportes anteriores. Descuento de Almacén Local y
+ * mano de obra, ambos proporcionales a lo atribuido en ESTE reporte.
  */
 export async function registrarRealizada(aplicacionId: string, input: RegistrarRealizadaInput, registradoPorId: string) {
   validarLineas(input.lineas);
-  if (!input.cuadros || input.cuadros.length === 0) throw new Error("Falta capturar qué Cuadro(s) se avanzaron y sus hectáreas en este reporte.");
+  if (!input.hectareas || input.hectareas <= 0) throw new Error("Captura las hectáreas avanzadas en este reporte.");
 
-  const aplicacion = await prisma.aplicacion.findUniqueOrThrow({ where: { id: aplicacionId }, include: { cuadros: true, productos: true } });
+  const aplicacion = await prisma.aplicacion.findUniqueOrThrow({
+    where: { id: aplicacionId },
+    include: { grupos: { include: INCLUDE_GRUPO }, realizadas: { select: { hectareas: true } } },
+  });
   if (aplicacion.estado !== "entregada" && aplicacion.estado !== "realizada") {
     throw new Error(
       "No se ha entregado el producto a esta Huerta todavía — Almacén debe confirmar la entrega antes de registrar la aplicación como realizada."
     );
   }
-  const cuadroIdsProgramados = new Set(aplicacion.cuadros.map((c) => c.cuadroId));
-  for (const c of input.cuadros) {
-    if (!cuadroIdsProgramados.has(c.cuadroId)) throw new Error("Uno de los Cuadros reportados no forma parte de esta aplicación.");
+
+  const yaReportadas = aplicacion.realizadas.reduce((s, r) => s + Number(r.hectareas), 0);
+  const totalConEste = yaReportadas + input.hectareas;
+  if (totalConEste > Number(aplicacion.hectareasTotalesProgramadas) + 0.0001) {
+    throw new SuperficieExcedeProgramadoError(Number(aplicacion.hectareasTotalesProgramadas), totalConEste);
   }
-  await validarCandadoCuadrosReporte(aplicacionId, input.cuadros);
 
   // Registro automático llegando después del cierre del día (9.11): no entra solo — exige caso extraordinario ya autorizado por el llamador (verificado en la ruta).
   if ((await diaEstaCerrado(aplicacion.huertaId, input.fechaReal)) && !input.casoExtraordinario) {
@@ -782,56 +958,65 @@ export async function registrarRealizada(aplicacionId: string, input: RegistrarR
   const tarifaAplicada = tarifaEfectiva(aActividadCalc(actividad), config.tarifaGeneralHora);
   const esPrimeraVezRealizada = aplicacion.estado === "entregada";
 
-  const hectareasEsteReporte = input.cuadros.reduce((s, c) => s + c.hectareas, 0);
+  const reparto = calcularRepartoAvance(gruposParaReparto(aplicacion.grupos), input.hectareas);
 
   return prisma.$transaction(async (tx) => {
     const realizada = await tx.aplicacionRealizada.create({
-      data: {
-        aplicacionId,
-        fechaReal: new Date(input.fechaReal),
-        registradoPorId,
-        comentario: input.comentario,
-        cuadros: { create: input.cuadros.map((c) => ({ cuadroId: c.cuadroId, hectareas: c.hectareas })) },
-      },
+      data: { aplicacionId, fechaReal: new Date(input.fechaReal), registradoPorId, comentario: input.comentario, hectareas: input.hectareas },
     });
 
-    await crearLineasYNomina(tx, realizada.id, aplicacion.huertaId, input, actividad.id, tarifaAplicada, registradoPorId);
+    for (const pg of reparto.porGrupo) {
+      const rg = await tx.aplicacionRealizadaGrupo.create({
+        data: { realizadaId: realizada.id, grupoId: pg.grupoId, hectareasAtribuidas: pg.hectareasAtribuidas },
+      });
+      for (const m of reparto.porMiembro.filter((x) => x.grupoId === pg.grupoId)) {
+        const { cuadroId, variedad } = parseClaveMiembro(m.clave);
+        await tx.aplicacionRealizadaGrupoCuadro.create({
+          data: { realizadaGrupoId: rg.id, cuadroId, variedad, hectareasAtribuidas: m.hectareasAtribuidas },
+        });
+      }
+    }
+
+    await crearLineasYNomina(tx, realizada.id, aplicacion.huertaId, input.fechaReal, input.hectareas, input.lineas, reparto, actividad.id, tarifaAplicada, registradoPorId);
 
     if (esPrimeraVezRealizada) {
       await tx.aplicacion.update({ where: { id: aplicacionId }, data: { estado: "realizada" } });
     }
 
-    await descontarAlmacenLocalPorProductos(
-      tx,
-      aplicacion.huertaId,
-      aplicacion.productos,
-      hectareasEsteReporte,
-      Number(aplicacion.hectareasTotalesProgramadas),
-      aplicacionId,
-      registradoPorId
-    );
+    for (const grupo of aplicacion.grupos) {
+      const atribuidoGrupo = reparto.porGrupo.find((pg) => pg.grupoId === grupo.id)?.hectareasAtribuidas ?? 0;
+      await descontarAlmacenLocalPorGrupo(tx, aplicacion.huertaId, grupo.productos, atribuidoGrupo, Number(grupo.hectareasProgramadas), realizada.id, registradoPorId);
+    }
 
     return tx.aplicacionRealizada.findUniqueOrThrow({
       where: { id: realizada.id },
-      include: { cuadros: { include: { cuadro: true } }, lineas: { include: INCLUDE_LINEA } },
+      include: { grupos: { include: { cuadros: { include: { cuadro: true } } } }, lineas: { include: INCLUDE_LINEA } },
     });
   });
 }
 
-/** Crea las líneas de un reporte + su mano de obra automática + su alimentación a Uso Diario — compartido entre crear y editar. */
+/**
+ * Crea las líneas de un reporte + su mano de obra automática + su
+ * alimentación a Uso Diario — compartido entre crear y editar (V1 P2,
+ * 25-sep-2026: las horas de CADA línea se reparten entre los miembros
+ * atribuidos, en vez de ir todas a un único Cuadro — una misma persona
+ * puede generar varios RegistroNomina el mismo reporte, uno por Cuadro).
+ */
 async function crearLineasYNomina(
   tx: TransactionClient,
   realizadaId: string,
   huertaId: string,
-  input: { cuadros: CuadroAvanceInput[]; lineas: LineaRealizadaInput[]; fechaReal: string },
+  fechaReal: string,
+  hectareasReporte: number,
+  lineas: LineaRealizadaInput[],
+  reparto: ReturnType<typeof calcularRepartoAvance<string>>,
   actividadId: string,
   tarifaAplicada: number,
   registradoPorId: string
 ) {
-  const cuadroIdUnico = input.cuadros.length === 1 ? input.cuadros[0]!.cuadroId : undefined;
-  const fecha = new Date(input.fechaReal);
+  const fecha = new Date(fechaReal);
 
-  for (const linea of input.lineas) {
+  for (const linea of lineas) {
     const lineaCreada = await tx.aplicacionRealizadaLinea.create({
       data: {
         realizadaId,
@@ -844,21 +1029,26 @@ async function crearLineasYNomina(
       },
     });
 
+    const horasPorMiembro = repartirMontoPorHectareas(reparto.porMiembro, hectareasReporte, linea.horas);
     for (const personalId of personasAPagarDeLinea(linea)) {
-      await tx.registroNomina.create({
-        data: {
-          fecha,
-          huertaId,
-          cuadroId: cuadroIdUnico,
-          personalId,
-          actividadId,
-          cantidad: linea.horas,
-          tarifaAplicada,
-          origen: "automatico_aplicacion",
-          referenciaOrigenId: realizadaId,
-          capturadoPorId: registradoPorId,
-        },
-      });
+      for (const hm of horasPorMiembro) {
+        if (hm.monto <= 0.0001) continue;
+        const { cuadroId } = parseClaveMiembro(hm.clave);
+        await tx.registroNomina.create({
+          data: {
+            fecha,
+            huertaId,
+            cuadroId,
+            personalId,
+            actividadId,
+            cantidad: hm.monto,
+            tarifaAplicada,
+            origen: "automatico_aplicacion",
+            referenciaOrigenId: realizadaId,
+            capturadoPorId: registradoPorId,
+          },
+        });
+      }
     }
 
     if (linea.modalidad !== "mochila") {
@@ -868,95 +1058,94 @@ async function crearLineasYNomina(
 }
 
 export interface EditarRealizadaInput {
-  cuadros: CuadroAvanceInput[];
+  hectareas: number;
   lineas: LineaRealizadaInput[];
   comentario?: string;
 }
 
 /**
- * Historial de reportes editable por separado (9.7) — sujeto al candado de
- * consistencia con Nómina (bloqueado si la Huerta/fecha del reporte ya
- * tiene el día cerrado) y al mismo candado de superficie por Cuadro. El
- * Almacén Local se ajusta por la diferencia entre lo que decía antes y lo
- * que dice ahora, nunca se vuelve a descontar el total completo. Líneas,
- * mano de obra automática y Uso Diario automático se reemplazan completos
- * (borrar y recrear) — más simple y seguro que intentar diferenciar línea
- * por línea qué cambió.
+ * Historial de reportes editable por separado (9.7, V1 P2 25-sep-2026) —
+ * sujeto al candado de consistencia con Nómina y al mismo candado de
+ * superficie total. El Almacén Local se ajusta por la diferencia entre el
+ * reparto de antes y el de ahora (por Grupo), nunca se vuelve a descontar
+ * el total completo. Líneas, mano de obra automática, Uso Diario y el
+ * reparto guardado se reemplazan completos (borrar y recrear).
  */
 export async function editarRealizada(realizadaId: string, input: EditarRealizadaInput, editadoPorId: string) {
   validarLineas(input.lineas);
-  if (!input.cuadros || input.cuadros.length === 0) throw new Error("Falta capturar qué Cuadro(s) se avanzaron y sus hectáreas en este reporte.");
+  if (!input.hectareas || input.hectareas <= 0) throw new Error("Captura las hectáreas avanzadas en este reporte.");
 
   const realizada = await prisma.aplicacionRealizada.findUniqueOrThrow({
     where: { id: realizadaId },
-    include: { aplicacion: { include: { cuadros: true, productos: true } }, cuadros: true, lineas: true },
+    include: { aplicacion: { include: { grupos: { include: INCLUDE_GRUPO }, realizadas: { select: { id: true, hectareas: true } } } }, lineas: true },
   });
   const fechaISO = realizada.fechaReal.toISOString().slice(0, 10);
   if (await diaEstaCerrado(realizada.aplicacion.huertaId, fechaISO)) throw new DiaCerradoAplicacionError();
 
-  const cuadroIdsProgramados = new Set(realizada.aplicacion.cuadros.map((c) => c.cuadroId));
-  for (const c of input.cuadros) {
-    if (!cuadroIdsProgramados.has(c.cuadroId)) throw new Error("Uno de los Cuadros reportados no forma parte de esta aplicación.");
-  }
-  await validarCandadoCuadrosReporte(realizada.aplicacionId, input.cuadros, realizadaId);
-
   const aplicacion = realizada.aplicacion;
-  const hectareasAntes = realizada.cuadros.reduce((s, c) => s + Number(c.hectareas), 0);
-  const hectareasDespues = input.cuadros.reduce((s, c) => s + c.hectareas, 0);
-  const base = Number(aplicacion.hectareasTotalesProgramadas);
+  const yaReportadasOtros = aplicacion.realizadas.filter((r) => r.id !== realizadaId).reduce((s, r) => s + Number(r.hectareas), 0);
+  const totalConEste = yaReportadasOtros + input.hectareas;
+  if (totalConEste > Number(aplicacion.hectareasTotalesProgramadas) + 0.0001) {
+    throw new SuperficieExcedeProgramadoError(Number(aplicacion.hectareasTotalesProgramadas), totalConEste);
+  }
 
   const actividad = await prisma.actividad.findFirstOrThrow({ where: { nombre: NOMBRE_ACTIVIDAD_APLICACION } });
   const config = await obtenerConfigNomina();
   const tarifaAplicada = tarifaEfectiva(aActividadCalc(actividad), config.tarifaGeneralHora);
   const lineaIdsAnteriores = realizada.lineas.map((l) => l.id);
 
+  const repartoAntes = calcularRepartoAvance(gruposParaReparto(aplicacion.grupos), Number(realizada.hectareas));
+  const repartoDespues = calcularRepartoAvance(gruposParaReparto(aplicacion.grupos), input.hectareas);
+
   return prisma.$transaction(async (tx) => {
-    await tx.aplicacionRealizadaCuadro.deleteMany({ where: { realizadaId } });
-    await tx.aplicacionRealizadaCuadro.createMany({
-      data: input.cuadros.map((c) => ({ realizadaId, cuadroId: c.cuadroId, hectareas: c.hectareas })),
-    });
-    await tx.aplicacionRealizada.update({ where: { id: realizadaId }, data: { comentario: input.comentario } });
+    const gruposRealizadaViejos = await tx.aplicacionRealizadaGrupo.findMany({ where: { realizadaId }, select: { id: true } });
+    await tx.aplicacionRealizadaGrupoCuadro.deleteMany({ where: { realizadaGrupoId: { in: gruposRealizadaViejos.map((g) => g.id) } } });
+    await tx.aplicacionRealizadaGrupo.deleteMany({ where: { realizadaId } });
+
+    for (const pg of repartoDespues.porGrupo) {
+      const rg = await tx.aplicacionRealizadaGrupo.create({
+        data: { realizadaId, grupoId: pg.grupoId, hectareasAtribuidas: pg.hectareasAtribuidas },
+      });
+      for (const m of repartoDespues.porMiembro.filter((x) => x.grupoId === pg.grupoId)) {
+        const { cuadroId, variedad } = parseClaveMiembro(m.clave);
+        await tx.aplicacionRealizadaGrupoCuadro.create({
+          data: { realizadaGrupoId: rg.id, cuadroId, variedad, hectareasAtribuidas: m.hectareasAtribuidas },
+        });
+      }
+    }
+
+    await tx.aplicacionRealizada.update({ where: { id: realizadaId }, data: { comentario: input.comentario, hectareas: input.hectareas } });
 
     await borrarUsoDiarioDeLineasTx(tx, lineaIdsAnteriores);
     await tx.registroNomina.deleteMany({ where: { origen: "automatico_aplicacion", referenciaOrigenId: realizadaId } });
     await tx.aplicacionRealizadaLineaPersona.deleteMany({ where: { lineaId: { in: lineaIdsAnteriores } } });
     await tx.aplicacionRealizadaLinea.deleteMany({ where: { realizadaId } });
 
-    await crearLineasYNomina(
-      tx,
-      realizadaId,
-      aplicacion.huertaId,
-      { cuadros: input.cuadros, lineas: input.lineas, fechaReal: fechaISO },
-      actividad.id,
-      tarifaAplicada,
-      editadoPorId
-    );
+    await crearLineasYNomina(tx, realizadaId, aplicacion.huertaId, fechaISO, input.hectareas, input.lineas, repartoDespues, actividad.id, tarifaAplicada, editadoPorId);
 
-    for (const p of aplicacion.productos) {
-      const cantidadAntes = (hectareasAntes / base) * Number(p.cantidadTotalCalculada);
-      const cantidadDespues = (hectareasDespues / base) * Number(p.cantidadTotalCalculada);
-      const delta = cantidadDespues - cantidadAntes;
-      if (Math.abs(delta) <= 0.0000001) continue;
+    for (const grupo of aplicacion.grupos) {
+      const atribuidoAntes = repartoAntes.porGrupo.find((pg) => pg.grupoId === grupo.id)?.hectareasAtribuidas ?? 0;
+      const atribuidoDespues = repartoDespues.porGrupo.find((pg) => pg.grupoId === grupo.id)?.hectareasAtribuidas ?? 0;
+      for (const p of grupo.productos) {
+        const cantidadAntes = proporcionDelGrupo(atribuidoAntes, Number(grupo.hectareasProgramadas), Number(p.cantidadTotalCalculada));
+        const cantidadDespues = proporcionDelGrupo(atribuidoDespues, Number(grupo.hectareasProgramadas), Number(p.cantidadTotalCalculada));
+        const delta = cantidadDespues - cantidadAntes;
+        if (Math.abs(delta) <= 0.0000001) continue;
 
-      const local = await tx.almacenLocal.upsert({
-        where: { huertaId_productoId: { huertaId: aplicacion.huertaId, productoId: p.productoId } },
-        update: { cantidadReportadaAcumulada: { increment: delta } },
-        create: { huertaId: aplicacion.huertaId, productoId: p.productoId, cantidadReportadaAcumulada: delta },
-      });
-      await tx.almacenLocalMovimiento.create({
-        data: {
-          almacenLocalId: local.id,
-          tipo: "ajuste_manual",
-          cantidad: delta,
-          referenciaId: aplicacion.id,
-          capturadoPorId: editadoPorId,
-        },
-      });
+        const local = await tx.almacenLocal.upsert({
+          where: { huertaId_productoId: { huertaId: aplicacion.huertaId, productoId: p.productoId } },
+          update: { cantidadReportadaAcumulada: { increment: delta } },
+          create: { huertaId: aplicacion.huertaId, productoId: p.productoId, cantidadReportadaAcumulada: delta },
+        });
+        await tx.almacenLocalMovimiento.create({
+          data: { almacenLocalId: local.id, tipo: "ajuste_manual", cantidad: delta, referenciaId: aplicacion.id, capturadoPorId: editadoPorId },
+        });
+      }
     }
 
     return tx.aplicacionRealizada.findUniqueOrThrow({
       where: { id: realizadaId },
-      include: { cuadros: { include: { cuadro: true } }, lineas: { include: INCLUDE_LINEA } },
+      include: { grupos: { include: { cuadros: { include: { cuadro: true } } } }, lineas: { include: INCLUDE_LINEA } },
     });
   });
 }
@@ -969,23 +1158,21 @@ export async function editarRealizada(realizadaId: string, input: EditarRealizad
  * bodega" — si ya se entregó al rancho, ver `cancelarAplicacionEntregada`.
  */
 export async function liberarAplicacionVencida(aplicacionId: string, capturadoPorId: string) {
-  const aplicacion = await prisma.aplicacion.findUniqueOrThrow({ where: { id: aplicacionId }, include: { productos: true } });
+  const aplicacion = await prisma.aplicacion.findUniqueOrThrow({ where: { id: aplicacionId }, include: { productosDenormalizado: true } });
   if (aplicacion.estado !== "programada") throw new TransicionAplicacionInvalidaError("programada");
 
+  const cantidadPorProducto = new Map<string, number>();
+  for (const p of aplicacion.productosDenormalizado) {
+    cantidadPorProducto.set(p.productoId, (cantidadPorProducto.get(p.productoId) ?? 0) + Number(p.cantidadTotalCalculada));
+  }
+
   return prisma.$transaction(async (tx) => {
-    for (const p of aplicacion.productos) {
+    for (const [productoId, cantidad] of cantidadPorProducto) {
       const comprometido = await tx.almacenCentralMovimiento.findFirst({
-        where: { referenciaId: aplicacionId, tipo: "salida_comprometida", productoId: p.productoId },
+        where: { referenciaId: aplicacionId, tipo: "salida_comprometida", productoId },
       });
       if (comprometido) {
-        await liberarComprometido(
-          tx,
-          p.productoId,
-          Number(p.cantidadTotalCalculada),
-          aplicacionId,
-          capturadoPorId,
-          "Liberación de aplicación vencida (15 días sin entregar) o cancelada manualmente."
-        );
+        await liberarComprometido(tx, productoId, cantidad, aplicacionId, capturadoPorId, "Liberación de aplicación vencida (15 días sin entregar) o cancelada manualmente.");
       }
     }
     // 1.5 (2-sep-2026): cualquier orden de compra ligada a esta Aplicación
@@ -1006,35 +1193,41 @@ export async function liberarAplicacionVencida(aplicacionId: string, capturadoPo
  * El ajuste de inventario ocurre de inmediato; la confirmación de Bodega es
  * un paso de registro aparte que no lo bloquea (ver `confirmarRecepcionCancelacion`).
  */
-export async function cancelarAplicacionEntregada(aplicacionId: string, canceladaPorId: string) {
-  const aplicacion = await prisma.aplicacion.findUniqueOrThrow({ where: { id: aplicacionId }, include: { productos: true } });
+/**
+ * Cierre por debajo de 100% (V1 P2, 25-sep-2026, regla): solo Dirección
+ * General o Gerente Técnico (ya filtrado en la ruta) y con nota
+ * obligatoria — se guarda en `Aplicacion.notaCierre`. Los 15 días cuentan
+ * desde FECHA FIN de la programación (antes: fecha real de la entrega).
+ */
+export async function cancelarAplicacionEntregada(aplicacionId: string, canceladaPorId: string, nota: string) {
+  if (!nota || !nota.trim()) throw new Error("El cierre por debajo de 100% necesita una nota obligatoria.");
+  const aplicacion = await prisma.aplicacion.findUniqueOrThrow({ where: { id: aplicacionId }, include: { productosDenormalizado: true, realizadas: true } });
   if (aplicacion.estado !== "entregada" && aplicacion.estado !== "realizada") {
     throw new NoSePuedeCancelarError("Solo se puede cancelar una aplicación que ya fue entregada al rancho.");
   }
 
-  const entrega = await prisma.almacenCentralMovimiento.findFirst({ where: { referenciaId: aplicacionId, tipo: "salida_real" } });
-  if (!entrega) throw new NoSePuedeCancelarError("No se encontró la entrega de esta aplicación.");
-  const diasSinAplicar = Math.floor((Date.now() - entrega.fecha.getTime()) / 86_400_000);
+  const diasSinAplicar = Math.floor((Date.now() - aplicacion.fechaFin.getTime()) / 86_400_000);
   if (diasSinAplicar <= DIAS_VENCIMIENTO) {
-    throw new NoSePuedeCancelarError(`Todavía no pasan los ${DIAS_VENCIMIENTO} días desde la entrega — lleva ${diasSinAplicar}.`);
+    throw new NoSePuedeCancelarError(`Todavía no pasan los ${DIAS_VENCIMIENTO} días desde la fecha fin — lleva ${diasSinAplicar}.`);
   }
 
-  const avanzadas = await prisma.aplicacionRealizadaCuadro.aggregate({
-    _sum: { hectareas: true },
-    where: { realizada: { aplicacionId } },
-  });
-  const hectareasAvanzadas = Number(avanzadas._sum.hectareas ?? 0);
+  const hectareasAvanzadas = aplicacion.realizadas.reduce((s, r) => s + Number(r.hectareas), 0);
   const porcentajeAvance = hectareasAvanzadas / Number(aplicacion.hectareasTotalesProgramadas);
   if (porcentajeAvance >= 0.9999) {
     throw new NoSePuedeCancelarError("Esta aplicación ya quedó completamente aplicada — no hay nada que cancelar.");
   }
 
+  const cantidadPorProducto = new Map<string, number>();
+  for (const p of aplicacion.productosDenormalizado) {
+    cantidadPorProducto.set(p.productoId, (cantidadPorProducto.get(p.productoId) ?? 0) + Number(p.cantidadTotalCalculada));
+  }
+
   return prisma.$transaction(async (tx) => {
-    for (const p of aplicacion.productos) {
-      const cantidadARegresar = Number(p.cantidadTotalCalculada) * (1 - porcentajeAvance);
+    for (const [productoId, cantidadTotal] of cantidadPorProducto) {
+      const cantidadARegresar = cantidadTotal * (1 - porcentajeAvance);
 
       const local = await tx.almacenLocal.update({
-        where: { huertaId_productoId: { huertaId: aplicacion.huertaId, productoId: p.productoId } },
+        where: { huertaId_productoId: { huertaId: aplicacion.huertaId, productoId } },
         data: { cantidadRecibidaAcumulada: { decrement: cantidadARegresar } },
       });
       await tx.almacenLocalMovimiento.create({
@@ -1050,13 +1243,13 @@ export async function cancelarAplicacionEntregada(aplicacionId: string, cancelad
       // Regresa al/los lote(s) EXACTOS de donde salió, a su mismo precio
       // (regla f, V1 P1 25-sep-2026) — antes iba "al primer lote del
       // producto" sin importar cuál.
-      const desglose = await desgloseLotesDeMovimientos(tx, aplicacionId, p.productoId, ["salida_real"]);
+      const desglose = await desgloseLotesDeMovimientos(tx, aplicacionId, productoId, ["salida_real"]);
       const aplicado = await regresarProporcionalALotes(tx, desglose, cantidadARegresar);
       if (aplicado.length === 0) {
-        const lote = await crearLoteRespaldo(tx, p.productoId, cantidadARegresar, "ABONO");
+        const lote = await crearLoteRespaldo(tx, productoId, cantidadARegresar, "ABONO");
         await tx.almacenCentralMovimiento.create({
           data: {
-            productoId: p.productoId,
+            productoId,
             loteId: lote.id,
             tipo: "abono_sobrante",
             cantidad: cantidadARegresar,
@@ -1069,7 +1262,7 @@ export async function cancelarAplicacionEntregada(aplicacionId: string, cancelad
         for (const parte of aplicado) {
           await tx.almacenCentralMovimiento.create({
             data: {
-              productoId: p.productoId,
+              productoId,
               loteId: parte.loteId,
               tipo: "abono_sobrante",
               cantidad: parte.cantidad,
@@ -1089,7 +1282,7 @@ export async function cancelarAplicacionEntregada(aplicacionId: string, cancelad
 
     return tx.aplicacion.update({
       where: { id: aplicacionId },
-      data: { estado: "cancelada", canceladaPorId, fechaCancelacion: new Date() },
+      data: { estado: "cancelada", canceladaPorId, fechaCancelacion: new Date(), notaCierre: nota },
     });
   });
 }
@@ -1122,7 +1315,7 @@ export async function confirmarRecepcionCancelacion(aplicacionId: string, confir
 export async function listarCancelacionesPendientesConfirmar() {
   const aplicaciones = await prisma.aplicacion.findMany({
     where: { estado: "cancelada", confirmacionBodegaPorId: null },
-    include: { huerta: true, productos: { include: { producto: true } } },
+    include: { huerta: true, productosDenormalizado: { include: { producto: true } } },
     orderBy: { fechaCancelacion: "asc" },
   });
   // Aplanado uno por producto (corregido 15-ago-2026: esta función devolvía
@@ -1139,11 +1332,14 @@ export async function listarCancelacionesPendientesConfirmar() {
     fecha: string | null;
   }[] = [];
   for (const a of aplicaciones) {
-    for (const p of a.productos) {
-      const abono = await prisma.almacenCentralMovimiento.findFirst({
+    const productosUnicos = [...new Map(a.productosDenormalizado.map((p) => [p.productoId, p])).values()];
+    for (const p of productosUnicos) {
+      // Suma, no findFirst (V1 P1, 25-sep-2026): una devolución puede
+      // repartirse en varios movimientos, uno por lote de origen.
+      const abonos = await prisma.almacenCentralMovimiento.findMany({
         where: { referenciaId: a.id, tipo: "abono_sobrante", productoId: p.productoId },
       });
-      const cantidadRegresada = abono ? Number(abono.cantidad) : 0;
+      const cantidadRegresada = abonos.reduce((s, m) => s + Number(m.cantidad), 0);
       if (cantidadRegresada <= 0) continue;
       filas.push({
         id: a.id,
