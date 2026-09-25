@@ -77,14 +77,15 @@ export default function Granular() {
   const [quien, setQuien] = useState("");
   const [horas, setHoras] = useState("");
   const [fechaReal, setFechaReal] = useState(hoyISO());
-  const [avanceCuadros, setAvanceCuadros] = useState<Record<string, string>>({});
+  const [avanceHectareas, setAvanceHectareas] = useState("");
   const [comentario, setComentario] = useState("");
 
   const [editando, setEditando] = useState<string | null>(null);
   const [editQuien, setEditQuien] = useState("");
   const [editHoras, setEditHoras] = useState("");
-  const [editAvanceCuadros, setEditAvanceCuadros] = useState<Record<string, string>>({});
+  const [editAvanceHectareas, setEditAvanceHectareas] = useState("");
   const [editComentario, setEditComentario] = useState("");
+  const [notaCancelacion, setNotaCancelacion] = useState("");
 
   // Las "vencida" (liberadas) y "cancelada" no se muestran por default —
   // se quedaban en la lista para siempre (31-ago-2026, reportado por
@@ -141,12 +142,25 @@ export default function Granular() {
     setProductosForm((prev) => (prev.length === 1 ? prev : prev.filter((_, i) => i !== index)));
   }
 
+  // V1 P2 (25-sep-2026, Bloque 3): esta pantalla todavía arma un único
+  // Grupo con todos los Cuadros elegidos (a su superficie completa) — el
+  // modelo ya soporta varios Grupos/modo Por Variedad, la pantalla para
+  // armarlos queda pendiente.
   async function programar(e: FormEvent) {
     e.preventDefault();
     setError(null);
     const payload = {
-      cuadroIds,
-      productos: productosForm.map((p) => ({ ingredienteActivoNombre: p.ingredienteActivoNombre, modoDosis: p.modoDosis, dosisValor: Number(p.dosisValor) })),
+      modo: "por_cuadro" as const,
+      grupos: [
+        {
+          cuadros: cuadroIds.map((cuadroId) => {
+            const cuadro = cuadrosHuerta.find((c) => c.id === cuadroId);
+            const vigente = cuadro?.versiones.find((v) => v.vigenteHasta == null) ?? cuadro?.versiones[0];
+            return { cuadroId, hectareas: Number(vigente?.hectareas ?? 0) };
+          }),
+          productos: productosForm.map((p) => ({ ingredienteActivoNombre: p.ingredienteActivoNombre, modoDosis: p.modoDosis, dosisValor: Number(p.dosisValor) })),
+        },
+      ],
       recursoTipo,
       equipoId: recursoTipo === "implemento" ? equipoId : undefined,
       fechaInicio,
@@ -172,10 +186,11 @@ export default function Granular() {
   }
 
   function iniciarEdicionProgramada(f: FertilizacionGranular) {
+    const grupo = f.grupos[0];
     setEditandoProgramadaId(f.id);
     setHuertaId(f.huertaId);
-    setCuadroIds(f.cuadros.map((c) => c.cuadro.id));
-    setProductosForm(f.productos.map((p) => ({ ingredienteActivoNombre: p.producto.ingredienteActivo ?? "", modoDosis: p.modoDosis, dosisValor: String(p.dosisValor) })));
+    setCuadroIds(grupo ? grupo.cuadros.map((c) => c.cuadro.id) : []);
+    setProductosForm((grupo?.productos ?? []).map((p) => ({ ingredienteActivoNombre: p.producto.ingredienteActivo ?? "", modoDosis: p.modoDosis, dosisValor: String(p.dosisValor) })));
     setRecursoTipo(f.recursoTipo);
     setEquipoId(f.equipoId ?? "");
     setFechaInicio(f.fechaInicio.slice(0, 10));
@@ -210,19 +225,13 @@ export default function Granular() {
   async function abrirRegistrar(f: FertilizacionGranular) {
     setRegistrando(f.id);
     const ultimo = f.realizadas[0];
-    setQuien(ultimo ? (ultimo.personalId ? `p:${ultimo.personalId}` : ultimo.grupoId ? `g:${ultimo.grupoId}` : "") : "");
+    setQuien(ultimo ? (ultimo.personalId ? `p:${ultimo.personalId}` : ultimo.grupoPagoId ? `g:${ultimo.grupoPagoId}` : "") : "");
     setHoras(ultimo ? ultimo.horas : "");
     setFechaReal(hoyISO());
-    setAvanceCuadros({});
+    setAvanceHectareas("");
     setComentario("");
     const grupos = await api.get<GrupoPago[]>("/fertilizantes/granular/grupos");
     setGruposHuerta(grupos);
-  }
-
-  function cuadrosDesdeMapa(mapa: Record<string, string>) {
-    return Object.entries(mapa)
-      .filter(([, hectareas]) => hectareas)
-      .map(([cuadroId, hectareas]) => ({ cuadroId, hectareas: Number(hectareas) }));
   }
 
   async function confirmarRegistrar(id: string) {
@@ -231,19 +240,18 @@ export default function Granular() {
       setError("Falta quién hizo la fertilización.");
       return;
     }
-    const cuadros = cuadrosDesdeMapa(avanceCuadros);
-    if (cuadros.length === 0) {
-      setError("Falta capturar qué Cuadro(s) se avanzaron y sus hectáreas en este reporte.");
+    if (!avanceHectareas || Number(avanceHectareas) <= 0) {
+      setError("Captura las hectáreas avanzadas en este reporte.");
       return;
     }
     const [tipo, refId] = quien.split(":");
     try {
       await api.post(`/fertilizantes/granular/${id}/realizada`, {
         personalId: tipo === "p" ? refId : undefined,
-        grupoId: tipo === "g" ? refId : undefined,
+        grupoPagoId: tipo === "g" ? refId : undefined,
         horas: Number(horas),
         fechaReal,
-        cuadros,
+        hectareas: Number(avanceHectareas),
         comentario: comentario.trim() || undefined,
       });
       setRegistrando(null);
@@ -255,11 +263,9 @@ export default function Granular() {
 
   function abrirEditar(r: FertilizacionGranular["realizadas"][number]) {
     setEditando(r.id);
-    setEditQuien(r.personalId ? `p:${r.personalId}` : r.grupoId ? `g:${r.grupoId}` : "");
+    setEditQuien(r.personalId ? `p:${r.personalId}` : r.grupoPagoId ? `g:${r.grupoPagoId}` : "");
     setEditHoras(r.horas);
-    const mapa: Record<string, string> = {};
-    for (const c of r.cuadros) mapa[c.cuadroId] = c.hectareas;
-    setEditAvanceCuadros(mapa);
+    setEditAvanceHectareas(r.hectareas);
     setEditComentario(r.comentario ?? "");
   }
 
@@ -269,18 +275,17 @@ export default function Granular() {
       setError("Falta quién hizo la fertilización.");
       return;
     }
-    const cuadros = cuadrosDesdeMapa(editAvanceCuadros);
-    if (cuadros.length === 0) {
-      setError("Falta capturar qué Cuadro(s) se avanzaron y sus hectáreas en este reporte.");
+    if (!editAvanceHectareas || Number(editAvanceHectareas) <= 0) {
+      setError("Captura las hectáreas avanzadas en este reporte.");
       return;
     }
     const [tipo, refId] = editQuien.split(":");
     try {
       await api.patch(`/fertilizantes/granular/realizada/${realizadaId}`, {
         personalId: tipo === "p" ? refId : undefined,
-        grupoId: tipo === "g" ? refId : undefined,
+        grupoPagoId: tipo === "g" ? refId : undefined,
         horas: Number(editHoras),
-        cuadros,
+        hectareas: Number(editAvanceHectareas),
         comentario: editComentario.trim() || undefined,
       });
       setEditando(null);
@@ -290,14 +295,10 @@ export default function Granular() {
     }
   }
 
-  async function cancelar(id: string) {
+  async function cancelar(id: string, nota: string) {
     setError(null);
-    try {
-      await api.post(`/fertilizantes/granular/${id}/cancelar`);
-      cargar();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "No se pudo cancelar.");
-    }
+    await api.post(`/fertilizantes/granular/${id}/cancelar`, { nota });
+    cargar();
   }
 
   async function confirmarRecepcion(id: string) {
@@ -484,18 +485,27 @@ export default function Granular() {
                   {!f.comprometido && f.estado === "programada" && <span className="tag tag-neutral">Esperando compra automática</span>}{" "}
                   {f.alertaVencimiento && <span className="tag tag-danger">15+ días sin entregar</span>}{" "}
                   {f.alertaPendienteAplicar && <span className="tag tag-danger">15+ días entregada sin aplicar</span>}
-                  <div style={{ fontSize: 13, fontWeight: 600, marginTop: 6 }}>
-                    {f.huerta.nombre} — {f.productos.map((p) => p.producto.ingredienteActivo ?? p.producto.nombreComercial).join(" + ")}
-                  </div>
-                  <div style={{ fontSize: 12, color: "var(--ink-soft)" }}>
-                    Cuadros: {f.cuadros.map((c) => c.cuadro.nombre).join(", ") || "—"}
-                  </div>
-                  {f.productos.map((p) => (
-                    <div key={p.id} style={{ fontSize: 12, color: "var(--ink-soft)" }}>
-                      {p.producto.ingredienteActivo ?? p.producto.nombreComercial}: {formatearNumero(p.cantidadTotalCalculada)} {p.producto.unidad} · {p.dosisValor}{" "}
-                      {p.modoDosis === "kg_ha" ? "kg/ha" : "g/planta"}
-                    </div>
-                  ))}
+                  {(() => {
+                    const productos = f.grupos.flatMap((g) => g.productos);
+                    const cuadrosNombres = f.grupos.flatMap((g) => (g.cuadros.length > 0 ? g.cuadros.map((c) => c.cuadro.nombre) : g.variedades.map((v) => `${v.cuadro.nombre} (${v.variedad})`)));
+                    return (
+                      <>
+                        <div style={{ fontSize: 13, fontWeight: 600, marginTop: 6 }}>
+                          {f.huerta.nombre} — {productos.map((p) => p.producto.ingredienteActivo ?? p.producto.nombreComercial).join(" + ")}
+                        </div>
+                        <div style={{ fontSize: 12, color: "var(--ink-soft)" }}>
+                          {f.modo === "por_variedad" ? "Variedades" : "Cuadros"}: {cuadrosNombres.join(", ") || "—"}
+                          {f.grupos.length > 1 && ` · ${f.grupos.length} Grupos`}
+                        </div>
+                        {productos.map((p) => (
+                          <div key={p.id} style={{ fontSize: 12, color: "var(--ink-soft)" }}>
+                            {p.producto.ingredienteActivo ?? p.producto.nombreComercial}: {formatearNumero(p.cantidadTotalCalculada)} {p.producto.unidad} · {p.dosisValor}{" "}
+                            {p.modoDosis === "kg_ha" ? "kg/ha" : "g/planta"}
+                          </div>
+                        ))}
+                      </>
+                    );
+                  })()}
                   <div style={{ fontSize: 12, color: "var(--ink-soft)" }}>
                     {f.recursoTipo === "implemento" ? `Con implemento (${f.equipo?.folio ?? "—"})` : "Con gente"} · {formatearFecha(f.fechaInicio)} a{" "}
                     {formatearFecha(f.fechaFin)}
@@ -582,38 +592,13 @@ export default function Granular() {
                       <FechaInput value={fechaReal} onChange={setFechaReal} />
                     </label>
                   </div>
-                  <div style={{ fontSize: 11.5, color: "var(--ink-soft)", marginBottom: 6 }}>
-                    ¿Qué Cuadro(s) se avanzaron en este reporte, y cuántas hectáreas de cada uno?
-                  </div>
-                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
-                    {f.cuadros.map(({ cuadro }) => (
-                      <label key={cuadro.id} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5 }}>
-                        <input
-                          type="checkbox"
-                          checked={avanceCuadros[cuadro.id] !== undefined}
-                          onChange={(e) =>
-                            setAvanceCuadros((prev) => {
-                              const copia = { ...prev };
-                              if (e.target.checked) copia[cuadro.id] = "";
-                              else delete copia[cuadro.id];
-                              return copia;
-                            })
-                          }
-                        />
-                        {cuadro.nombre}
-                        {avanceCuadros[cuadro.id] !== undefined && (
-                          <input
-                            type="number"
-                            min={0}
-                            step="0.0001"
-                            placeholder="ha"
-                            style={{ width: 80 }}
-                            value={avanceCuadros[cuadro.id]}
-                            onChange={(e) => setAvanceCuadros((prev) => ({ ...prev, [cuadro.id]: e.target.value }))}
-                          />
-                        )}
-                      </label>
-                    ))}
+                  <label className="field" style={{ maxWidth: 220, marginBottom: 10 }}>
+                    Hectáreas avanzadas en este reporte
+                    <input type="number" min={0} step="0.0001" value={avanceHectareas} onChange={(e) => setAvanceHectareas(e.target.value)} />
+                  </label>
+                  <div style={{ fontSize: 11.5, color: "var(--ink-soft)", marginBottom: 10 }}>
+                    Programadas: {f.hectareasTotalesProgramadas} ha · Avanzadas hasta ahora: {formatearNumero(f.hectareasAvanzadas ?? 0)} ha — el sistema
+                    reparte solo entre los Cuadros/Grupos, en proporción a lo programado.
                   </div>
                   <label className="field" style={{ marginBottom: 10 }}>
                     Comentario (opcional)
@@ -643,7 +628,8 @@ export default function Granular() {
                       <tr>
                         <th>Fecha</th>
                         <th>Horas</th>
-                        <th>Cuadros avanzados</th>
+                        <th>Hectáreas</th>
+                        <th>Reparto (calculado)</th>
                         <th>Comentario</th>
                         <th></th>
                       </tr>
@@ -654,7 +640,13 @@ export default function Granular() {
                           <tr>
                             <td>{formatearFecha(r.fechaReal)}</td>
                             <td>{r.horas}</td>
-                            <td>{r.cuadros.map((c) => `${c.cuadro.nombre} (${c.hectareas} ha)`).join(", ") || "—"}</td>
+                            <td>{r.hectareas} ha</td>
+                            <td>
+                              {r.grupos
+                                .flatMap((g) => g.cuadros)
+                                .map((c) => `${c.cuadro.nombre}${c.variedad ? ` (${c.variedad})` : ""}: ${c.hectareasAtribuidas} ha`)
+                                .join(", ") || "—"}
+                            </td>
                             <td>{r.comentario || "—"}</td>
                             <td>
                               {editando !== r.id && (
@@ -666,7 +658,7 @@ export default function Granular() {
                           </tr>
                           {editando === r.id && (
                             <tr>
-                              <td colSpan={5}>
+                              <td colSpan={6}>
                                 <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap", marginBottom: 8 }}>
                                   <label className="field">
                                     Quién la hizo
@@ -692,36 +684,10 @@ export default function Granular() {
                                     Horas
                                     <input type="number" step="0.25" value={editHoras} onChange={(e) => setEditHoras(e.target.value)} />
                                   </label>
-                                </div>
-                                <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 8 }}>
-                                  {f.cuadros.map(({ cuadro }) => (
-                                    <label key={cuadro.id} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5 }}>
-                                      <input
-                                        type="checkbox"
-                                        checked={editAvanceCuadros[cuadro.id] !== undefined}
-                                        onChange={(e) =>
-                                          setEditAvanceCuadros((prev) => {
-                                            const copia = { ...prev };
-                                            if (e.target.checked) copia[cuadro.id] = "";
-                                            else delete copia[cuadro.id];
-                                            return copia;
-                                          })
-                                        }
-                                      />
-                                      {cuadro.nombre}
-                                      {editAvanceCuadros[cuadro.id] !== undefined && (
-                                        <input
-                                          type="number"
-                                          min={0}
-                                          step="0.0001"
-                                          placeholder="ha"
-                                          style={{ width: 80 }}
-                                          value={editAvanceCuadros[cuadro.id]}
-                                          onChange={(e) => setEditAvanceCuadros((prev) => ({ ...prev, [cuadro.id]: e.target.value }))}
-                                        />
-                                      )}
-                                    </label>
-                                  ))}
+                                  <label className="field">
+                                    Hectáreas avanzadas
+                                    <input type="number" min={0} step="0.0001" value={editAvanceHectareas} onChange={(e) => setEditAvanceHectareas(e.target.value)} />
+                                  </label>
                                 </div>
                                 <label className="field" style={{ marginBottom: 8 }}>
                                   Comentario (opcional)
@@ -762,16 +728,42 @@ export default function Granular() {
         />
       )}
       {confirmando && confirmando.tipo === "cancelar" && (
-        <ConfirmModal
-          titulo="Cancelar fertilización"
-          mensaje="Se regresará a bodega central el producto no aplicado y se generará un abono al Rancho. ¿Confirmar?"
-          peligroso
-          onCancelar={() => setConfirmando(null)}
-          onConfirmar={async () => {
-            await cancelar(confirmando.id);
-            setConfirmando(null);
-          }}
-        />
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200, padding: 12 }}>
+          <div className="card" style={{ width: 420, maxWidth: "100%" }}>
+            <h3 style={{ marginBottom: 10 }}>Cancelar fertilización (cierre por debajo de 100%)</h3>
+            <p style={{ fontSize: 12.5, color: "var(--ink-soft)" }}>
+              Se regresará a bodega central el producto no aplicado y se generará un abono al Rancho. Captura la nota obligatoria de por qué se cierra sin llegar al 100%.
+            </p>
+            <label className="field" style={{ marginTop: 8 }}>
+              Nota (obligatoria)
+              <textarea rows={2} value={notaCancelacion} onChange={(e) => setNotaCancelacion(e.target.value)} />
+            </label>
+            {error && <p style={{ fontSize: 12.5, color: "var(--danger)", marginTop: 8 }}>{error}</p>}
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+              <button className="btn-secondary" onClick={() => { setConfirmando(null); setNotaCancelacion(""); }}>
+                Cancelar
+              </button>
+              <button
+                className="btn-danger"
+                onClick={async () => {
+                  if (!notaCancelacion.trim()) {
+                    setError("La nota es obligatoria.");
+                    return;
+                  }
+                  try {
+                    await cancelar(confirmando.id, notaCancelacion.trim());
+                    setConfirmando(null);
+                    setNotaCancelacion("");
+                  } catch (err) {
+                    setError(err instanceof ApiError ? err.message : "No se pudo cancelar.");
+                  }
+                }}
+              >
+                Sí, cancelar
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

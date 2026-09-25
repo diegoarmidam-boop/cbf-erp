@@ -73,10 +73,16 @@ actividadesRouter.get("/:id", requirePermission("actividades", "ver"), async (re
   res.json(programada);
 });
 
+const cuadroInputSchema = z.object({ cuadroId: z.string().min(1), hectareas: z.number().positive() });
+const variedadInputSchema = z.object({ cuadroId: z.string().min(1), variedad: z.string().min(1) });
+
 const programarSchema = z.object({
   huertaId: z.string().min(1),
-  cuadroIds: z.array(z.string().min(1)).min(1),
+  modo: z.enum(["por_cuadro", "por_variedad"]),
+  cuadros: z.array(cuadroInputSchema).optional(),
+  variedades: z.array(variedadInputSchema).optional(),
   actividadId: z.string().min(1),
+  comentario: z.string().optional(),
   fechaInicio: z.string(),
   fechaFin: z.string(),
 });
@@ -104,7 +110,6 @@ actividadesRouter.post("/", requirePermission("actividades", "capturar"), async 
   }
 });
 
-const cuadroAvanceSchema = z.object({ cuadroId: z.string().min(1), hectareas: z.number().positive() });
 const personaLineaSchema = z.object({ personalId: z.string().min(1), horas: z.number().positive() });
 
 // Duplicados en la misma línea (16-ago-2026): seleccionar dos veces a la
@@ -127,7 +132,7 @@ const lineaActividadSchema = z
 
 const avanceSchema = z.object({
   fechaReal: z.string(),
-  cuadros: z.array(cuadroAvanceSchema).min(1),
+  hectareas: z.number().positive(),
   lineas: z.array(lineaActividadSchema).min(1),
   comentario: z.string().optional(),
 });
@@ -180,7 +185,7 @@ actividadesRouter.post("/:id/avance", requirePermissionAny(["actividades", "capt
 });
 
 const editarAvanceSchema = z.object({
-  cuadros: z.array(cuadroAvanceSchema).min(1),
+  hectareas: z.number().positive(),
   lineas: z.array(lineaActividadSchema).min(1),
   comentario: z.string().optional(),
 });

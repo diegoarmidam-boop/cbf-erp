@@ -1,4 +1,4 @@
-import { ordenarPorNombreNumerico, tarifaEfectiva, TarifaGeneralNoConfiguradaError } from "@cbf/shared";
+import { calcularRepartoAvance, ordenarPorNombreNumerico, repartirMontoPorHectareas, tarifaEfectiva, TarifaGeneralNoConfiguradaError, type GrupoPrograma } from "@cbf/shared";
 import type { Prisma, TipoRecursoActividad } from "@prisma/client";
 import { prisma } from "../../core/db.js";
 import type { TransactionClient } from "../../core/db.js";
@@ -12,24 +12,9 @@ import { listarEquipos } from "../equipos/equipos.js";
 import { comunicacionActiva } from "../../core/moduloComunicacion.js";
 
 /**
- * Corrección de fondo (9.4, 15-ago-2026): el alcance inicial del módulo
- * (10-ago-2026) se implementó como una lista fija de 7 nombres permitidos —
- * eso funcionaba mientras el catálogo era cerrado, pero desde que se abrió
- * con botón "+" (ver catalogo.routes.ts), cualquier actividad nueva que
- * Diego dé de alta (ej. "Bordeo", "Encamado") nunca aparecería para
- * programar sin que alguien edite código y despliegue de nuevo — eso era el
- * bug real detrás de "actividades ya dadas de alta que no aparecen al
- * programar" (no era la etapa restringida: ese campo existe en el esquema
- * pero no se usa en ningún lado del código todavía).
- *
- * Se invierte el criterio: en vez de una lista blanca de lo permitido, una
- * lista negra corta de lo que NO debe programarse aquí — solo los dos
- * nombres que otros módulos usan como ancla fija para su propia mano de
- * obra automática (NOMBRE_ACTIVIDAD_APLICACION en aplicaciones.ts,
- * NOMBRE_ACTIVIDAD_GRANULAR en fertilizantes/granular.ts) — programarlas
- * aquí también generaría un registro paralelo y confuso, sin relación con
- * el flujo real de Aplicaciones/Fertilizantes. Todo lo demás del catálogo
- * (incluida cualquier actividad nueva) es programable de inmediato.
+ * Corrección de fondo (9.4, 15-ago-2026): lista negra corta de lo que NO
+ * debe programarse aquí — solo los dos nombres que otros módulos usan como
+ * ancla fija para su propia mano de obra automática.
  */
 export const ACTIVIDADES_RESERVADAS_OTROS_MODULOS = ["Fumigación", "Fertilización"];
 
@@ -39,10 +24,10 @@ export class ActividadFueraDeAlcanceError extends Error {
   }
 }
 
-export class SuperficieExcedeCuadroReporteActividadError extends Error {
-  constructor(nombreCuadro: string, hectareasCuadro: number, hectareasAcumuladas: number) {
+export class SuperficieExcedeProgramadoError extends Error {
+  constructor(hectareasProgramadas: number, hectareasAcumuladas: number) {
     super(
-      `El Cuadro "${nombreCuadro}" tiene ${hectareasCuadro} ha, pero entre todos los reportes de esta actividad se acumularían ${hectareasAcumuladas.toFixed(4)} ha — la suma no puede exceder la superficie del Cuadro.`
+      `Esta Actividad tiene ${hectareasProgramadas} ha programadas, pero entre todos los reportes se acumularían ${hectareasAcumuladas.toFixed(4)} ha — la suma no puede exceder lo programado.`
     );
   }
 }
@@ -60,6 +45,8 @@ export class DiaCerradoRequiereCasoExtraordinarioActividadError extends Error {
     );
   }
 }
+
+export type ModoProgramacionCuadro = "por_cuadro" | "por_variedad";
 
 /** Implementos elegibles en una línea de Tractor/Mixta (9.4/9.13, 15-ago-2026). */
 export function equiposImplementoParaActividad() {
@@ -79,55 +66,112 @@ export function actividadesParaProgramar() {
   });
 }
 
+/** Codifica un miembro (Cuadro o Cuadro+Variedad) como clave única. */
+function claveMiembro(cuadroId: string, variedad: string | null): string {
+  return variedad ? `${cuadroId}::${variedad}` : cuadroId;
+}
+function parseClaveMiembro(clave: string): { cuadroId: string; variedad: string | null } {
+  const idx = clave.indexOf("::");
+  return idx === -1 ? { cuadroId: clave, variedad: null } : { cuadroId: clave.slice(0, idx), variedad: clave.slice(idx + 2) };
+}
+
+/** Hectáreas de una variedad en un Cuadro según la composición varietal vigente del Ciclo. */
+async function hectareasDeVariedad(huertaId: string, cuadroId: string, variedad: string, fechaRef: Date): Promise<number> {
+  const ciclo = await prisma.ciclo.findFirst({ where: { huertaId, activo: true }, include: { variedades: true } });
+  const fila = ciclo?.variedades.find((v) => v.cuadroId === cuadroId && v.variedad === variedad);
+  if (!fila) throw new Error(`No se encontró la variedad "${variedad}" en el Cuadro elegido, dentro del Ciclo activo de esta Huerta.`);
+  if (fila.hectareas != null) return Number(fila.hectareas);
+  if (fila.porcentaje != null) {
+    const version = await obtenerVersionVigente(cuadroId, fechaRef);
+    if (!version) throw new Error("El Cuadro elegido no tiene una configuración vigente para la fecha de inicio.");
+    return (Number(fila.porcentaje) / 100) * Number(version.hectareas);
+  }
+  throw new Error(`La variedad "${variedad}" del Cuadro elegido no tiene hectáreas ni porcentaje capturados en el Ciclo.`);
+}
+
+export interface CuadroInput {
+  cuadroId: string;
+  hectareas: number;
+}
+export interface VariedadInput {
+  cuadroId: string;
+  variedad: string;
+}
+
 export interface ProgramarActividadInput {
   huertaId: string;
-  cuadroIds: string[];
+  modo: ModoProgramacionCuadro;
+  cuadros?: CuadroInput[]; // modo por_cuadro
+  variedades?: VariedadInput[]; // modo por_variedad
   actividadId: string;
+  comentario?: string;
   fechaInicio: string;
   fechaFin: string;
 }
 
-/** Paso 1, Programar (9.4): sin gate de Almacén — no hay insumo que entregar, así que se puede reportar avance desde que se programa. */
-export async function programarActividad(input: ProgramarActividadInput, creadoPorId: string) {
-  if (input.cuadroIds.length === 0) {
-    throw new Error("Elige al menos un Cuadro.");
+interface MiembroResuelto {
+  cuadroId: string;
+  variedad: string | null;
+  hectareas: number;
+}
+
+async function resolverMiembros(huertaId: string, modo: ModoProgramacionCuadro, input: { cuadros?: CuadroInput[]; variedades?: VariedadInput[] }, fechaRef: Date): Promise<MiembroResuelto[]> {
+  if (modo === "por_cuadro") {
+    if (!input.cuadros || input.cuadros.length === 0) throw new Error("Elige al menos un Cuadro.");
+    const miembros: MiembroResuelto[] = [];
+    for (const c of input.cuadros) {
+      const version = await obtenerVersionVigente(c.cuadroId, fechaRef);
+      if (!version) throw new Error("Uno de los Cuadros elegidos no tiene una configuración vigente para la fecha de inicio.");
+      if (c.hectareas <= 0 || c.hectareas > Number(version.hectareas) + 0.0001) {
+        throw new Error(`Hectáreas inválidas para uno de los Cuadros: no pueden ser 0 ni exceder su superficie (${version.hectareas} ha).`);
+      }
+      miembros.push({ cuadroId: c.cuadroId, variedad: null, hectareas: c.hectareas });
+    }
+    return miembros;
   }
+  if (!input.variedades || input.variedades.length === 0) throw new Error("Elige al menos una Variedad.");
+  return Promise.all(
+    input.variedades.map(async (v) => ({ cuadroId: v.cuadroId, variedad: v.variedad, hectareas: await hectareasDeVariedad(huertaId, v.cuadroId, v.variedad, fechaRef) }))
+  );
+}
+
+/** Paso 1, Programar (9.4, V1 P2 25-sep-2026: modo Por Cuadro/Por Variedad, sin Grupos) — sin gate de Almacén. */
+export async function programarActividad(input: ProgramarActividadInput, creadoPorId: string) {
   const actividad = await prisma.actividad.findUniqueOrThrow({ where: { id: input.actividadId } });
   if (ACTIVIDADES_RESERVADAS_OTROS_MODULOS.includes(actividad.nombre)) {
     throw new ActividadFueraDeAlcanceError();
   }
-  // Corrección de mensaje (15-ago-2026): antes esta falta solo se detectaba
-  // hasta Registrar avance (Paso 2) o, peor, al listar (ver
-  // enriquecerConAlertas), donde terminaba mostrando el mensaje del Cuadro
-  // por casualidad de orden — se valida aquí, temprano y explícito, para
-  // que el bloqueo real en Programar (Paso 1) diga la causa real.
   if (actividad.usarTarifaGeneral) {
     const config = await obtenerConfigNomina();
     tarifaEfectiva(aActividadCalc(actividad), config.tarifaGeneralHora);
   }
 
-  let hectareasTotales = 0;
   const fechaRef = new Date(input.fechaInicio);
-  for (const cuadroId of input.cuadroIds) {
-    const version = await obtenerVersionVigente(cuadroId, fechaRef);
-    if (!version) throw new Error("El Cuadro elegido no tiene una configuración vigente para la fecha de inicio.");
-    hectareasTotales += Number(version.hectareas);
-  }
+  const miembros = await resolverMiembros(input.huertaId, input.modo, input, fechaRef);
+  const hectareasTotales = miembros.reduce((s, m) => s + m.hectareas, 0);
 
   return prisma.$transaction(async (tx) => {
     const programada = await tx.actividadProgramada.create({
       data: {
         huertaId: input.huertaId,
         actividadId: input.actividadId,
+        modo: input.modo,
+        comentario: input.comentario,
         fechaInicio: fechaRef,
         fechaFin: new Date(input.fechaFin),
         hectareasTotalesProgramadas: hectareasTotales,
         creadoPorId,
       },
     });
-    await tx.actividadProgramadaCuadro.createMany({
-      data: input.cuadroIds.map((cuadroId) => ({ actividadProgramadaId: programada.id, cuadroId })),
-    });
+    if (input.modo === "por_cuadro") {
+      await tx.actividadProgramadaCuadro.createMany({
+        data: miembros.map((m) => ({ actividadProgramadaId: programada.id, cuadroId: m.cuadroId, hectareas: m.hectareas })),
+      });
+    } else {
+      await tx.actividadProgramadaVariedad.createMany({
+        data: miembros.map((m) => ({ actividadProgramadaId: programada.id, cuadroId: m.cuadroId, variedad: m.variedad!, hectareas: m.hectareas })),
+      });
+    }
     return programada;
   });
 }
@@ -138,6 +182,7 @@ const INCLUDE_ACTIVIDAD_PROGRAMADA = {
   huerta: true,
   actividad: true,
   cuadros: { include: { cuadro: true } },
+  variedades: { include: { cuadro: true } },
   realizadas: {
     include: { cuadros: { include: { cuadro: true } }, lineas: { include: INCLUDE_LINEA_ACTIVIDAD } },
     orderBy: { fechaReal: "desc" as const },
@@ -146,44 +191,63 @@ const INCLUDE_ACTIVIDAD_PROGRAMADA = {
 
 type ActividadProgramadaConRealizadas = {
   id: string;
-  actividad: { tarifa: unknown; usarTarifaGeneral: boolean };
+  huertaId: string;
+  actividad: { nombre: string; tarifa: unknown; usarTarifaGeneral: boolean };
   hectareasTotalesProgramadas: Prisma.Decimal;
-  cuadros: { cuadroId: string; cuadro: { nombre: string } }[];
+  cuadros: { cuadroId: string; hectareas: Prisma.Decimal; cuadro: { nombre: string } }[];
+  variedades: { cuadroId: string; variedad: string; hectareas: Prisma.Decimal }[];
   realizadas: {
     id: string;
-    cuadros: { cuadroId: string; hectareas: Prisma.Decimal }[];
+    hectareas: Prisma.Decimal;
+    cuadros: { cuadroId: string; variedad: string | null; hectareasAtribuidas: Prisma.Decimal }[];
     lineas: { operadorHoras: Prisma.Decimal | null; personas: { horas: Prisma.Decimal }[] }[];
   }[];
 };
 
-/** Hectáreas restantes por Cuadro (9.4, mismo mecanismo que Aplicaciones 9.7): lo que falta de reportar de cada Cuadro programado. */
-async function hectareasRestantesPorCuadro(programada: ActividadProgramadaConRealizadas, excluirRealizadaId?: string): Promise<Record<string, number>> {
-  const restantes: Record<string, number> = {};
-  for (const { cuadroId } of programada.cuadros) {
-    const version = await obtenerVersionVigente(cuadroId);
-    const totalCuadro = version ? Number(version.hectareas) : 0;
-    const reportadas = programada.realizadas
-      .filter((r) => r.id !== excluirRealizadaId)
-      .reduce((s, r) => s + r.cuadros.filter((c) => c.cuadroId === cuadroId).reduce((s2, c) => s2 + Number(c.hectareas), 0), 0);
-    restantes[cuadroId] = Math.max(0, totalCuadro - reportadas);
+interface ProgramadaParaReparto {
+  cuadros: { cuadroId: string; hectareas: Prisma.Decimal }[];
+  variedades: { cuadroId: string; variedad: string; hectareas: Prisma.Decimal }[];
+}
+
+function gruposParaReparto(programada: ProgramadaParaReparto): GrupoPrograma<string>[] {
+  // Sin Grupos en Actividades (regla explícita) — un único Grupo sintético con todos los miembros.
+  const miembros =
+    programada.cuadros.length > 0
+      ? programada.cuadros.map((c) => ({ clave: claveMiembro(c.cuadroId, null), hectareasProgramadas: Number(c.hectareas) }))
+      : programada.variedades.map((v) => ({ clave: claveMiembro(v.cuadroId, v.variedad), hectareasProgramadas: Number(v.hectareas) }));
+  return [{ grupoId: "unico", hectareasProgramadas: miembros.reduce((s, m) => s + m.hectareasProgramadas, 0), miembros }];
+}
+
+/** Hectáreas restantes por miembro (Cuadro/Variedad) — mismo criterio que Aplicaciones. */
+function hectareasRestantesPorMiembro(programada: ActividadProgramadaConRealizadas, excluirRealizadaId?: string): Record<string, number> {
+  const programadoPorClave = new Map<string, number>();
+  if (programada.cuadros.length > 0) {
+    for (const c of programada.cuadros) programadoPorClave.set(claveMiembro(c.cuadroId, null), Number(c.hectareas));
+  } else {
+    for (const v of programada.variedades) programadoPorClave.set(claveMiembro(v.cuadroId, v.variedad), Number(v.hectareas));
   }
+  const reportadoPorClave = new Map<string, number>();
+  for (const r of programada.realizadas) {
+    if (r.id === excluirRealizadaId) continue;
+    for (const c of r.cuadros) {
+      const clave = claveMiembro(c.cuadroId, c.variedad);
+      reportadoPorClave.set(clave, (reportadoPorClave.get(clave) ?? 0) + Number(c.hectareasAtribuidas));
+    }
+  }
+  const restantes: Record<string, number> = {};
+  for (const [clave, total] of programadoPorClave) restantes[clave] = Math.max(0, total - (reportadoPorClave.get(clave) ?? 0));
   return restantes;
 }
 
 async function enriquecerConAlertas<T extends ActividadProgramadaConRealizadas>(programada: T, tarifaGeneralHora: number | null) {
-  const hectareasAvanzadas = programada.realizadas.reduce((s, r) => s + r.cuadros.reduce((s2, c) => s2 + Number(c.hectareas), 0), 0);
+  const hectareasAvanzadas = programada.realizadas.reduce((s, r) => s + Number(r.hectareas), 0);
   const horasHombreTotales = programada.realizadas.reduce(
-    (s, r) =>
-      s + r.lineas.reduce((s2, l) => s2 + Number(l.operadorHoras ?? 0) + l.personas.reduce((s3, p) => s3 + Number(p.horas), 0), 0),
+    (s, r) => s + r.lineas.reduce((s2, l) => s2 + Number(l.operadorHoras ?? 0) + l.personas.reduce((s3, p) => s3 + Number(p.horas), 0), 0),
     0
   );
   const porcentajeAvance = Number(programada.hectareasTotalesProgramadas) > 0 ? (hectareasAvanzadas / Number(programada.hectareasTotalesProgramadas)) * 100 : 0;
-  const restantesPorCuadro = await hectareasRestantesPorCuadro(programada);
-  // Nunca debe tronar la lista completa por una sola Actividad sin tarifa
-  // general configurada (15-ago-2026) — antes `tarifaEfectiva` sin proteger
-  // aquí podía romper el listado entero con un error 500 genérico, en vez
-  // de solo avisar en el punto donde de verdad hace falta el monto
-  // (Programar y Registrar avance, que sí la exigen).
+  const restantesPorMiembro = hectareasRestantesPorMiembro(programada);
+  // Nunca debe tronar la lista completa por una sola Actividad sin tarifa general configurada.
   let costoTotal: number | null = null;
   try {
     costoTotal = horasHombreTotales * tarifaEfectiva(aActividadCalc(programada.actividad), tarifaGeneralHora);
@@ -191,22 +255,12 @@ async function enriquecerConAlertas<T extends ActividadProgramadaConRealizadas>(
     if (!(err instanceof TarifaGeneralNoConfiguradaError)) throw err;
   }
 
-  return {
-    ...programada,
-    hectareasAvanzadas,
-    horasHombreTotales,
-    porcentajeAvance,
-    restantesPorCuadro,
-    costoTotal,
-  };
+  return { ...programada, hectareasAvanzadas, horasHombreTotales, porcentajeAvance, restantesPorMiembro, costoTotal };
 }
 
-/** 9.15 (31-ago-2026): Cuadros en orden numérico ("Cuadro 2" antes que "Cuadro 10"), no alfabético. */
-function ordenarCuadrosDe<T extends { cuadros: { cuadro: { nombre: string } }[]; realizadas: { cuadros: { cuadro: { nombre: string } }[] }[] }>(
-  item: T
-): T {
+/** 9.15 (31-ago-2026): Cuadros en orden numérico, no alfabético. */
+function ordenarCuadrosDe<T extends { cuadros: { cuadro: { nombre: string } }[] }>(item: T): T {
   item.cuadros = ordenarPorNombreNumerico(item.cuadros, (c) => c.cuadro.nombre);
-  for (const r of item.realizadas) r.cuadros = ordenarPorNombreNumerico(r.cuadros, (c) => c.cuadro.nombre);
   return item;
 }
 
@@ -223,17 +277,9 @@ export async function listarActividadesProgramadas(huertaId?: string) {
 
 export async function obtenerActividadProgramada(id: string) {
   const config = await obtenerConfigNomina();
-  const programada = await prisma.actividadProgramada.findUniqueOrThrow({
-    where: { id },
-    include: INCLUDE_ACTIVIDAD_PROGRAMADA,
-  });
+  const programada = await prisma.actividadProgramada.findUniqueOrThrow({ where: { id }, include: INCLUDE_ACTIVIDAD_PROGRAMADA });
   ordenarCuadrosDe(programada);
   return enriquecerConAlertas(programada, config.tarifaGeneralHora);
-}
-
-export interface CuadroAvanceInput {
-  cuadroId: string;
-  hectareas: number;
 }
 
 export interface PersonaLineaActividadInput {
@@ -242,14 +288,10 @@ export interface PersonaLineaActividadInput {
 }
 
 /**
- * Línea de recurso de un reporte (9.4, 15-ago-2026, reabre decisión previa
- * del 11-ago que dejaba a Actividades sin maquinaria) — mismo patrón que
+ * Línea de recurso de un reporte (9.4, 15-ago-2026) — mismo patrón que
  * Aplicaciones (9.7): tipo "tractor" exige Tractor+Operador+Implemento,
  * "mixta" lo mismo más una lista de personas propia, "gente" solo la lista
- * de personas. A diferencia de Aplicaciones, las horas se capturan por
- * persona (`personas[].horas` y `operadorHoras` por separado) — confirmado
- * con Diego para no perder la flexibilidad que ya tenía este módulo de que
- * cada quien trabaje horas distintas el mismo reporte.
+ * de personas. Las horas se capturan por persona.
  */
 export interface LineaActividadInput {
   tipo: TipoRecursoActividad;
@@ -262,7 +304,8 @@ export interface LineaActividadInput {
 
 export interface RegistrarAvanceActividadInput {
   fechaReal: string;
-  cuadros: CuadroAvanceInput[];
+  // V1 P2, 25-sep-2026: el avance ya NO indica Cuadro/Variedad — solo hectáreas totales de este reporte.
+  hectareas: number;
   lineas: LineaActividadInput[];
   casoExtraordinario?: boolean;
   comentario?: string;
@@ -295,65 +338,46 @@ function validarLineasActividad(lineas: LineaActividadInput[], tipoRecursoActivi
 }
 
 /**
- * Candado (9.4, mismo mecanismo que Aplicaciones 9.7): la suma acumulada de
- * hectáreas reportadas de un mismo Cuadro, a través de TODOS los reportes
- * de una Actividad programada, no puede exceder la superficie vigente de
- * ese Cuadro.
+ * Crea las líneas de un reporte + su mano de obra automática + su
+ * alimentación a Uso Diario (V1 P2, 25-sep-2026: las horas de CADA persona
+ * — y del operador — se reparten entre los miembros atribuidos, en vez de
+ * ir todas a un único Cuadro).
  */
-async function validarCandadoCuadrosReporte(actividadProgramadaId: string, cuadros: CuadroAvanceInput[], excluirRealizadaId?: string) {
-  for (const c of cuadros) {
-    const yaReportadas = await prisma.actividadRealizadaCuadro.aggregate({
-      _sum: { hectareas: true },
-      where: {
-        cuadroId: c.cuadroId,
-        realizada: { actividadProgramadaId, ...(excluirRealizadaId ? { id: { not: excluirRealizadaId } } : {}) },
-      },
-    });
-    const acumuladas = Number(yaReportadas._sum.hectareas ?? 0) + c.hectareas;
-    const version = await obtenerVersionVigente(c.cuadroId);
-    if (version && acumuladas > Number(version.hectareas) + 0.0001) {
-      const cuadro = await prisma.cuadro.findUnique({ where: { id: c.cuadroId } });
-      throw new SuperficieExcedeCuadroReporteActividadError(cuadro?.nombre ?? c.cuadroId, Number(version.hectareas), acumuladas);
-    }
-  }
-}
-
-/** Crea las líneas de un reporte + su mano de obra automática + su alimentación a Uso Diario — compartido entre crear y editar (mismo patrón que Aplicaciones 9.7). */
 async function crearLineasYNomina(
   tx: TransactionClient,
   realizadaId: string,
   huertaId: string,
   actividadId: string,
-  cuadroIdUnico: string | undefined,
   fecha: Date,
+  hectareasReporte: number,
   lineas: LineaActividadInput[],
+  reparto: ReturnType<typeof calcularRepartoAvance<string>>,
   tarifaAplicada: number,
   registradoPorId: string
 ) {
-  // Switch de comunicación por módulo (20-ago-2026): con "actividades"
-  // apagado, el reporte de avance se sigue guardando igual (Cuadros,
-  // líneas, quién y cuántas horas) — solo se detienen las cascadas hacia
-  // Nómina y Uso Diario de Equipos. La mano de obra y el uso de tractor
-  // quedan abiertos para capturarse a mano en esos módulos, con la misma
-  // estructura de siempre.
   const cascadaActiva = await comunicacionActiva("actividades");
 
   async function pagar(personalId: string, horas: number) {
-    if (!cascadaActiva) return;
-    await tx.registroNomina.create({
-      data: {
-        fecha,
-        huertaId,
-        cuadroId: cuadroIdUnico,
-        personalId,
-        actividadId,
-        cantidad: horas,
-        tarifaAplicada,
-        origen: "automatico_actividad",
-        referenciaOrigenId: realizadaId,
-        capturadoPorId: registradoPorId,
-      },
-    });
+    if (!cascadaActiva || horas <= 0.0001) return;
+    const horasPorMiembro = repartirMontoPorHectareas(reparto.porMiembro, hectareasReporte, horas);
+    for (const hm of horasPorMiembro) {
+      if (hm.monto <= 0.0001) continue;
+      const { cuadroId } = parseClaveMiembro(hm.clave);
+      await tx.registroNomina.create({
+        data: {
+          fecha,
+          huertaId,
+          cuadroId,
+          personalId,
+          actividadId,
+          cantidad: hm.monto,
+          tarifaAplicada,
+          origen: "automatico_actividad",
+          referenciaOrigenId: realizadaId,
+          capturadoPorId: registradoPorId,
+        },
+      });
+    }
   }
 
   for (const l of lineas) {
@@ -382,26 +406,26 @@ async function crearLineasYNomina(
 }
 
 /**
- * Paso 2, Registrar avance (9.4) — mismo patrón que Aplicaciones (9.7): cada
- * reporte captura qué Cuadro(s) se avanzaron y cuántas hectáreas de cada
- * uno, más quién trabajó y cuántas horas cada uno. Genera mano de obra
- * automática en Nómina (origen=automatico_actividad); a diferencia de
- * Aplicaciones, no hay Almacén Local que descontar — esta actividad no
- * consume insumo.
+ * Paso 2, Registrar avance (9.4, V1 P2 25-sep-2026): ya no indica Cuadro/
+ * Variedad — solo hectáreas totales del reporte. Se reparte a Cuadros/
+ * Variedades en proporción a lo programado y se GUARDA calculado (nunca se
+ * recalcula después). Genera mano de obra automática en Nómina; a
+ * diferencia de Aplicaciones, no hay Almacén Local que descontar.
  */
 export async function registrarAvanceActividad(actividadProgramadaId: string, input: RegistrarAvanceActividadInput, registradoPorId: string) {
-  if (!input.cuadros || input.cuadros.length === 0) throw new Error("Falta capturar qué Cuadro(s) se avanzaron y sus hectáreas en este reporte.");
+  if (!input.hectareas || input.hectareas <= 0) throw new Error("Captura las hectáreas avanzadas en este reporte.");
 
   const programada = await prisma.actividadProgramada.findUniqueOrThrow({
     where: { id: actividadProgramadaId },
-    include: { cuadros: true, actividad: true },
+    include: { cuadros: true, variedades: true, actividad: true, realizadas: { select: { hectareas: true } } },
   });
   validarLineasActividad(input.lineas, programada.actividad.tipoRecurso);
-  const cuadroIdsProgramados = new Set(programada.cuadros.map((c) => c.cuadroId));
-  for (const c of input.cuadros) {
-    if (!cuadroIdsProgramados.has(c.cuadroId)) throw new Error("Uno de los Cuadros reportados no forma parte de esta actividad.");
+
+  const yaReportadas = programada.realizadas.reduce((s, r) => s + Number(r.hectareas), 0);
+  const totalConEste = yaReportadas + input.hectareas;
+  if (totalConEste > Number(programada.hectareasTotalesProgramadas) + 0.0001) {
+    throw new SuperficieExcedeProgramadoError(Number(programada.hectareasTotalesProgramadas), totalConEste);
   }
-  await validarCandadoCuadrosReporte(actividadProgramadaId, input.cuadros);
 
   if ((await diaEstaCerrado(programada.huertaId, input.fechaReal)) && !input.casoExtraordinario) {
     throw new DiaCerradoRequiereCasoExtraordinarioActividadError();
@@ -409,24 +433,26 @@ export async function registrarAvanceActividad(actividadProgramadaId: string, in
 
   const config = await obtenerConfigNomina();
   const tarifaAplicada = tarifaEfectiva(aActividadCalc(programada.actividad), config.tarifaGeneralHora);
-  const cuadroIdUnico = input.cuadros.length === 1 ? input.cuadros[0]!.cuadroId : undefined;
   const fecha = new Date(input.fechaReal);
+  const reparto = calcularRepartoAvance(gruposParaReparto(programada), input.hectareas);
 
   return prisma.$transaction(async (tx) => {
     const realizada = await tx.actividadRealizada.create({
-      data: {
-        actividadProgramadaId,
-        fechaReal: fecha,
-        registradoPorId,
-        comentario: input.comentario,
-        cuadros: { create: input.cuadros.map((c) => ({ cuadroId: c.cuadroId, hectareas: c.hectareas })) },
-      },
+      data: { actividadProgramadaId, fechaReal: fecha, registradoPorId, comentario: input.comentario, hectareas: input.hectareas },
     });
 
-    await crearLineasYNomina(tx, realizada.id, programada.huertaId, programada.actividadId, cuadroIdUnico, fecha, input.lineas, tarifaAplicada, registradoPorId);
+    await tx.actividadRealizadaCuadro.createMany({
+      data: reparto.porMiembro.map((m) => {
+        const { cuadroId, variedad } = parseClaveMiembro(m.clave);
+        return { realizadaId: realizada.id, cuadroId, variedad, hectareasAtribuidas: m.hectareasAtribuidas };
+      }),
+    });
+
+    await crearLineasYNomina(tx, realizada.id, programada.huertaId, programada.actividadId, fecha, input.hectareas, input.lineas, reparto, tarifaAplicada, registradoPorId);
 
     if (programada.actividad.nombre === NOMBRE_ACTIVIDAD_SEGUNDA_CINTILLA) {
-      await aplicarSegundaCintillaTx(tx, input.cuadros.map((c) => c.cuadroId), input.fechaReal);
+      const cuadroIdsTocados = [...new Set(reparto.porMiembro.filter((m) => m.hectareasAtribuidas > 0.0001).map((m) => parseClaveMiembro(m.clave).cuadroId))];
+      await aplicarSegundaCintillaTx(tx, cuadroIdsTocados, input.fechaReal);
     }
 
     return tx.actividadRealizada.findUniqueOrThrow({
@@ -437,13 +463,11 @@ export async function registrarAvanceActividad(actividadProgramadaId: string, in
 }
 
 /**
- * "Tirar 2da Cintilla" (V1 P5, 21-sep-2026): al reportar su avance para
- * uno o varios Cuadros, cada Sección de Riego a la que pertenecen esos
- * Cuadros queda con "Líneas de cintilla" = 2 a partir de la fecha del
- * avance -- alimenta el mismo historial por fecha de la Sección, sin
- * captura manual aparte. Si a esa fecha ya estaba en 2, no abre versión
- * nueva; si ya hay una versión POSTERIOR a la fecha del avance (reporte
- * atrasado), no se toca para no pisar un dato más reciente.
+ * "Tirar 2da Cintilla" (V1 P5, 21-sep-2026 — pendiente moverla a Riego en
+ * otra prioridad; se mantiene funcionando aquí mientras tanto): al reportar
+ * avance, cada Sección de Riego a la que pertenecen los Cuadros TOCADOS
+ * (hectareasAtribuidas > 0 en el reparto) queda con "Líneas de cintilla" =
+ * 2 a partir de la fecha del avance.
  */
 export const NOMBRE_ACTIVIDAD_SEGUNDA_CINTILLA = "Tirar 2da Cintilla";
 
@@ -462,63 +486,59 @@ async function aplicarSegundaCintillaTx(tx: TransactionClient, cuadroIds: string
 }
 
 export interface EditarAvanceActividadInput {
-  cuadros: CuadroAvanceInput[];
+  hectareas: number;
   lineas: LineaActividadInput[];
   comentario?: string;
 }
 
 /**
- * Historial de reportes editable por separado (9.4) — sujeto al candado de
- * consistencia con Nómina (bloqueado si la Huerta/fecha del reporte ya
- * tiene el día cerrado) y al mismo candado de superficie por Cuadro.
- * Líneas, Uso Diario automático y mano de obra automática se reemplazan
- * completos (borrar y recrear) — mismo criterio que Aplicaciones (9.7).
+ * Historial de reportes editable por separado (9.4, V1 P2 25-sep-2026) —
+ * sujeto al candado de consistencia con Nómina y al mismo candado de
+ * superficie total. Líneas, Uso Diario y mano de obra automática, y el
+ * reparto guardado, se reemplazan completos.
  */
 export async function editarAvanceActividad(realizadaId: string, input: EditarAvanceActividadInput, editadoPorId: string) {
-  if (!input.cuadros || input.cuadros.length === 0) throw new Error("Falta capturar qué Cuadro(s) se avanzaron y sus hectáreas en este reporte.");
+  if (!input.hectareas || input.hectareas <= 0) throw new Error("Captura las hectáreas avanzadas en este reporte.");
 
   const realizada = await prisma.actividadRealizada.findUniqueOrThrow({
     where: { id: realizadaId },
-    include: { actividadProgramada: { include: { cuadros: true, actividad: true } }, lineas: true },
+    include: {
+      actividadProgramada: { include: { cuadros: true, variedades: true, actividad: true, realizadas: { select: { id: true, hectareas: true } } } },
+      lineas: true,
+    },
   });
   validarLineasActividad(input.lineas, realizada.actividadProgramada.actividad.tipoRecurso);
   const fechaISO = realizada.fechaReal.toISOString().slice(0, 10);
   if (await diaEstaCerrado(realizada.actividadProgramada.huertaId, fechaISO)) throw new DiaCerradoActividadError();
 
-  const cuadroIdsProgramados = new Set(realizada.actividadProgramada.cuadros.map((c) => c.cuadroId));
-  for (const c of input.cuadros) {
-    if (!cuadroIdsProgramados.has(c.cuadroId)) throw new Error("Uno de los Cuadros reportados no forma parte de esta actividad.");
+  const programada = realizada.actividadProgramada;
+  const yaReportadasOtros = programada.realizadas.filter((r) => r.id !== realizadaId).reduce((s, r) => s + Number(r.hectareas), 0);
+  const totalConEste = yaReportadasOtros + input.hectareas;
+  if (totalConEste > Number(programada.hectareasTotalesProgramadas) + 0.0001) {
+    throw new SuperficieExcedeProgramadoError(Number(programada.hectareasTotalesProgramadas), totalConEste);
   }
-  await validarCandadoCuadrosReporte(realizada.actividadProgramadaId, input.cuadros, realizadaId);
 
   const config = await obtenerConfigNomina();
-  const tarifaAplicada = tarifaEfectiva(aActividadCalc(realizada.actividadProgramada.actividad), config.tarifaGeneralHora);
-  const cuadroIdUnico = input.cuadros.length === 1 ? input.cuadros[0]!.cuadroId : undefined;
+  const tarifaAplicada = tarifaEfectiva(aActividadCalc(programada.actividad), config.tarifaGeneralHora);
   const lineaIdsAnteriores = realizada.lineas.map((l) => l.id);
+  const reparto = calcularRepartoAvance(gruposParaReparto(programada), input.hectareas);
 
   return prisma.$transaction(async (tx) => {
     await tx.actividadRealizadaCuadro.deleteMany({ where: { realizadaId } });
     await tx.actividadRealizadaCuadro.createMany({
-      data: input.cuadros.map((c) => ({ realizadaId, cuadroId: c.cuadroId, hectareas: c.hectareas })),
+      data: reparto.porMiembro.map((m) => {
+        const { cuadroId, variedad } = parseClaveMiembro(m.clave);
+        return { realizadaId, cuadroId, variedad, hectareasAtribuidas: m.hectareasAtribuidas };
+      }),
     });
-    await tx.actividadRealizada.update({ where: { id: realizadaId }, data: { comentario: input.comentario } });
+    await tx.actividadRealizada.update({ where: { id: realizadaId }, data: { comentario: input.comentario, hectareas: input.hectareas } });
 
     await borrarUsoDiarioDeLineasTx(tx, lineaIdsAnteriores);
     await tx.registroNomina.deleteMany({ where: { origen: "automatico_actividad", referenciaOrigenId: realizadaId } });
     await tx.actividadRealizadaLineaPersona.deleteMany({ where: { lineaId: { in: lineaIdsAnteriores } } });
     await tx.actividadRealizadaLinea.deleteMany({ where: { realizadaId } });
 
-    await crearLineasYNomina(
-      tx,
-      realizadaId,
-      realizada.actividadProgramada.huertaId,
-      realizada.actividadProgramada.actividadId,
-      cuadroIdUnico,
-      realizada.fechaReal,
-      input.lineas,
-      tarifaAplicada,
-      editadoPorId
-    );
+    await crearLineasYNomina(tx, realizadaId, programada.huertaId, programada.actividadId, realizada.fechaReal, input.hectareas, input.lineas, reparto, tarifaAplicada, editadoPorId);
 
     return tx.actividadRealizada.findUniqueOrThrow({
       where: { id: realizadaId },

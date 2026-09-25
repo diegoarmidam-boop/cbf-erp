@@ -91,14 +91,24 @@ const productoGranularSchema = z.object({
   dosisValor: z.number().positive(),
 });
 
+const grupoCuadroSchema = z.object({ cuadroId: z.string().min(1), hectareas: z.number().positive() });
+const grupoVariedadSchema = z.object({ cuadroId: z.string().min(1), variedad: z.string().min(1) });
+
+const grupoGranularSchema = z.object({
+  cuadros: z.array(grupoCuadroSchema).optional(),
+  variedades: z.array(grupoVariedadSchema).optional(),
+  productos: z.array(productoGranularSchema).min(1),
+});
+
 const programarSchema = z.object({
   huertaId: z.string().min(1),
-  cuadroIds: z.array(z.string().min(1)).min(1),
-  productos: z.array(productoGranularSchema).min(1),
+  modo: z.enum(["por_cuadro", "por_variedad"]),
+  grupos: z.array(grupoGranularSchema).min(1),
   recursoTipo: z.enum(["gente", "implemento"]),
   equipoId: z.string().optional(),
   fechaInicio: z.string(),
   fechaFin: z.string(),
+  comentario: z.string().optional(),
 });
 
 granularRouter.post("/", requirePermission("fertilizantes", "capturar"), async (req, res) => {
@@ -169,14 +179,12 @@ granularRouter.post("/:id/entregar", requirePermissionAny(["almacen", "capturar"
   }
 });
 
-const cuadroAvanceSchema = z.object({ cuadroId: z.string().min(1), hectareas: z.number().positive() });
-
 const realizadaSchema = z.object({
   personalId: z.string().optional(),
-  grupoId: z.string().optional(),
+  grupoPagoId: z.string().optional(),
   horas: z.number().positive(),
   fechaReal: z.string(),
-  cuadros: z.array(cuadroAvanceSchema).min(1),
+  hectareas: z.number().positive(),
   comentario: z.string().optional(),
 });
 
@@ -224,9 +232,9 @@ granularRouter.post("/:id/realizada", requirePermissionAny(["fertilizantes", "ca
 
 const editarRealizadaSchema = z.object({
   personalId: z.string().optional(),
-  grupoId: z.string().optional(),
+  grupoPagoId: z.string().optional(),
   horas: z.number().positive(),
-  cuadros: z.array(cuadroAvanceSchema).min(1),
+  hectareas: z.number().positive(),
   comentario: z.string().optional(),
 });
 
@@ -270,11 +278,19 @@ granularRouter.post("/:id/liberar", requirePermission("fertilizantes", "capturar
   }
 });
 
-// Protocolo de cancelación de fertilización entregada y vencida a 15 días — solo Director/Gerente Técnico.
+// Protocolo de cancelación de fertilización entregada y vencida a 15 días —
+// solo Director/Gerente Técnico, con nota obligatoria (V1 P2).
+const cancelarSchema = z.object({ nota: z.string().min(1, "La nota es obligatoria para cerrar por debajo de 100%.") });
+
 granularRouter.post("/:id/cancelar", requirePermission("fertilizantes", "capturar"), async (req, res) => {
   if (!verificarRol(req, res, ROLES_CANCELAR)) return;
+  const parsed = cancelarSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
+    return;
+  }
   try {
-    const fertilizacion = await cancelarGranularEntregada(unoSolo(req.params.id), req.usuario!.usuarioId);
+    const fertilizacion = await cancelarGranularEntregada(unoSolo(req.params.id), req.usuario!.usuarioId, parsed.data.nota);
     res.json(fertilizacion);
   } catch (err) {
     if (err instanceof NoSePuedeCancelarError) {

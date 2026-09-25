@@ -204,13 +204,15 @@ model Cuadro {
   cicloVariedades                       CicloVariedad[]
   seccionRiegoCuadros                   SeccionRiegoCuadro[]
   registrosNomina                       RegistroNomina[]
-  actividadProgramadaCuadros            ActividadProgramadaCuadro[]
-  actividadRealizadaCuadros             ActividadRealizadaCuadro[]
+  actividadProgramadaCuadros             ActividadProgramadaCuadro[]
+  actividadProgramadaVariedades          ActividadProgramadaVariedad[]
+  actividadRealizadaCuadros              ActividadRealizadaCuadro[]
   aplicacionGrupoCuadros                 AplicacionGrupoCuadro[]
   aplicacionGrupoVariedades              AplicacionGrupoVariedad[]
   aplicacionRealizadaGrupoCuadros        AplicacionRealizadaGrupoCuadro[]
-  fertilizacionGranularCuadros          FertilizacionGranularCuadro[]
-  fertilizacionGranularRealizadaCuadros FertilizacionGranularRealizadaCuadro[]
+  fertilizacionGranularGrupoCuadros          FertilizacionGranularGrupoCuadro[]
+  fertilizacionGranularGrupoVariedades       FertilizacionGranularGrupoVariedad[]
+  fertilizacionGranularRealizadaGrupoCuadros FertilizacionGranularRealizadaGrupoCuadro[]
   viveroTraspasos                        ViveroTraspaso[]
 
   @@unique([huertaId, nombre])
@@ -1506,12 +1508,18 @@ model ZonaFlete {
 // Paso 1, Programar (9.4): Huerta, Cuadro(s), actividad del catálogo, rango
 // de fechas — sin gate de Almacén (no hay insumo que entregar), así que se
 // puede reportar avance desde que se programa, sin paso de "entrega".
+// Programar (V1 P2, 25-sep-2026, Bloque 3, 9.4): Huerta + modo (Por Cuadro
+// o Por Variedad, sin mezclar) — SIN Grupos (a diferencia de Aplicaciones/
+// Granular, regla explícita: "Grupos de dosis solo en Aplicaciones y
+// Granular"). hectareasTotalesProgramadas sigue siendo la suma estable.
 model ActividadProgramada {
   id                          String    @id @default(uuid())
   huertaId                    String
   huerta                      Huerta    @relation(fields: [huertaId], references: [id])
   actividadId                 String
   actividad                   Actividad @relation(fields: [actividadId], references: [id])
+  modo                        ModoProgramacionCuadro @default(por_cuadro)
+  comentario                  String?   @db.Text
   fechaInicio                 DateTime  @db.Date
   fechaFin                    DateTime  @db.Date
   hectareasTotalesProgramadas Decimal   @db.Decimal(10, 4)
@@ -1519,29 +1527,54 @@ model ActividadProgramada {
   fechaCreacion               DateTime  @default(now())
 
   cuadros    ActividadProgramadaCuadro[]
+  variedades ActividadProgramadaVariedad[]
   realizadas ActividadRealizada[]
 }
 
+// Miembro en modo "por Cuadro" — hectareas puede ser menor a la superficie
+// total del Cuadro (V1 P2, misma regla que Aplicaciones/Granular).
 model ActividadProgramadaCuadro {
+  id                    String              @id @default(uuid())
   actividadProgramadaId String
   actividadProgramada   ActividadProgramada @relation(fields: [actividadProgramadaId], references: [id])
   cuadroId              String
   cuadro                Cuadro              @relation(fields: [cuadroId], references: [id])
+  hectareas             Decimal             @db.Decimal(10, 4)
 
-  @@id([actividadProgramadaId, cuadroId])
+  @@unique([actividadProgramadaId, cuadroId])
+  @@index([cuadroId])
 }
 
-// Paso 2, Registrar avance (9.4): por reporte, Cuadro(s) trabajados con
-// hectáreas avanzadas de cada uno (candado de suma acumulada por Cuadro,
-// igual que Aplicaciones) + personas con sus horas — genera mano de obra
-// automática en Nómina (origen=automatico_actividad). Sin líneas de
-// maquinaria: ninguna de las 7 actividades del alcance inicial la necesita.
+// Miembro en modo "por Variedad" — toma toda la superficie de esa variedad
+// según la composición varietal del Ciclo, foto fija al programar.
+model ActividadProgramadaVariedad {
+  id                    String              @id @default(uuid())
+  actividadProgramadaId String
+  actividadProgramada   ActividadProgramada @relation(fields: [actividadProgramadaId], references: [id])
+  cuadroId              String
+  cuadro                Cuadro              @relation(fields: [cuadroId], references: [id])
+  variedad              String
+  hectareas             Decimal             @db.Decimal(10, 4)
+
+  @@unique([actividadProgramadaId, cuadroId, variedad])
+  @@index([cuadroId])
+}
+
+// Paso 2, Registrar avance (9.4, V1 P2 25-sep-2026): ya NO indica Cuadro/
+// Variedad — solo hectáreas totales del reporte; el sistema reparte a
+// Cuadros/Variedades en proporción a lo programado y GUARDA ese reparto
+// calculado (ActividadRealizadaCuadro pasa a ser el resultado, no la
+// captura) — nunca se recalculan reportes anteriores. + personas con sus
+// horas, repartidas igual — genera mano de obra automática en Nómina
+// (origen=automatico_actividad). Sin líneas de maquinaria: ninguna de las
+// 7 actividades del alcance inicial la necesita.
 model ActividadRealizada {
   id                    String              @id @default(uuid())
   actividadProgramadaId String
   actividadProgramada   ActividadProgramada @relation(fields: [actividadProgramadaId], references: [id])
   fechaReal             DateTime            @db.Date
   registradoPorId       String
+  hectareas             Decimal             @db.Decimal(10, 4)
   // Comentario libre por reporte (8-sep-2026) — nunca obligatorio, lo
   // captura quien reporta el avance. Editable junto con el resto del
   // reporte (mismo endpoint de editar).
@@ -1589,13 +1622,17 @@ model ActividadRealizadaLineaPersona {
   @@id([lineaId, personalId])
 }
 
+// V1 P2, 25-sep-2026: ya no es lo que el usuario capturó, es el reparto
+// CALCULADO por el sistema (hectareasAtribuidas) a partir de las hectáreas
+// totales del reporte, en proporción a lo programado en cada Cuadro/Variedad.
 model ActividadRealizadaCuadro {
-  id          String             @id @default(uuid())
-  realizadaId String
-  realizada   ActividadRealizada @relation(fields: [realizadaId], references: [id])
-  cuadroId    String
-  cuadro      Cuadro             @relation(fields: [cuadroId], references: [id])
-  hectareas   Decimal            @db.Decimal(10, 4)
+  id                  String             @id @default(uuid())
+  realizadaId         String
+  realizada           ActividadRealizada @relation(fields: [realizadaId], references: [id])
+  cuadroId            String
+  cuadro              Cuadro             @relation(fields: [cuadroId], references: [id])
+  variedad            String?
+  hectareasAtribuidas Decimal            @db.Decimal(10, 4)
 
   @@index([realizadaId])
   @@index([cuadroId])
@@ -1925,13 +1962,19 @@ enum ModoDosisGranular {
 }
 
 // Mismo patrón de dos pasos que Aplicaciones (Programar → Registrar realizada).
+// Programar (V1 P2, 25-sep-2026, Bloque 3, 9.5): mismo modelo de Grupos que
+// Aplicaciones, adaptado a que aquí NO hay "litros de mezcla" compartido —
+// cada Grupo solo agrupa Cuadros/Variedades, cada producto conserva su
+// propia dosis (kg/ha o g/planta) dentro del Grupo.
 model FertilizacionGranular {
   id                          String           @id @default(uuid())
   huertaId                    String
   huerta                      Huerta           @relation(fields: [huertaId], references: [id])
+  modo                        ModoProgramacionCuadro @default(por_cuadro)
   recursoTipo                 RecursoTipo
   equipoId                    String?
   equipo                      Equipo?          @relation(fields: [equipoId], references: [id])
+  comentario                  String?          @db.Text
   fechaInicio                 DateTime         @db.Date
   fechaFin                    DateTime         @db.Date
   hectareasTotalesProgramadas Decimal          @db.Decimal(10, 4)
@@ -1940,68 +1983,126 @@ model FertilizacionGranular {
   fechaCreacion               DateTime         @default(now())
   canceladaPorId              String?
   fechaCancelacion            DateTime?
+  notaCierre                  String?          @db.Text
   confirmacionBodegaPorId     String?
   fechaConfirmacionBodega     DateTime?
 
-  productos  FertilizacionGranularProducto[]
-  cuadros    FertilizacionGranularCuadro[]
+  grupos     FertilizacionGranularGrupo[]
   realizadas FertilizacionGranularRealizada[]
+  // Denormalizado desde FertilizacionGranularProducto.fertilizacionId.
+  productosDenormalizado FertilizacionGranularProducto[]
 }
 
-// Varios productos en la misma fertilización granular (10-ago-2026, 9.5):
-// se pueden revolver varios productos en polvo antes de esparcir. A
-// diferencia de Aplicaciones, aquí no hay "litros de mezcla" compartido —
-// cada producto conserva su propia dosis (kg/ha o g/planta), calculada de
-// forma completamente independiente.
-model FertilizacionGranularProducto {
-  id                     String                @id @default(uuid())
-  fertilizacionId        String
-  fertilizacion          FertilizacionGranular @relation(fields: [fertilizacionId], references: [id])
-  productoId             String
-  producto               Producto              @relation(fields: [productoId], references: [id])
-  modoDosis              ModoDosisGranular
-  dosisValor             Decimal               @db.Decimal(10, 4)
-  cantidadTotalCalculada Decimal               @db.Decimal(12, 4)
+// Grupo (V1 P2): sus propios Cuadros (por_cuadro) o Cuadro+Variedad
+// (por_variedad), con hectáreas Y plantas programadas propias (plantas
+// solo se usa si algún producto del Grupo dosifica g/planta).
+model FertilizacionGranularGrupo {
+  id                   String @id @default(uuid())
+  fertilizacionId      String
+  fertilizacion        FertilizacionGranular @relation(fields: [fertilizacionId], references: [id])
+  orden                Int
+  hectareasProgramadas Decimal @db.Decimal(10, 4)
+  plantasProgramadas   Decimal? @db.Decimal(14, 2)
 
+  cuadros    FertilizacionGranularGrupoCuadro[]
+  variedades FertilizacionGranularGrupoVariedad[]
+  productos  FertilizacionGranularProducto[]
+  realizados FertilizacionGranularRealizadaGrupo[]
+
+  @@index([fertilizacionId])
+}
+
+model FertilizacionGranularGrupoCuadro {
+  id        String                     @id @default(uuid())
+  grupoId   String
+  grupo     FertilizacionGranularGrupo @relation(fields: [grupoId], references: [id])
+  cuadroId  String
+  cuadro    Cuadro                     @relation(fields: [cuadroId], references: [id])
+  hectareas Decimal                    @db.Decimal(10, 4)
+
+  @@unique([grupoId, cuadroId])
+  @@index([cuadroId])
+}
+
+model FertilizacionGranularGrupoVariedad {
+  id        String                     @id @default(uuid())
+  grupoId   String
+  grupo     FertilizacionGranularGrupo @relation(fields: [grupoId], references: [id])
+  cuadroId  String
+  cuadro    Cuadro                     @relation(fields: [cuadroId], references: [id])
+  variedad  String
+  hectareas Decimal                    @db.Decimal(10, 4)
+
+  @@unique([grupoId, cuadroId, variedad])
+  @@index([cuadroId])
+}
+
+// Varios productos en el mismo Grupo (10-ago-2026, 9.5, movido a Grupo en
+// V1 P2): cada uno conserva su propia dosis (kg/ha o g/planta), calculada
+// de forma independiente. `fertilizacionId` denormalizado para el
+// compromiso/compra automática a nivel Almacén Central.
+model FertilizacionGranularProducto {
+  id                     String                     @id @default(uuid())
+  grupoId                String
+  grupo                  FertilizacionGranularGrupo @relation(fields: [grupoId], references: [id])
+  fertilizacionId        String
+  fertilizacion          FertilizacionGranular      @relation(fields: [fertilizacionId], references: [id])
+  productoId             String
+  producto               Producto                   @relation(fields: [productoId], references: [id])
+  modoDosis              ModoDosisGranular
+  dosisValor             Decimal                    @db.Decimal(10, 4)
+  cantidadTotalCalculada Decimal                    @db.Decimal(12, 4)
+
+  @@index([grupoId])
   @@index([fertilizacionId])
   @@index([productoId])
 }
 
-model FertilizacionGranularCuadro {
-  fertilizacionId String
-  fertilizacion   FertilizacionGranular @relation(fields: [fertilizacionId], references: [id])
-  cuadroId        String
-  cuadro          Cuadro                @relation(fields: [cuadroId], references: [id])
-
-  @@id([fertilizacionId, cuadroId])
-}
-
+// Avance (V1 P2): solo hectáreas totales del reporte + quién (persona o
+// Grupo de pago) + horas — se reparte a Grupos y de ahí a Cuadros/Variedades
+// en proporción a lo programado, y se GUARDA calculado (nunca se recalcula).
 model FertilizacionGranularRealizada {
   id              String                @id @default(uuid())
   fertilizacionId String
   fertilizacion   FertilizacionGranular @relation(fields: [fertilizacionId], references: [id])
   personalId      String?
-  grupoId         String?
+  grupoPagoId     String?
   horas           Decimal               @db.Decimal(6, 2)
+  hectareas       Decimal               @db.Decimal(10, 4)
   fechaReal       DateTime              @db.Date
   registradoPorId String
   // Comentario libre por reporte (8-sep-2026) — ver ActividadRealizada.comentario.
   comentario      String?               @db.Text
 
-  cuadros FertilizacionGranularRealizadaCuadro[]
+  grupos FertilizacionGranularRealizadaGrupo[]
 
   @@index([fertilizacionId])
 }
 
-model FertilizacionGranularRealizadaCuadro {
-  id          String                         @id @default(uuid())
-  realizadaId String
-  realizada   FertilizacionGranularRealizada @relation(fields: [realizadaId], references: [id])
-  cuadroId    String
-  cuadro      Cuadro                         @relation(fields: [cuadroId], references: [id])
-  hectareas   Decimal                        @db.Decimal(10, 4)
+model FertilizacionGranularRealizadaGrupo {
+  id                  String                         @id @default(uuid())
+  realizadaId         String
+  realizada           FertilizacionGranularRealizada @relation(fields: [realizadaId], references: [id])
+  grupoId             String
+  grupo               FertilizacionGranularGrupo     @relation(fields: [grupoId], references: [id])
+  hectareasAtribuidas Decimal                        @db.Decimal(10, 4)
+
+  cuadros FertilizacionGranularRealizadaGrupoCuadro[]
 
   @@index([realizadaId])
+  @@index([grupoId])
+}
+
+model FertilizacionGranularRealizadaGrupoCuadro {
+  id                  String                              @id @default(uuid())
+  realizadaGrupoId    String
+  realizadaGrupo      FertilizacionGranularRealizadaGrupo @relation(fields: [realizadaGrupoId], references: [id])
+  cuadroId            String
+  cuadro              Cuadro                              @relation(fields: [cuadroId], references: [id])
+  variedad            String?
+  hectareasAtribuidas Decimal                             @db.Decimal(10, 4)
+
+  @@index([realizadaGrupoId])
   @@index([cuadroId])
 }
 

@@ -118,13 +118,13 @@ export default function Actividades() {
   // ---- Registrar avance ----
   const [registrando, setRegistrando] = useState<string | null>(null);
   const [fechaReal, setFechaReal] = useState(hoyISO());
-  const [avanceCuadros, setAvanceCuadros] = useState<Record<string, string>>({});
+  const [avanceHectareas, setAvanceHectareas] = useState("");
   const [lineas, setLineas] = useState<LineaForm[]>([lineaVacia("gente")]);
   const [comentario, setComentario] = useState("");
 
   // ---- Editar reporte existente ----
   const [editando, setEditando] = useState<string | null>(null);
-  const [editAvanceCuadros, setEditAvanceCuadros] = useState<Record<string, string>>({});
+  const [editAvanceHectareas, setEditAvanceHectareas] = useState("");
   const [editLineas, setEditLineas] = useState<LineaForm[]>([]);
   const [editComentario, setEditComentario] = useState("");
 
@@ -163,11 +163,18 @@ export default function Actividades() {
     setCuadroIds((prev) => (prev.length === cuadrosHuerta.length ? [] : cuadrosHuerta.map((c) => c.id)));
   }
 
+  // V1 P2 (25-sep-2026, Bloque 3): esta pantalla todavía programa por
+  // Cuadro a su superficie completa (modo Por Variedad no tiene UI todavía).
   async function programar(e: FormEvent) {
     e.preventDefault();
     setError(null);
+    const cuadros = cuadroIds.map((cuadroId) => {
+      const cuadro = cuadrosHuerta.find((c) => c.id === cuadroId);
+      const vigente = cuadro?.versiones.find((v) => v.vigenteHasta == null) ?? cuadro?.versiones[0];
+      return { cuadroId, hectareas: Number(vigente?.hectareas ?? 0) };
+    });
     try {
-      await api.post("/actividades", { huertaId, cuadroIds, actividadId, fechaInicio, fechaFin });
+      await api.post("/actividades", { huertaId, modo: "por_cuadro", cuadros, actividadId, fechaInicio, fechaFin });
       setMostrarForm(false);
       setCuadroIds([]);
       setActividadId("");
@@ -187,39 +194,16 @@ export default function Actividades() {
   function abrirRegistrar(a: ActividadProgramada) {
     setRegistrando(a.id);
     setFechaReal(hoyISO());
-    setAvanceCuadros({});
+    setAvanceHectareas("");
     setComentario("");
     const ultimo = a.realizadas[0];
     setLineas(ultimo ? lineasDesdeExistentes(ultimo.lineas) : [lineaVacia(a.actividad.tipoRecurso === "mixta" ? "gente" : a.actividad.tipoRecurso)]);
   }
 
-  function cuadrosDesdeMapa(mapa: Record<string, string>, restantes: Record<string, number> | undefined): { cuadroId: string; hectareas: number }[] {
-    return Object.entries(mapa)
-      .filter(([, hectareas]) => hectareas !== undefined)
-      .map(([cuadroId, hectareas]) => ({
-        cuadroId,
-        hectareas: hectareas === "" ? restantes?.[cuadroId] ?? 0 : Number(hectareas),
-      }))
-      .filter((c) => c.hectareas > 0);
-  }
-
-  function resumenConfirmacion(a: ActividadProgramada, mapa: Record<string, string>): string {
-    const lineasResumen = Object.entries(mapa)
-      .filter(([, hectareas]) => hectareas === "")
-      .map(([cuadroId]) => {
-        const nombre = a.cuadros.find((c) => c.cuadro.id === cuadroId)?.cuadro.nombre ?? cuadroId;
-        const ha = a.restantesPorCuadro?.[cuadroId] ?? 0;
-        return `${nombre}: se marca completo (${ha.toFixed(2)} ha)`;
-      });
-    if (lineasResumen.length === 0) return "";
-    return `Vas a dar por completados estos Cuadros:\n\n${lineasResumen.join("\n")}\n\n¿Confirmar?`;
-  }
-
   async function confirmarRegistrar(a: ActividadProgramada) {
     setError(null);
-    const cuadros = cuadrosDesdeMapa(avanceCuadros, a.restantesPorCuadro);
-    if (cuadros.length === 0) {
-      setError("Falta capturar qué Cuadro(s) se avanzaron y sus hectáreas en este reporte.");
+    if (!avanceHectareas || Number(avanceHectareas) <= 0) {
+      setError("Captura las hectáreas avanzadas en este reporte.");
       return;
     }
     const errorLineas = validarLineasForm(lineas, a.actividad.tipoRecurso);
@@ -227,11 +211,14 @@ export default function Actividades() {
       setError(errorLineas);
       return;
     }
-    const resumen = resumenConfirmacion(a, avanceCuadros);
-    if (resumen && !confirm(resumen)) return;
 
     try {
-      await api.post(`/actividades/${a.id}/avance`, { fechaReal, cuadros, lineas: lineasParaEnviar(lineas), comentario: comentario.trim() || undefined });
+      await api.post(`/actividades/${a.id}/avance`, {
+        fechaReal,
+        hectareas: Number(avanceHectareas),
+        lineas: lineasParaEnviar(lineas),
+        comentario: comentario.trim() || undefined,
+      });
       setRegistrando(null);
       cargar();
     } catch (err) {
@@ -241,18 +228,15 @@ export default function Actividades() {
 
   function abrirEditar(r: ActividadProgramada["realizadas"][number]) {
     setEditando(r.id);
-    const mapa: Record<string, string> = {};
-    for (const c of r.cuadros) mapa[c.cuadroId] = c.hectareas;
-    setEditAvanceCuadros(mapa);
+    setEditAvanceHectareas(r.hectareas);
     setEditLineas(lineasDesdeExistentes(r.lineas));
     setEditComentario(r.comentario ?? "");
   }
 
   async function confirmarEditar(a: ActividadProgramada, realizadaId: string) {
     setError(null);
-    const cuadros = cuadrosDesdeMapa(editAvanceCuadros, a.restantesPorCuadro);
-    if (cuadros.length === 0) {
-      setError("Falta capturar qué Cuadro(s) se avanzaron y sus hectáreas en este reporte.");
+    if (!editAvanceHectareas || Number(editAvanceHectareas) <= 0) {
+      setError("Captura las hectáreas avanzadas en este reporte.");
       return;
     }
     const errorLineas = validarLineasForm(editLineas, a.actividad.tipoRecurso);
@@ -261,7 +245,11 @@ export default function Actividades() {
       return;
     }
     try {
-      await api.patch(`/actividades/avance/${realizadaId}`, { cuadros, lineas: lineasParaEnviar(editLineas), comentario: editComentario.trim() || undefined });
+      await api.patch(`/actividades/avance/${realizadaId}`, {
+        hectareas: Number(editAvanceHectareas),
+        lineas: lineasParaEnviar(editLineas),
+        comentario: editComentario.trim() || undefined,
+      });
       setEditando(null);
       cargar();
     } catch (err) {
@@ -382,41 +370,12 @@ export default function Actividades() {
                     <FechaInput value={fechaReal} onChange={setFechaReal} />
                   </label>
 
-                  <div style={{ fontSize: 11.5, color: "var(--ink-soft)", marginBottom: 6 }}>
-                    ¿Qué Cuadro(s) se avanzaron en este reporte, y cuántas hectáreas de cada uno? (deja el número en blanco para marcarlo completo)
-                  </div>
-                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
-                    {a.cuadros.map(({ cuadro }) => {
-                      const restan = a.restantesPorCuadro?.[cuadro.id];
-                      return (
-                        <label key={cuadro.id} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5 }}>
-                          <input
-                            type="checkbox"
-                            checked={avanceCuadros[cuadro.id] !== undefined}
-                            onChange={(e) =>
-                              setAvanceCuadros((prev) => {
-                                const copia = { ...prev };
-                                if (e.target.checked) copia[cuadro.id] = "";
-                                else delete copia[cuadro.id];
-                                return copia;
-                              })
-                            }
-                          />
-                          {cuadro.nombre} {restan !== undefined && <span style={{ color: "var(--ink-soft)" }}>(quedan {restan.toFixed(2)} ha)</span>}
-                          {avanceCuadros[cuadro.id] !== undefined && (
-                            <input
-                              type="number"
-                              min={0}
-                              step="0.0001"
-                              placeholder={restan !== undefined ? `${restan.toFixed(2)} (completo)` : "ha"}
-                              style={{ width: 110 }}
-                              value={avanceCuadros[cuadro.id]}
-                              onChange={(e) => setAvanceCuadros((prev) => ({ ...prev, [cuadro.id]: e.target.value }))}
-                            />
-                          )}
-                        </label>
-                      );
-                    })}
+                  <label className="field" style={{ maxWidth: 220, marginBottom: 10 }}>
+                    Hectáreas avanzadas en este reporte
+                    <input type="number" min={0} step="0.0001" value={avanceHectareas} onChange={(e) => setAvanceHectareas(e.target.value)} />
+                  </label>
+                  <div style={{ fontSize: 11.5, color: "var(--ink-soft)", marginBottom: 10 }}>
+                    El sistema reparte automáticamente entre los Cuadros/Variedades, en proporción a lo programado.
                   </div>
 
                   <LineasActividadEditor
@@ -496,7 +455,10 @@ export default function Actividades() {
                                 </div>
                               )}
                             </td>
-                            <td>{r.cuadros.map((c) => `${c.cuadro.nombre} (${c.hectareas} ha)`).join(", ") || "—"}</td>
+                            <td>
+                              {formatearNumero(r.hectareas)} ha —{" "}
+                              {r.cuadros.map((c) => `${c.cuadro.nombre}${c.variedad ? ` (${c.variedad})` : ""}: ${formatearNumero(c.hectareasAtribuidas)} ha`).join(", ") || "—"}
+                            </td>
                             <td>{r.comentario || "—"}</td>
                             <td>
                               {editando !== r.id && (
@@ -509,39 +471,10 @@ export default function Actividades() {
                           {editando === r.id && (
                             <tr>
                               <td colSpan={5}>
-                                <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 8 }}>
-                                  {a.cuadros.map(({ cuadro }) => {
-                                    const restan = a.restantesPorCuadro?.[cuadro.id];
-                                    return (
-                                      <label key={cuadro.id} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5 }}>
-                                        <input
-                                          type="checkbox"
-                                          checked={editAvanceCuadros[cuadro.id] !== undefined}
-                                          onChange={(e) =>
-                                            setEditAvanceCuadros((prev) => {
-                                              const copia = { ...prev };
-                                              if (e.target.checked) copia[cuadro.id] = "";
-                                              else delete copia[cuadro.id];
-                                              return copia;
-                                            })
-                                          }
-                                        />
-                                        {cuadro.nombre} {restan !== undefined && <span style={{ color: "var(--ink-soft)" }}>(quedan {restan.toFixed(2)} ha)</span>}
-                                        {editAvanceCuadros[cuadro.id] !== undefined && (
-                                          <input
-                                            type="number"
-                                            min={0}
-                                            step="0.0001"
-                                            placeholder="ha"
-                                            style={{ width: 80 }}
-                                            value={editAvanceCuadros[cuadro.id]}
-                                            onChange={(e) => setEditAvanceCuadros((prev) => ({ ...prev, [cuadro.id]: e.target.value }))}
-                                          />
-                                        )}
-                                      </label>
-                                    );
-                                  })}
-                                </div>
+                                <label className="field" style={{ maxWidth: 220, marginBottom: 8 }}>
+                                  Hectáreas avanzadas
+                                  <input type="number" min={0} step="0.0001" value={editAvanceHectareas} onChange={(e) => setEditAvanceHectareas(e.target.value)} />
+                                </label>
 
                                 <LineasActividadEditor
                                   lineas={editLineas}

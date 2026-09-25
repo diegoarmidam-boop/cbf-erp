@@ -962,11 +962,13 @@ export interface EquipoUsoDiario {
 // Desde 15-ago-2026 sí maneja maquinaria (líneas de tractor/mixta/gente),
 // con horas por persona (no compartidas por línea, a diferencia de
 // Aplicaciones). ----
+// V1 P2 (25-sep-2026): reparto CALCULADO por el sistema, ya no capturado.
 export interface ActividadRealizadaCuadro {
   id: string;
   cuadroId: string;
   cuadro: Cuadro;
-  hectareas: string;
+  variedad: string | null;
+  hectareasAtribuidas: string;
 }
 
 export interface ActividadRealizadaLineaPersona {
@@ -994,8 +996,25 @@ export interface ActividadRealizada {
   fechaReal: string;
   registradoPorId: string;
   comentario: string | null;
+  hectareas: string;
   cuadros: ActividadRealizadaCuadro[];
   lineas: ActividadRealizadaLinea[];
+}
+
+// V1 P2 (25-sep-2026, Bloque 3): modo Por Cuadro/Por Variedad, sin Grupos.
+export interface ActividadProgramadaCuadro {
+  id: string;
+  cuadroId: string;
+  cuadro: Cuadro;
+  hectareas: string;
+}
+
+export interface ActividadProgramadaVariedad {
+  id: string;
+  cuadroId: string;
+  cuadro: Cuadro;
+  variedad: string;
+  hectareas: string;
 }
 
 export interface ActividadProgramada {
@@ -1004,18 +1023,21 @@ export interface ActividadProgramada {
   huerta: Huerta;
   actividadId: string;
   actividad: Actividad;
+  modo: ModoProgramacionCuadro;
+  comentario: string | null;
   fechaInicio: string;
   fechaFin: string;
   hectareasTotalesProgramadas: string;
   creadoPorId: string;
   fechaCreacion: string;
-  cuadros: { cuadro: Cuadro }[];
+  cuadros: ActividadProgramadaCuadro[];
+  variedades: ActividadProgramadaVariedad[];
   realizadas: ActividadRealizada[];
   hectareasAvanzadas?: number;
   horasHombreTotales?: number;
   porcentajeAvance?: number;
   costoTotal?: number;
-  restantesPorCuadro?: Record<string, number>;
+  restantesPorMiembro?: Record<string, number>;
 }
 
 export type RecursoTipo = "gente" | "implemento";
@@ -1207,18 +1229,8 @@ export interface Aplicacion {
 
 export type ModoDosisGranular = "kg_ha" | "g_planta";
 
-export interface FertilizacionGranularRealizada {
-  id: string;
-  fertilizacionId: string;
-  personalId: string | null;
-  grupoId: string | null;
-  horas: string;
-  fechaReal: string;
-  registradoPorId: string;
-  comentario: string | null;
-  cuadros: RealizadaCuadro[];
-}
-
+// V1 P2 (25-sep-2026, Bloque 3): Grupos, mismo modelo que Aplicaciones,
+// salvo que aquí no hay litros de mezcla compartidos.
 export interface FertilizacionGranularProducto {
   id: string;
   productoId: string;
@@ -1228,14 +1240,69 @@ export interface FertilizacionGranularProducto {
   cantidadTotalCalculada: string;
 }
 
+export interface FertilizacionGranularGrupoCuadro {
+  id: string;
+  cuadroId: string;
+  cuadro: Cuadro;
+  hectareas: string;
+}
+
+export interface FertilizacionGranularGrupoVariedad {
+  id: string;
+  cuadroId: string;
+  cuadro: Cuadro;
+  variedad: string;
+  hectareas: string;
+}
+
+export interface FertilizacionGranularGrupo {
+  id: string;
+  orden: number;
+  hectareasProgramadas: string;
+  plantasProgramadas: string | null;
+  cuadros: FertilizacionGranularGrupoCuadro[];
+  variedades: FertilizacionGranularGrupoVariedad[];
+  productos: FertilizacionGranularProducto[];
+}
+
+export interface FertilizacionGranularRealizadaGrupoCuadro {
+  id: string;
+  cuadroId: string;
+  cuadro: Cuadro;
+  variedad: string | null;
+  hectareasAtribuidas: string;
+}
+
+export interface FertilizacionGranularRealizadaGrupo {
+  id: string;
+  grupoId: string;
+  hectareasAtribuidas: string;
+  cuadros: FertilizacionGranularRealizadaGrupoCuadro[];
+}
+
+export interface FertilizacionGranularRealizada {
+  id: string;
+  fertilizacionId: string;
+  personalId: string | null;
+  grupoPagoId: string | null;
+  horas: string;
+  hectareas: string;
+  fechaReal: string;
+  registradoPorId: string;
+  comentario: string | null;
+  grupos: FertilizacionGranularRealizadaGrupo[];
+}
+
 export interface FertilizacionGranular {
   id: string;
   huertaId: string;
   huerta: Huerta;
-  productos: FertilizacionGranularProducto[];
+  modo: ModoProgramacionCuadro;
+  grupos: FertilizacionGranularGrupo[];
   recursoTipo: RecursoTipo;
   equipoId: string | null;
   equipo: Equipo | null;
+  comentario: string | null;
   fechaInicio: string;
   fechaFin: string;
   hectareasTotalesProgramadas: string;
@@ -1243,9 +1310,9 @@ export interface FertilizacionGranular {
   fechaCreacion: string;
   canceladaPorId: string | null;
   fechaCancelacion: string | null;
+  notaCierre: string | null;
   confirmacionBodegaPorId: string | null;
   fechaConfirmacionBodega: string | null;
-  cuadros: { cuadro: Cuadro }[];
   realizadas: FertilizacionGranularRealizada[];
   comprometido?: boolean;
   diasSinEntregar?: number | null;
@@ -1255,6 +1322,7 @@ export interface FertilizacionGranular {
   hectareasAvanzadas?: number;
   horasHombreTotales?: number;
   porcentajeAvance?: number;
+  restantesPorMiembro?: Record<string, number>;
 }
 
 export type FrecuenciaFertirriego = "diario" | "cada_2_dias" | "cada_3_dias" | "patron_2_1" | "dias_semana";

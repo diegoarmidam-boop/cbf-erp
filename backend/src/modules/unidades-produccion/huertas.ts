@@ -66,6 +66,10 @@ export async function eliminarHuertaCompleta(huertaId: string) {
     const fertilizacionRealizadaIds = (
       await tx.fertilizacionGranularRealizada.findMany({ where: { fertilizacionId: { in: fertilizacionIds } }, select: { id: true } })
     ).map((r) => r.id);
+    const fertilizacionGrupoIds = (await tx.fertilizacionGranularGrupo.findMany({ where: { fertilizacionId: { in: fertilizacionIds } }, select: { id: true } })).map((g) => g.id);
+    const fertilizacionRealizadaGrupoIds = (
+      await tx.fertilizacionGranularRealizadaGrupo.findMany({ where: { realizadaId: { in: fertilizacionRealizadaIds } }, select: { id: true } })
+    ).map((g) => g.id);
     const actividadRealizadaIds = (
       await tx.actividadRealizada.findMany({ where: { actividadProgramadaId: { in: actividadProgramadaIds } }, select: { id: true } })
     ).map((a) => a.id);
@@ -85,7 +89,8 @@ export async function eliminarHuertaCompleta(huertaId: string) {
     await tx.riegoRegistroDiario.deleteMany({ where: { id: { in: riegoIds } } });
     await tx.aplicacionRealizadaGrupoCuadro.deleteMany({ where: { realizadaGrupoId: { in: aplicacionRealizadaGrupoIds } } });
     await tx.aplicacionRealizadaGrupo.deleteMany({ where: { id: { in: aplicacionRealizadaGrupoIds } } });
-    await tx.fertilizacionGranularRealizadaCuadro.deleteMany({ where: { realizadaId: { in: fertilizacionRealizadaIds } } });
+    await tx.fertilizacionGranularRealizadaGrupoCuadro.deleteMany({ where: { realizadaGrupoId: { in: fertilizacionRealizadaGrupoIds } } });
+    await tx.fertilizacionGranularRealizadaGrupo.deleteMany({ where: { id: { in: fertilizacionRealizadaGrupoIds } } });
     await tx.actividadRealizadaCuadro.deleteMany({ where: { realizadaId: { in: actividadRealizadaIds } } });
 
     await tx.aplicacionRealizada.deleteMany({ where: { id: { in: aplicacionRealizadaIds } } });
@@ -108,10 +113,13 @@ export async function eliminarHuertaCompleta(huertaId: string) {
     await tx.aplicacionGrupoVariedad.deleteMany({ where: { grupoId: { in: aplicacionGrupoIds } } });
     await tx.aplicacionGrupo.deleteMany({ where: { id: { in: aplicacionGrupoIds } } });
     await tx.fertilizacionGranularProducto.deleteMany({ where: { fertilizacionId: { in: fertilizacionIds } } });
-    await tx.fertilizacionGranularCuadro.deleteMany({ where: { fertilizacionId: { in: fertilizacionIds } } });
+    await tx.fertilizacionGranularGrupoCuadro.deleteMany({ where: { grupoId: { in: fertilizacionGrupoIds } } });
+    await tx.fertilizacionGranularGrupoVariedad.deleteMany({ where: { grupoId: { in: fertilizacionGrupoIds } } });
+    await tx.fertilizacionGranularGrupo.deleteMany({ where: { id: { in: fertilizacionGrupoIds } } });
     await tx.fertirriegoProgramacionProducto.deleteMany({ where: { fertirriegoId: { in: fertirriegoIds } } });
     await tx.fertirriegoSeccion.deleteMany({ where: { fertirriegoId: { in: fertirriegoIds } } });
     await tx.actividadProgramadaCuadro.deleteMany({ where: { actividadProgramadaId: { in: actividadProgramadaIds } } });
+    await tx.actividadProgramadaVariedad.deleteMany({ where: { actividadProgramadaId: { in: actividadProgramadaIds } } });
 
     await tx.aplicacion.deleteMany({ where: { id: { in: aplicacionIds } } });
     await tx.fertilizacionGranular.deleteMany({ where: { id: { in: fertilizacionIds } } });
