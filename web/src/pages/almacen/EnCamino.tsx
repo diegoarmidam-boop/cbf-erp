@@ -32,6 +32,10 @@ export default function EnCamino() {
   const [fechaCaducidad, setFechaCaducidad] = useState("");
   const [productoRecibidoId, setProductoRecibidoId] = useState("");
   const [opcionesRecepcion, setOpcionesRecepcion] = useState<Producto[]>([]);
+  // Número de Lote de Almacén asignado por el sistema (V1 P1, 25-sep-2026,
+  // regla a) — consecutivo único de todo el Almacén Central, se muestra en
+  // grande para que el almacenista lo marque a mano en el producto físico.
+  const [loteAsignado, setLoteAsignado] = useState<{ productoNombre: string; numero: number } | null>(null);
 
   const totalRecibido = Number(presentacionCantidad || 0) * Number(numeroUnidades || 0);
 
@@ -59,10 +63,10 @@ export default function EnCamino() {
     setOpcionesRecepcion(opciones);
   }
 
-  async function confirmarRecibir(id: string) {
+  async function confirmarRecibir(id: string, productoNombre: string) {
     setError(null);
     try {
-      await api.post(`/compras/ordenes/${id}/recibir`, {
+      const resultado = await api.post<{ numeroLoteAsignado: number | null }>(`/compras/ordenes/${id}/recibir`, {
         contenedor,
         presentacionCantidad: Number(presentacionCantidad),
         numeroUnidades: Number(numeroUnidades),
@@ -71,6 +75,9 @@ export default function EnCamino() {
         productoRecibidoId,
       });
       setRecibiendo(null);
+      if (resultado.numeroLoteAsignado != null) {
+        setLoteAsignado({ productoNombre, numero: resultado.numeroLoteAsignado });
+      }
       cargar();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "No se pudo recibir.");
@@ -101,6 +108,22 @@ export default function EnCamino() {
       {error && (
         <div className="tag tag-danger" style={{ display: "block", padding: "8px 12px", marginBottom: 12 }}>
           {error}
+        </div>
+      )}
+
+      {loteAsignado && (
+        <div
+          className="card"
+          style={{ marginBottom: 14, textAlign: "center", padding: "20px 16px", border: "2px solid var(--pink, #c0396b)" }}
+        >
+          <div style={{ fontSize: 13, color: "var(--ink-soft)" }}>{loteAsignado.productoNombre}</div>
+          <div style={{ fontSize: 28, fontWeight: 800, margin: "6px 0" }}>Escribe LOTE {loteAsignado.numero}</div>
+          <div style={{ fontSize: 12.5, color: "var(--ink-soft)", marginBottom: 10 }}>
+            Marca este número a mano en el producto que acaba de llegar.
+          </div>
+          <button className="btn-secondary" onClick={() => setLoteAsignado(null)}>
+            Listo, ya lo marqué
+          </button>
         </div>
       )}
 
@@ -190,7 +213,7 @@ export default function EnCamino() {
                     {o.producto.requiereLote && (
                       <>
                         <label className="field">
-                          Lote
+                          Lote del proveedor (opcional)
                           <input value={lote} onChange={(e) => setLote(e.target.value)} />
                         </label>
                         <label className="field">
@@ -199,7 +222,7 @@ export default function EnCamino() {
                         </label>
                       </>
                     )}
-                    <button className="btn-primary" onClick={() => confirmarRecibir(o.id)}>
+                    <button className="btn-primary" onClick={() => confirmarRecibir(o.id, o.producto.nombreComercial)}>
                       Confirmar recepción
                     </button>
                     <button className="btn-secondary" onClick={() => setRecibiendo(null)}>

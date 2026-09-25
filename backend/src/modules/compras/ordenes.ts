@@ -878,7 +878,7 @@ export async function recibirOrden(
     // Misma transacción que el resto de la recepción — si algo falla
     // después, la entrada de inventario también se revierte. Siempre bajo
     // el producto que de verdad llegó, sea el pedido o un sustituto.
-    await registrarEntradaTx(tx, productoRecibidoId, cantidadRecibida, recibidoPorId, {
+    const loteCreado = await registrarEntradaTx(tx, productoRecibidoId, cantidadRecibida, recibidoPorId, {
       // Toda orden generada ya trae precio (lo fija la cotización elegida).
       precioUnitario: Number(orden.precioUnitario ?? 0),
       lote: opciones.lote,
@@ -937,6 +937,11 @@ export async function recibirOrden(
         }
       }
     }
-    return tx.ordenCompra.findUniqueOrThrow({ where: { id } });
+    const ordenFinal = await tx.ordenCompra.findUniqueOrThrow({ where: { id } });
+    // Número de Lote de Almacén (V1 P1, 25-sep-2026, regla a) — se regresa
+    // junto con la orden para que la pantalla de recepción lo muestre en
+    // grande: el almacenista lo escribe a mano en una hoja sobre el
+    // producto físico.
+    return { ...ordenFinal, numeroLoteAsignado: loteCreado.numeroLote };
   });
 }

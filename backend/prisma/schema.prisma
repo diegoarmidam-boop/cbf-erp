@@ -1082,15 +1082,29 @@ model ProductoLote {
   id                   String    @id @default(uuid())
   productoId           String
   producto             Producto  @relation(fields: [productoId], references: [id])
+  // Número de Lote de Almacén (V1 P1, 25-sep-2026): consecutivo ÚNICO para
+  // TODO el Almacén Central (una sola secuencia global, ver Contador
+  // "lote_almacen") — no una por producto. Lo asigna el sistema al
+  // confirmar una recepción/Entrada manual/Carga a Garrafa; se muestra en
+  // grande al almacenista para que lo marque físicamente con una hoja de
+  // papel. Los 13 lotes históricos ya se renumeraron (migración
+  // 20260925000002) antes de que este campo se volviera obligatorio.
+  numeroLote           Int       @unique
+  // `lote` (texto libre) se conserva como el código/lote QUE TRAE el
+  // proveedor en el empaque, si se captura — deja de ser lo que identifica
+  // al lote dentro del sistema (eso ahora es `numeroLote`).
   lote                 String
   fechaCaducidad       DateTime? @db.Date
   cantidadActual       Decimal   @db.Decimal(12, 3)
+  // Fecha de llegada de ESTE lote (V1 P1, 25-sep-2026) — el FIFO de salida
+  // ordena por este campo (fecha de llegada), no por caducidad. Se fija al
+  // crear el lote, nunca se recalcula.
+  fechaLlegada         DateTime  @default(now())
   // Presentación de ESTE lote (Prioridad 2, 4-sep-2026) — null en lotes de
   // ajuste/abono que no vienen de una recepción real (ver
-  // movimientos.ts). Un mismo string de `lote` (incl. "ÚNICO", productos
-  // sin lote real) puede tener más de una fila si llegó en presentaciones
-  // distintas — se distinguen por este par, nunca se mezclan en una sola
-  // suma ciega.
+  // movimientos.ts). Desde V1 P1 (25-sep-2026) cada recepción SIEMPRE crea
+  // su propia fila (un lote = una recepción, regla b) — ya no se reutiliza
+  // una fila existente aunque coincidan producto/presentación/texto de lote.
   contenedor           String?
   presentacionCantidad Decimal?  @db.Decimal(10, 3)
 
@@ -1140,6 +1154,13 @@ model AlmacenCentralMovimiento {
   confirmado      Boolean                      @default(true)
   confirmadoPorId String?
   fechaConfirmado DateTime?
+  // "Fuera de orden" (V1 P1, 25-sep-2026, regla e): Bodega puede, al
+  // confirmar la entrega de un producto comprometido, elegir un lote
+  // distinto al que el sistema sugirió por FIFO — el movimiento real queda
+  // marcado con su motivo. Solo aplica a `salida_real` que reemplaza a un
+  // `salida_comprometida` con otro loteId.
+  fueraDeOrden        Boolean @default(false)
+  motivoFueraDeOrden  String?
 
   @@index([productoId, fecha])
   @@index([huertaDestinoId])

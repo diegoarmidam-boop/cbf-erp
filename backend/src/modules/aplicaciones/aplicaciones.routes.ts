@@ -20,6 +20,7 @@ import {
   listarCancelacionesPendientesConfirmar,
   NoSePuedeCancelarError,
   obtenerAplicacion,
+  opcionesLoteParaEntrega,
   productosParaAplicacion,
   programarAplicacion,
   ProductoNoAutorizadoAplicacionError,
@@ -29,7 +30,7 @@ import {
   TransicionAplicacionInvalidaError,
   YaHayAvanceReportadoError,
 } from "./aplicaciones.js";
-import { AjusteInvalidoError, confirmarRecepcionAjuste, listarAjustesPendientesConfirmar } from "../almacen/movimientos.js";
+import { AjusteInvalidoError, confirmarRecepcionAjuste, listarAjustesPendientesConfirmar, StockInsuficienteError } from "../almacen/movimientos.js";
 import { ProductoPreferidoNoConfiguradoError } from "../almacen/preferencias.js";
 import { listarCancelacionesPendientesConfirmarGranular } from "../fertilizantes/granular.js";
 import { construirOrdenAplicacion, OrdenSinCapacidadTanqueError } from "../ordenes/ordenes.js";
@@ -254,12 +255,23 @@ aplicacionesRouter.patch("/:id", requirePermission("aplicaciones", "capturar"), 
 // módulo aparte (decisión de Diego, 4-sep-2026, Prioridad 4): el botón
 // tiene que funcionar también con el propio permiso de Aplicaciones, para
 // no depender de que el supervisor tenga acceso cruzado a Almacén.
+const overridesEntregaSchema = z.record(z.string(), z.object({ loteIdElegido: z.string().min(1), motivo: z.string().min(1) })).optional();
+
+aplicacionesRouter.get("/:id/opciones-lote-entrega", requirePermissionAny(["almacen", "capturar"], ["aplicaciones", "capturar"]), async (req, res) => {
+  res.json(await opcionesLoteParaEntrega(unoSolo(req.params.id)));
+});
+
 aplicacionesRouter.post("/:id/entregar", requirePermissionAny(["almacen", "capturar"], ["aplicaciones", "capturar"]), async (req, res) => {
+  const parsed = overridesEntregaSchema.safeParse(req.body?.overridesPorProducto);
+  if (!parsed.success) {
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
+    return;
+  }
   try {
-    const aplicacion = await confirmarEntrega(unoSolo(req.params.id), req.usuario!.usuarioId);
+    const aplicacion = await confirmarEntrega(unoSolo(req.params.id), req.usuario!.usuarioId, parsed.data);
     res.json(aplicacion);
   } catch (err) {
-    if (err instanceof TransicionAplicacionInvalidaError || err instanceof StockNoComprometidoError) {
+    if (err instanceof TransicionAplicacionInvalidaError || err instanceof StockNoComprometidoError || err instanceof StockInsuficienteError) {
       res.status(409).json({ error: err.message });
       return;
     }

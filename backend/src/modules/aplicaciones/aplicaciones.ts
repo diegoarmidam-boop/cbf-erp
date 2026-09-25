@@ -8,8 +8,11 @@ import { actualizarDosisProductoEnReceta, obtenerReceta, ROLES_RECETAS } from ".
 import {
   ajustarCantidadProducto,
   confirmarEntregaComprometida,
+  crearLoteRespaldo,
+  desgloseLotesDeMovimientos,
   intentarComprometer,
   liberarComprometido,
+  regresarProporcionalALotes,
   stockTotalProductoTx,
 } from "../almacen/movimientos.js";
 import { listarEquipos } from "../equipos/equipos.js";
@@ -562,8 +565,17 @@ export async function obtenerAplicacion(id: string) {
  * Confirma la entrega física de TODOS los productos a la Huerta (9.7) —
  * acción de Almacén, no de quien programó. Solo puede pasar si ya hay stock
  * comprometido para cada producto de esta aplicación.
+ *
+ * `overridesPorProducto` (V1 P1, 25-sep-2026, regla e): si Bodega dictamina
+ * que un producto salió (o debe salir) de un lote distinto al que el
+ * sistema sugirió por FIFO al comprometer, se pasa aquí su loteId elegido
+ * y el motivo — el movimiento real queda marcado "fuera de orden".
  */
-export async function confirmarEntrega(aplicacionId: string, capturadoPorId: string) {
+export async function confirmarEntrega(
+  aplicacionId: string,
+  capturadoPorId: string,
+  overridesPorProducto?: Record<string, { loteIdElegido: string; motivo: string }>
+) {
   const aplicacion = await prisma.aplicacion.findUniqueOrThrow({ where: { id: aplicacionId }, include: { productos: true } });
   if (aplicacion.estado !== "programada") throw new TransicionAplicacionInvalidaError("programada");
 
@@ -575,10 +587,44 @@ export async function confirmarEntrega(aplicacionId: string, capturadoPorId: str
     if (faltaAlguno) throw new StockNoComprometidoError();
 
     for (const p of aplicacion.productos) {
-      await confirmarEntregaComprometida(tx, p.productoId, aplicacion.huertaId, Number(p.cantidadTotalCalculada), aplicacionId, capturadoPorId);
+      await confirmarEntregaComprometida(
+        tx,
+        p.productoId,
+        aplicacion.huertaId,
+        Number(p.cantidadTotalCalculada),
+        aplicacionId,
+        capturadoPorId,
+        overridesPorProducto?.[p.productoId]
+      );
     }
     return tx.aplicacion.update({ where: { id: aplicacionId }, data: { estado: "entregada" } });
   });
+}
+
+/**
+ * Para la pantalla de "Confirmar entrega": qué lote(s) sugirió el sistema
+ * por FIFO para cada producto de esta Aplicación, y qué otros lotes (con
+ * existencia) hay disponibles por si Bodega quiere elegir otro (regla e).
+ */
+export async function opcionesLoteParaEntrega(aplicacionId: string) {
+  const aplicacion = await prisma.aplicacion.findUniqueOrThrow({ where: { id: aplicacionId }, include: { productos: true } });
+  const resultado = [];
+  for (const p of aplicacion.productos) {
+    const comprometidos = await prisma.almacenCentralMovimiento.findMany({
+      where: { referenciaId: aplicacionId, productoId: p.productoId, tipo: "salida_comprometida", loteId: { not: null } },
+      include: { lote: true },
+    });
+    const otrosLotes = await prisma.productoLote.findMany({
+      where: { productoId: p.productoId, cantidadActual: { gt: 0 } },
+      orderBy: { fechaLlegada: "asc" },
+    });
+    resultado.push({
+      productoId: p.productoId,
+      loteSugerido: comprometidos.map((m) => ({ loteId: m.loteId, numeroLote: m.lote?.numeroLote ?? null, cantidad: Number(m.cantidad) })),
+      otrosLotesConExistencia: otrosLotes.map((l) => ({ loteId: l.id, numeroLote: l.numeroLote, cantidadActual: Number(l.cantidadActual) })),
+    });
+  }
+  return resultado;
 }
 
 export interface CuadroAvanceInput {
@@ -1001,22 +1047,39 @@ export async function cancelarAplicacionEntregada(aplicacionId: string, cancelad
         },
       });
 
-      const lote = await tx.productoLote.findFirst({ where: { productoId: p.productoId } });
-      if (lote) {
-        await tx.productoLote.update({ where: { id: lote.id }, data: { cantidadActual: { increment: cantidadARegresar } } });
+      // Regresa al/los lote(s) EXACTOS de donde salió, a su mismo precio
+      // (regla f, V1 P1 25-sep-2026) — antes iba "al primer lote del
+      // producto" sin importar cuál.
+      const desglose = await desgloseLotesDeMovimientos(tx, aplicacionId, p.productoId, ["salida_real"]);
+      const aplicado = await regresarProporcionalALotes(tx, desglose, cantidadARegresar);
+      if (aplicado.length === 0) {
+        const lote = await crearLoteRespaldo(tx, p.productoId, cantidadARegresar, "ABONO");
+        await tx.almacenCentralMovimiento.create({
+          data: {
+            productoId: p.productoId,
+            loteId: lote.id,
+            tipo: "abono_sobrante",
+            cantidad: cantidadARegresar,
+            huertaDestinoId: aplicacion.huertaId,
+            referenciaId: aplicacionId,
+            capturadoPorId: canceladaPorId,
+          },
+        });
       } else {
-        await tx.productoLote.create({ data: { productoId: p.productoId, lote: "ABONO", cantidadActual: cantidadARegresar } });
+        for (const parte of aplicado) {
+          await tx.almacenCentralMovimiento.create({
+            data: {
+              productoId: p.productoId,
+              loteId: parte.loteId,
+              tipo: "abono_sobrante",
+              cantidad: parte.cantidad,
+              huertaDestinoId: aplicacion.huertaId,
+              referenciaId: aplicacionId,
+              capturadoPorId: canceladaPorId,
+            },
+          });
+        }
       }
-      await tx.almacenCentralMovimiento.create({
-        data: {
-          productoId: p.productoId,
-          tipo: "abono_sobrante",
-          cantidad: cantidadARegresar,
-          huertaDestinoId: aplicacion.huertaId,
-          referenciaId: aplicacionId,
-          capturadoPorId: canceladaPorId,
-        },
-      });
     }
 
     // 1.5 (2-sep-2026): en la práctica ya no debería haber nada pendiente

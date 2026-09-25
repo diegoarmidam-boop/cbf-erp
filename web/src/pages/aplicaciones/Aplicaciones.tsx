@@ -16,6 +16,13 @@ import HistorialAplicaciones from "./HistorialAplicaciones";
 import OrdenAplicacionView from "../../components/OrdenAplicacionView";
 import ConfirmModal from "../../components/ConfirmModal";
 
+// Confirmar entrega con selección de lote (V1 P1, 25-sep-2026, regla e).
+interface OpcionLoteEntrega {
+  productoId: string;
+  loteSugerido: { loteId: string; numeroLote: number | null; cantidad: number }[];
+  otrosLotesConExistencia: { loteId: string; numeroLote: number | null; cantidadActual: number }[];
+}
+
 const ETIQUETAS_ESTADO: Record<string, string> = {
   programada: "Programada",
   entregada: "Entregada — pendiente de realizar",
@@ -184,6 +191,13 @@ export default function Aplicaciones() {
   // reutiliza el mismo formulario de arriba, sin poder cambiar de Huerta.
   const [editandoProgramadaId, setEditandoProgramadaId] = useState<string | null>(null);
   const [confirmando, setConfirmando] = useState<{ tipo: "liberar" | "cancelar"; id: string } | null>(null);
+
+  // ---- Confirmar entrega con selección de lote (V1 P1, 25-sep-2026, regla e) ----
+  const [entregandoId, setEntregandoId] = useState<string | null>(null);
+  const [opcionesEntrega, setOpcionesEntrega] = useState<OpcionLoteEntrega[]>([]);
+  const [overridesEntrega, setOverridesEntrega] = useState<Record<string, { loteIdElegido: string; motivo: string }>>({});
+  const [entregandoError, setEntregandoError] = useState<string | null>(null);
+  const [entregandoProcesando, setEntregandoProcesando] = useState(false);
 
   // ---- Recetario (20-ago-2026) ----
   const [recetaId, setRecetaId] = useState("");
@@ -413,13 +427,44 @@ export default function Aplicaciones() {
     }
   }
 
-  async function entregar(id: string) {
+  async function abrirEntregar(a: Aplicacion) {
     setError(null);
+    setEntregandoError(null);
+    setOverridesEntrega({});
+    setEntregandoId(a.id);
+    const opciones = await api.get<OpcionLoteEntrega[]>(`/aplicaciones/${a.id}/opciones-lote-entrega`);
+    setOpcionesEntrega(opciones);
+  }
+
+  function elegirOtroLote(productoId: string, loteId: string) {
+    setOverridesEntrega((prev) => ({ ...prev, [productoId]: { loteIdElegido: loteId, motivo: prev[productoId]?.motivo ?? "" } }));
+  }
+
+  function quitarOverride(productoId: string) {
+    setOverridesEntrega((prev) => {
+      const { [productoId]: _quitar, ...resto } = prev;
+      return resto;
+    });
+  }
+
+  async function confirmarEntregarConLotes() {
+    if (!entregandoId) return;
+    const faltaMotivo = Object.values(overridesEntrega).some((o) => !o.motivo.trim());
+    if (faltaMotivo) {
+      setEntregandoError("Captura el motivo de por qué se eligió otro lote.");
+      return;
+    }
+    setEntregandoProcesando(true);
+    setEntregandoError(null);
     try {
-      await api.post(`/aplicaciones/${id}/entregar`);
+      const overrides = Object.keys(overridesEntrega).length > 0 ? overridesEntrega : undefined;
+      await api.post(`/aplicaciones/${entregandoId}/entregar`, { overridesPorProducto: overrides });
+      setEntregandoId(null);
       cargar();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "No se pudo confirmar la entrega.");
+      setEntregandoError(err instanceof ApiError ? err.message : "No se pudo confirmar la entrega.");
+    } finally {
+      setEntregandoProcesando(false);
     }
   }
 
@@ -930,7 +975,7 @@ export default function Aplicaciones() {
                     </button>
                   )}
                   {a.estado === "programada" && a.comprometido && (
-                    <button className="btn-primary" onClick={() => entregar(a.id)}>
+                    <button className="btn-primary" onClick={() => abrirEntregar(a)}>
                       Confirmar entrega
                     </button>
                   )}
@@ -1162,6 +1207,76 @@ export default function Aplicaciones() {
             setConfirmando(null);
           }}
         />
+      )}
+
+      {entregandoId && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200, padding: 12 }}>
+          <div className="card" style={{ width: 480, maxWidth: "100%", maxHeight: "85vh", overflowY: "auto" }}>
+            <h3 style={{ marginBottom: 10 }}>Confirmar entrega</h3>
+            <p style={{ fontSize: 12.5, color: "var(--ink-soft)", marginBottom: 10 }}>
+              Por default se entrega del lote que el sistema apartó al programar. Si Bodega ya sabe que salió (o debe salir) de otro
+              lote, elígelo abajo y captura el motivo.
+            </p>
+            {aplicaciones
+              .find((a) => a.id === entregandoId)
+              ?.productos.map((p) => {
+                const opciones = opcionesEntrega.find((o) => o.productoId === p.productoId);
+                const override = overridesEntrega[p.productoId];
+                return (
+                  <div key={p.id} style={{ borderTop: "1px solid var(--border)", paddingTop: 10, marginTop: 10 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600 }}>{p.producto.nombreComercial}</div>
+                    <div style={{ fontSize: 12, color: "var(--ink-soft)", marginTop: 4 }}>
+                      {opciones && opciones.loteSugerido.length > 0
+                        ? "Sugerido: " + opciones.loteSugerido.map((l) => `Lote ${l.numeroLote ?? "?"} (${formatearNumero(l.cantidad)})`).join(" + ")
+                        : "Sin lote registrado (dato histórico)."}
+                    </div>
+                    {!override ? (
+                      <button
+                        className="btn-secondary"
+                        style={{ marginTop: 6 }}
+                        disabled={!opciones || opciones.otrosLotesConExistencia.length === 0}
+                        onClick={() => elegirOtroLote(p.productoId, opciones!.otrosLotesConExistencia[0]!.loteId)}
+                      >
+                        Usar otro lote
+                      </button>
+                    ) : (
+                      <div style={{ display: "flex", gap: 8, marginTop: 6, flexWrap: "wrap", alignItems: "flex-end" }}>
+                        <label className="field">
+                          Lote elegido
+                          <select value={override.loteIdElegido} onChange={(e) => elegirOtroLote(p.productoId, e.target.value)}>
+                            {opciones?.otrosLotesConExistencia.map((l) => (
+                              <option key={l.loteId} value={l.loteId}>
+                                Lote {l.numeroLote ?? "?"} — existencia {formatearNumero(l.cantidadActual)}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="field" style={{ minWidth: 200 }}>
+                          Motivo
+                          <input
+                            value={override.motivo}
+                            onChange={(e) => setOverridesEntrega((prev) => ({ ...prev, [p.productoId]: { ...prev[p.productoId]!, motivo: e.target.value } }))}
+                          />
+                        </label>
+                        <button className="btn-secondary" onClick={() => quitarOverride(p.productoId)}>
+                          Cancelar cambio
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            {entregandoError && <p style={{ fontSize: 12.5, color: "var(--danger)", marginTop: 10 }}>{entregandoError}</p>}
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+              <button className="btn-secondary" onClick={() => setEntregandoId(null)} disabled={entregandoProcesando}>
+                Cancelar
+              </button>
+              <button className="btn-primary" onClick={confirmarEntregarConLotes} disabled={entregandoProcesando}>
+                {entregandoProcesando ? "Procesando…" : "Confirmar entrega"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

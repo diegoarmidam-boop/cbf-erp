@@ -5,8 +5,11 @@ import type { TransactionClient } from "../../core/db.js";
 import {
   ajustarCantidadProducto,
   confirmarEntregaComprometida,
+  crearLoteRespaldo,
+  desgloseLotesDeMovimientos,
   intentarComprometer,
   liberarComprometido,
+  regresarProporcionalALotes,
   stockTotalProductoTx,
 } from "../almacen/movimientos.js";
 import { listarEquipos } from "../equipos/equipos.js";
@@ -695,22 +698,26 @@ export async function cancelarGranularEntregada(id: string, canceladaPorId: stri
         },
       });
 
-      const lote = await tx.productoLote.findFirst({ where: { productoId: p.productoId } });
-      if (lote) {
-        await tx.productoLote.update({ where: { id: lote.id }, data: { cantidadActual: { increment: cantidadARegresar } } });
-      } else {
-        await tx.productoLote.create({ data: { productoId: p.productoId, lote: "ABONO", cantidadActual: cantidadARegresar } });
+      // Regresa al/los lote(s) EXACTOS de donde salió, a su mismo precio
+      // (regla f, V1 P1 25-sep-2026) — antes iba "al primer lote del
+      // producto" sin importar cuál.
+      const desglose = await desgloseLotesDeMovimientos(tx, id, p.productoId, ["salida_real"]);
+      const aplicado = await regresarProporcionalALotes(tx, desglose, cantidadARegresar);
+      const lote = aplicado.length === 0 ? await crearLoteRespaldo(tx, p.productoId, cantidadARegresar, "ABONO") : null;
+      const porciones = lote ? [{ loteId: lote.id, cantidad: cantidadARegresar }] : aplicado;
+      for (const parte of porciones) {
+        await tx.almacenCentralMovimiento.create({
+          data: {
+            productoId: p.productoId,
+            loteId: parte.loteId,
+            tipo: "abono_sobrante",
+            cantidad: parte.cantidad,
+            huertaDestinoId: fertilizacion.huertaId,
+            referenciaId: id,
+            capturadoPorId: canceladaPorId,
+          },
+        });
       }
-      await tx.almacenCentralMovimiento.create({
-        data: {
-          productoId: p.productoId,
-          tipo: "abono_sobrante",
-          cantidad: cantidadARegresar,
-          huertaDestinoId: fertilizacion.huertaId,
-          referenciaId: id,
-          capturadoPorId: canceladaPorId,
-        },
-      });
     }
 
     await cancelarOrdenesDeReferencia(tx, id);

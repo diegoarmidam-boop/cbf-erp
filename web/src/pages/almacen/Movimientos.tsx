@@ -31,14 +31,33 @@ export default function Movimientos() {
   const [motivoAjuste, setMotivoAjuste] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [mensaje, setMensaje] = useState<string | null>(null);
+  // Número de Lote de Almacén asignado por el sistema (V1 P1, 25-sep-2026,
+  // regla a) al confirmar una Entrada manual.
+  const [loteAsignado, setLoteAsignado] = useState<number | null>(null);
+
+  // ---- Elegir otro lote al Entregar a Huerta (V1 P1, 25-sep-2026, regla e) ----
+  interface LoteProducto { id: string; numeroLote: number | null; cantidadActual: string; fechaLlegada: string }
+  const [lotesProducto, setLotesProducto] = useState<LoteProducto[]>([]);
+  const [loteElegido, setLoteElegido] = useState("");
+  const [motivoOtroLote, setMotivoOtroLote] = useState("");
+  useEffect(() => {
+    if (accion === "entregar" && productoId) {
+      api.get<{ total: number; lotes: LoteProducto[] }>(`/almacen/movimientos/${productoId}/stock`).then((r) => setLotesProducto(r.lotes));
+    } else {
+      setLotesProducto([]);
+    }
+    setLoteElegido("");
+    setMotivoOtroLote("");
+  }, [accion, productoId]);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
     setMensaje(null);
+    setLoteAsignado(null);
     try {
       if (accion === "entrada") {
-        await api.post("/almacen/movimientos/entrada", {
+        const resultado = await api.post<{ numeroLote: number | null }>("/almacen/movimientos/entrada", {
           productoId,
           cantidad: Number(cantidad),
           precioUnitario: Number(precioUnitario),
@@ -46,8 +65,19 @@ export default function Movimientos() {
           lote: lote || undefined,
           fechaCaducidad: fechaCaducidad || undefined,
         });
+        if (resultado.numeroLote != null) setLoteAsignado(resultado.numeroLote);
       } else if (accion === "entregar") {
-        await api.post("/almacen/movimientos/entregar-a-huerta", { productoId, huertaId, cantidad: Number(cantidad) });
+        if (loteElegido && !motivoOtroLote.trim()) {
+          setError("Captura el motivo de por qué se eligió otro lote.");
+          return;
+        }
+        await api.post("/almacen/movimientos/entregar-a-huerta", {
+          productoId,
+          huertaId,
+          cantidad: Number(cantidad),
+          loteIdElegido: loteElegido || undefined,
+          motivoOtroLote: loteElegido ? motivoOtroLote : undefined,
+        });
       } else {
         await api.post("/almacen/movimientos/salida", {
           productoId,
@@ -63,6 +93,8 @@ export default function Movimientos() {
       setPrecioUnitario("");
       setMotivoEntrada("");
       setMotivoAjuste("");
+      setLoteElegido("");
+      setMotivoOtroLote("");
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "No se pudo registrar.");
     }
@@ -81,6 +113,21 @@ export default function Movimientos() {
           Salida (merma/préstamo/ajuste)
         </button>
       </div>
+
+      {loteAsignado != null && (
+        <div
+          className="card"
+          style={{ marginBottom: 14, textAlign: "center", padding: "20px 16px", border: "2px solid var(--pink, #c0396b)" }}
+        >
+          <div style={{ fontSize: 28, fontWeight: 800, margin: "6px 0" }}>Escribe LOTE {loteAsignado}</div>
+          <div style={{ fontSize: 12.5, color: "var(--ink-soft)", marginBottom: 10 }}>
+            Marca este número a mano en el producto que acaba de llegar.
+          </div>
+          <button className="btn-secondary" onClick={() => setLoteAsignado(null)}>
+            Listo, ya lo marqué
+          </button>
+        </div>
+      )}
 
       <form onSubmit={onSubmit} className="card" style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
         <label className="field">
@@ -110,7 +157,7 @@ export default function Movimientos() {
               <input value={motivoEntrada} onChange={(e) => setMotivoEntrada(e.target.value)} required style={{ minWidth: 260 }} />
             </label>
             <label className="field">
-              Lote
+              Lote del proveedor
               <input value={lote} onChange={(e) => setLote(e.target.value)} placeholder="Opcional" />
             </label>
             <label className="field">
@@ -121,17 +168,40 @@ export default function Movimientos() {
         )}
 
         {accion === "entregar" && (
-          <label className="field">
-            Huerta destino
-            <select value={huertaId} onChange={(e) => setHuertaId(e.target.value)} required>
-              <option value="">Selecciona…</option>
-              {huertas.map((h) => (
-                <option key={h.id} value={h.id}>
-                  {h.nombre}
-                </option>
-              ))}
-            </select>
-          </label>
+          <>
+            <label className="field">
+              Huerta destino
+              <select value={huertaId} onChange={(e) => setHuertaId(e.target.value)} required>
+                <option value="">Selecciona…</option>
+                {huertas.map((h) => (
+                  <option key={h.id} value={h.id}>
+                    {h.nombre}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {lotesProducto.length > 0 && (
+              <label className="field">
+                Lote (default: el más antiguo con existencia)
+                <select value={loteElegido} onChange={(e) => setLoteElegido(e.target.value)}>
+                  <option value="">Automático (FIFO por fecha de llegada)</option>
+                  {lotesProducto
+                    .filter((l) => Number(l.cantidadActual) > 0)
+                    .map((l) => (
+                      <option key={l.id} value={l.id}>
+                        Lote {l.numeroLote ?? "?"} — existencia {l.cantidadActual}
+                      </option>
+                    ))}
+                </select>
+              </label>
+            )}
+            {loteElegido && (
+              <label className="field" style={{ minWidth: 200 }}>
+                Motivo de elegir otro lote
+                <input value={motivoOtroLote} onChange={(e) => setMotivoOtroLote(e.target.value)} required />
+              </label>
+            )}
+          </>
         )}
 
         {accion === "salida" && (

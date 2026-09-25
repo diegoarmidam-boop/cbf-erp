@@ -58,7 +58,14 @@ movimientosRouter.post("/entrada", requirePermission("almacen", "capturar"), asy
   res.status(201).json(await registrarEntrada(productoId, cantidad, req.usuario!.usuarioId, { ...opciones, motivoEntradaManual: motivo }));
 });
 
-const entregaSchema = z.object({ productoId: z.string().min(1), huertaId: z.string().min(1), cantidad: z.number().positive() });
+const entregaSchema = z.object({
+  productoId: z.string().min(1),
+  huertaId: z.string().min(1),
+  cantidad: z.number().positive(),
+  // Elegir otro lote (V1 P1, 25-sep-2026, regla e) — opcional, sustituye el FIFO por fecha de llegada.
+  loteIdElegido: z.string().min(1).optional(),
+  motivoOtroLote: z.string().min(1).optional(),
+});
 
 movimientosRouter.post("/entregar-a-huerta", requirePermission("almacen", "capturar"), async (req, res) => {
   const parsed = entregaSchema.safeParse(req.body);
@@ -66,8 +73,18 @@ movimientosRouter.post("/entregar-a-huerta", requirePermission("almacen", "captu
     res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
     return;
   }
+  if (parsed.data.loteIdElegido && !parsed.data.motivoOtroLote) {
+    res.status(400).json({ error: "Captura el motivo de por qué se eligió otro lote." });
+    return;
+  }
   try {
-    const local = await entregarAHuerta(parsed.data.productoId, parsed.data.huertaId, parsed.data.cantidad, req.usuario!.usuarioId);
+    const local = await entregarAHuerta(
+      parsed.data.productoId,
+      parsed.data.huertaId,
+      parsed.data.cantidad,
+      req.usuario!.usuarioId,
+      parsed.data.loteIdElegido ? { loteIdElegido: parsed.data.loteIdElegido, motivo: parsed.data.motivoOtroLote! } : undefined
+    );
     res.status(201).json(local);
   } catch (err) {
     if (err instanceof StockInsuficienteError) {
