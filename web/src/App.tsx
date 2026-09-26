@@ -38,6 +38,7 @@ import Comparador from "./pages/compras/Comparador";
 import EquiposLayout from "./pages/equipos/EquiposLayout";
 import EquiposCatalogo from "./pages/equipos/Catalogo";
 import Combustible from "./pages/equipos/Combustible";
+import Traslados from "./pages/equipos/Traslados";
 import Mantenimiento from "./pages/equipos/Mantenimiento";
 import UsoDiario from "./pages/equipos/UsoDiario";
 import ActividadesLayout from "./pages/actividades/ActividadesLayout";
@@ -126,6 +127,7 @@ export default function App() {
               <Route index element={<Navigate to="catalogo" replace />} />
               <Route path="catalogo" element={<EquiposCatalogo />} />
               <Route path="combustible" element={<Combustible />} />
+              <Route path="traslados" element={<Traslados />} />
               <Route path="mantenimiento" element={<Mantenimiento />} />
               <Route path="uso-diario" element={<UsoDiario />} />
             </Route>

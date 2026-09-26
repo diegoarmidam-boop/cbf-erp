@@ -3,7 +3,8 @@ import { api, ApiError } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
 import { useHuertas } from "../../lib/useHuertas";
 import { useRecetasFertirriego } from "../../lib/useRecetasFertirriego";
-import type { ModoDosisFertirriego, FertirriegoProgramacion, FrecuenciaFertirriego, IngredienteAutorizado, OrdenFertirriego, SeccionRiego } from "../../lib/types";
+import { subirEvidencia } from "../../lib/subirEvidencia";
+import type { Equipo, ModoDosisFertirriego, FertirriegoProgramacion, FrecuenciaFertirriego, IngredienteAutorizado, OrdenFertirriego, Producto, SeccionRiego } from "../../lib/types";
 import FechaInput from "../../components/FechaInput";
 import { formatearFecha } from "../../lib/fecha";
 import { formatearNumero } from "../../lib/numero";
@@ -79,6 +80,16 @@ export default function Fertirriego() {
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [mostrarRecetario, setMostrarRecetario] = useState(false);
+  const [mostrarMotobomba, setMostrarMotobomba] = useState(false);
+  const [motobombas, setMotobombas] = useState<Equipo[]>([]);
+  const [productosCombustible, setProductosCombustible] = useState<Producto[]>([]);
+  const [motobombaEquipoId, setMotobombaEquipoId] = useState("");
+  const [motobombaHuertaId, setMotobombaHuertaId] = useState("");
+  const [motobombaFecha, setMotobombaFecha] = useState(hoyISO());
+  const [motobombaLitros, setMotobombaLitros] = useState("");
+  const [motobombaProductoId, setMotobombaProductoId] = useState("");
+  const [motobombaArchivo, setMotobombaArchivo] = useState<File | null>(null);
+  const [motobombaGuardando, setMotobombaGuardando] = useState(false);
 
   const [mostrarForm, setMostrarForm] = useState(false);
   const [ingredientes, setIngredientes] = useState<IngredienteAutorizado[]>([]);
@@ -139,7 +150,37 @@ export default function Fertirriego() {
     // comparte el de Fertilización Granular -- abierto a cualquier producto
     // agrícola con Ingrediente Activo, no solo Fertilizante.
     api.get<IngredienteAutorizado[]>("/fertilizantes/fertirriego/productos").then(setIngredientes);
+    api.get<Equipo[]>("/fertilizantes/fertirriego/equipos-motobomba").then(setMotobombas);
+    api.get<Producto[]>("/fertilizantes/fertirriego/productos-combustible").then(setProductosCombustible);
   }, []);
+
+  async function registrarMotobomba(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
+    if (!motobombaArchivo) {
+      setError("Falta la foto del relleno.");
+      return;
+    }
+    setMotobombaGuardando(true);
+    try {
+      const fotoUrl = await subirEvidencia(motobombaArchivo);
+      await api.post("/fertilizantes/fertirriego/motobomba", {
+        equipoId: motobombaEquipoId,
+        huertaId: motobombaHuertaId,
+        fecha: motobombaFecha,
+        litros: Number(motobombaLitros),
+        productoId: motobombaProductoId,
+        fotoUrl,
+      });
+      setMotobombaLitros("");
+      setMotobombaArchivo(null);
+      setMostrarMotobomba(false);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "No se pudo registrar la gasolina de la Motobomba.");
+    } finally {
+      setMotobombaGuardando(false);
+    }
+  }
 
   useEffect(() => {
     if (!huertaId) {
@@ -307,11 +348,70 @@ export default function Fertirriego() {
         <button className="btn-secondary" onClick={() => setMostrarRecetario(true)}>
           Recetario
         </button>
+        <button className="btn-secondary" onClick={() => setMostrarMotobomba((v) => !v)}>
+          {mostrarMotobomba ? "Cerrar Motobomba" : "Gasolina de Motobomba"}
+        </button>
         <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "var(--ink-soft)" }}>
           <input type="checkbox" checked={mostrarCerradas} onChange={(e) => setMostrarCerradas(e.target.checked)} />
           Mostrar vencidas/canceladas
         </label>
       </div>
+
+      {mostrarMotobomba && (
+        <form onSubmit={registrarMotobomba} className="card" style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 18 }}>
+          <label className="field">
+            Motobomba
+            <select value={motobombaEquipoId} onChange={(e) => setMotobombaEquipoId(e.target.value)} required>
+              <option value="">Selecciona…</option>
+              {motobombas.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.folio} {m.marca ?? ""}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            Huerta
+            <select value={motobombaHuertaId} onChange={(e) => setMotobombaHuertaId(e.target.value)} required>
+              <option value="">Selecciona…</option>
+              {huertas.map((h) => (
+                <option key={h.id} value={h.id}>
+                  {h.nombre}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            Fecha del fertirriego
+            <FechaInput value={motobombaFecha} onChange={setMotobombaFecha} required />
+          </label>
+          <label className="field">
+            Gasolina — producto
+            <select value={motobombaProductoId} onChange={(e) => setMotobombaProductoId(e.target.value)} required>
+              <option value="">Selecciona…</option>
+              {productosCombustible.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.nombreComercial}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            Litros
+            <input type="number" step="0.01" value={motobombaLitros} onChange={(e) => setMotobombaLitros(e.target.value)} required />
+          </label>
+          <label className="field">
+            Foto del relleno
+            <input type="file" accept="image/*" onChange={(e) => setMotobombaArchivo(e.target.files?.[0] ?? null)} required />
+          </label>
+          <button className="btn-primary" type="submit" disabled={motobombaGuardando}>
+            {motobombaGuardando ? "Guardando…" : "Registrar"}
+          </button>
+          <span style={{ fontSize: 11, color: "var(--ink-soft)", width: "100%" }}>
+            Se reparte por hectáreas entre las Secciones de esa Huerta con fertirriego confirmado ese día, y de ahí a sus Cuadros.
+          </span>
+        </form>
+      )}
 
       <p style={{ fontSize: 12, color: "var(--ink-soft)", marginBottom: 14 }}>
         La ejecución diaria (¿se metió hoy?, ¿cuánto?) se registra desde Riego una vez entregado.

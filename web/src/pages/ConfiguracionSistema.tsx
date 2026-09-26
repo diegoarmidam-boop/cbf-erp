@@ -19,6 +19,7 @@ interface EmpresaConfig {
   firmaAtiendeNombre: string | null;
   firmaAutorizaNombre: string | null;
   umbralExcedentePctDefault: number;
+  umbralDesviacionCombustiblePctDefault?: number;
 }
 
 /**
@@ -46,6 +47,7 @@ export default function ConfiguracionSistema() {
     firmaAtiendeNombre: "",
     firmaAutorizaNombre: "",
     umbralExcedentePctDefault: "20",
+    umbralDesviacionCombustiblePctDefault: "20",
   });
   const [guardandoEmpresa, setGuardandoEmpresa] = useState(false);
   const [empresaGuardada, setEmpresaGuardada] = useState(false);
@@ -71,6 +73,7 @@ export default function ConfiguracionSistema() {
         firmaAtiendeNombre: e.firmaAtiendeNombre ?? "",
         firmaAutorizaNombre: e.firmaAutorizaNombre ?? "",
         umbralExcedentePctDefault: String(e.umbralExcedentePctDefault ?? 20),
+        umbralDesviacionCombustiblePctDefault: String(e.umbralDesviacionCombustiblePctDefault ?? 20),
       });
     });
   }, []);
@@ -83,6 +86,7 @@ export default function ConfiguracionSistema() {
       await api.patch<EmpresaConfig>("/configuracion/empresa", {
         ...empresaForm,
         umbralExcedentePctDefault: Number(empresaForm.umbralExcedentePctDefault),
+        umbralDesviacionCombustiblePctDefault: Number(empresaForm.umbralDesviacionCombustiblePctDefault),
       });
       setEmpresaGuardada(true);
       setTimeout(() => setEmpresaGuardada(false), 2500);
@@ -245,6 +249,16 @@ export default function ConfiguracionSistema() {
                 step="1"
                 value={empresaForm.umbralExcedentePctDefault}
                 onChange={(e) => setEmpresaForm((p) => ({ ...p, umbralExcedentePctDefault: e.target.value }))}
+              />
+            </label>
+            <label className="field">
+              Desviación de consumo de combustible (%) — alerta a Dirección, Gerente Técnico y Supervisor
+              <input
+                type="number"
+                min={1}
+                step="1"
+                value={empresaForm.umbralDesviacionCombustiblePctDefault}
+                onChange={(e) => setEmpresaForm((p) => ({ ...p, umbralDesviacionCombustiblePctDefault: e.target.value }))}
               />
             </label>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>

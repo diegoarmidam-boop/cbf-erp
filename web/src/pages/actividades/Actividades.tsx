@@ -4,6 +4,8 @@ import { useAuth } from "../../lib/auth";
 import { useHuertas } from "../../lib/useHuertas";
 import { usePersonal } from "../../lib/usePersonal";
 import { useEquipos } from "../../lib/useEquipos";
+import { useProductos } from "../../lib/useProductos";
+import { subirEvidencia } from "../../lib/subirEvidencia";
 import type { Actividad, ActividadProgramada, ActividadRealizadaLinea, Cuadro, TipoRecursoActividad } from "../../lib/types";
 import FechaInput from "../../components/FechaInput";
 import { formatearFecha } from "../../lib/fecha";
@@ -43,10 +45,25 @@ interface LineaForm {
   operadorHoras: string;
   implementoId: string;
   personas: PersonaLineaForm[];
+  // Relleno de diésel de esta línea (V1 P3, 26-sep-2026) — Tractor/Mixta.
+  combustibleProductoId: string;
+  combustibleLitros: string;
+  combustibleArchivo: File | null;
 }
 
 function lineaVacia(tipoDefault: TipoRecursoActividad): LineaForm {
-  return { key: nuevaKey(), tipo: tipoDefault, tractorId: "", operadorId: "", operadorHoras: "", implementoId: "", personas: [] };
+  return {
+    key: nuevaKey(),
+    tipo: tipoDefault,
+    tractorId: "",
+    operadorId: "",
+    operadorHoras: "",
+    implementoId: "",
+    personas: [],
+    combustibleProductoId: "",
+    combustibleLitros: "",
+    combustibleArchivo: null,
+  };
 }
 
 function lineasDesdeExistentes(lineas: ActividadRealizadaLinea[]): LineaForm[] {
@@ -58,6 +75,9 @@ function lineasDesdeExistentes(lineas: ActividadRealizadaLinea[]): LineaForm[] {
     operadorHoras: l.operadorHoras ?? "",
     implementoId: l.implementoId ?? "",
     personas: l.personas.map((p) => ({ personalId: p.personalId, horas: p.horas })),
+    combustibleProductoId: "",
+    combustibleLitros: "",
+    combustibleArchivo: null,
   }));
 }
 
@@ -75,6 +95,9 @@ function validarLineasForm(lineas: LineaForm[], tipoRecursoActividad: TipoRecurs
       if (!l.tractorId || !l.operadorId || !l.implementoId) return `Una línea de ${ETIQUETAS_TIPO[l.tipo]} necesita Tractor, Operador e Implemento.`;
       if (!l.operadorHoras || Number(l.operadorHoras) <= 0) return "Falta capturar las horas del operador de una línea.";
       if (l.tipo === "mixta" && personasValidas.length === 0) return "Una línea de Mixta necesita al menos una persona además del operador.";
+      if (!l.combustibleProductoId || !l.combustibleLitros || !l.combustibleArchivo) {
+        return "Falta el relleno de diésel de esta línea (producto, litros y foto).";
+      }
     }
     for (const p of personasValidas) {
       if (!p.horas || Number(p.horas) <= 0) return "Falta capturar las horas de una persona.";
@@ -83,15 +106,20 @@ function validarLineasForm(lineas: LineaForm[], tipoRecursoActividad: TipoRecurs
   return null;
 }
 
-function lineasParaEnviar(form: LineaForm[]) {
-  return form.map((l) => ({
-    tipo: l.tipo,
-    tractorId: l.tipo !== "gente" ? l.tractorId : undefined,
-    operadorId: l.tipo !== "gente" ? l.operadorId : undefined,
-    operadorHoras: l.tipo !== "gente" ? Number(l.operadorHoras) : undefined,
-    implementoId: l.tipo !== "gente" ? l.implementoId : undefined,
-    personas: l.personas.filter((p) => p.personalId).map((p) => ({ personalId: p.personalId, horas: Number(p.horas) })),
-  }));
+async function lineasParaEnviar(form: LineaForm[]) {
+  return Promise.all(
+    form.map(async (l) => ({
+      tipo: l.tipo,
+      tractorId: l.tipo !== "gente" ? l.tractorId : undefined,
+      operadorId: l.tipo !== "gente" ? l.operadorId : undefined,
+      operadorHoras: l.tipo !== "gente" ? Number(l.operadorHoras) : undefined,
+      implementoId: l.tipo !== "gente" ? l.implementoId : undefined,
+      personas: l.personas.filter((p) => p.personalId).map((p) => ({ personalId: p.personalId, horas: Number(p.horas) })),
+      combustibleProductoId: l.tipo !== "gente" ? l.combustibleProductoId : undefined,
+      combustibleLitros: l.tipo !== "gente" ? Number(l.combustibleLitros) : undefined,
+      combustibleFotoUrl: l.tipo !== "gente" && l.combustibleArchivo ? await subirEvidencia(l.combustibleArchivo) : undefined,
+    }))
+  );
 }
 
 export default function Actividades() {
@@ -100,6 +128,7 @@ export default function Actividades() {
   const { personal } = usePersonal();
   const { equipos: tractores } = useEquipos("tractor");
   const { equipos: implementos } = useEquipos("implemento");
+  const { productos: productosCombustible } = useProductos(true, "Combustible");
 
   const [programadas, setProgramadas] = useState<ActividadProgramada[]>([]);
   const [cargando, setCargando] = useState(true);
@@ -216,7 +245,7 @@ export default function Actividades() {
       await api.post(`/actividades/${a.id}/avance`, {
         fechaReal,
         hectareas: Number(avanceHectareas),
-        lineas: lineasParaEnviar(lineas),
+        lineas: await lineasParaEnviar(lineas),
         comentario: comentario.trim() || undefined,
       });
       setRegistrando(null);
@@ -247,7 +276,7 @@ export default function Actividades() {
     try {
       await api.patch(`/actividades/avance/${realizadaId}`, {
         hectareas: Number(editAvanceHectareas),
-        lineas: lineasParaEnviar(editLineas),
+        lineas: await lineasParaEnviar(editLineas),
         comentario: editComentario.trim() || undefined,
       });
       setEditando(null);
@@ -384,6 +413,7 @@ export default function Actividades() {
                     tipoRecursoActividad={a.actividad.tipoRecurso}
                     tractores={tractores}
                     implementos={implementos}
+                    productosCombustible={productosCombustible}
                     personal={personal}
                   />
 
@@ -482,6 +512,7 @@ export default function Actividades() {
                                   tipoRecursoActividad={a.actividad.tipoRecurso}
                                   tractores={tractores}
                                   implementos={implementos}
+                                  productosCombustible={productosCombustible}
                                   personal={personal}
                                 />
 
@@ -530,6 +561,7 @@ function LineasActividadEditor({
   tipoRecursoActividad,
   tractores,
   implementos,
+  productosCombustible,
   personal,
 }: {
   lineas: LineaForm[];
@@ -537,6 +569,7 @@ function LineasActividadEditor({
   tipoRecursoActividad: TipoRecursoActividad;
   tractores: { id: string; folio: string; marca: string | null; operadorDesignadoId: string | null }[];
   implementos: { id: string; folio: string; marca: string | null }[];
+  productosCombustible: { id: string; nombreComercial: string }[];
   personal: { id: string; nombreCompleto: string }[];
 }) {
   const tiposDisponibles: TipoRecursoActividad[] = tipoRecursoActividad === "mixta" ? ["gente", "tractor", "mixta"] : [tipoRecursoActividad];
@@ -685,6 +718,36 @@ function LineasActividadEditor({
                       </option>
                     ))}
                   </select>
+                </label>
+              </div>
+            )}
+
+            {l.tipo !== "gente" && (
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 8 }}>
+                <label className="field">
+                  Diésel — producto
+                  <select value={l.combustibleProductoId} onChange={(e) => actualizar(l.key, { combustibleProductoId: e.target.value })}>
+                    <option value="">Selecciona…</option>
+                    {productosCombustible.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.nombreComercial}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field">
+                  Litros del relleno
+                  <input
+                    type="number"
+                    step="0.01"
+                    style={{ width: 100 }}
+                    value={l.combustibleLitros}
+                    onChange={(e) => actualizar(l.key, { combustibleLitros: e.target.value })}
+                  />
+                </label>
+                <label className="field">
+                  Foto del relleno
+                  <input type="file" accept="image/*" onChange={(e) => actualizar(l.key, { combustibleArchivo: e.target.files?.[0] ?? null })} />
                 </label>
               </div>
             )}

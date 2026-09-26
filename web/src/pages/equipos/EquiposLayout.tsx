@@ -6,6 +6,7 @@ import { EquipoSeleccionadoContext } from "./EquipoSeleccionadoContext";
 const TABS = [
   { to: "catalogo", label: "Catálogo" },
   { to: "combustible", label: "Combustible" },
+  { to: "traslados", label: "Traslados" },
   { to: "mantenimiento", label: "Mantenimiento" },
   { to: "uso-diario", label: "Uso diario" },
 ];

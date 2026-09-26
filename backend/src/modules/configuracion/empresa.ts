@@ -13,6 +13,7 @@ export interface EmpresaConfigInput {
   firmaAtiendeNombre?: string | null;
   firmaAutorizaNombre?: string | null;
   umbralExcedentePctDefault?: number;
+  umbralDesviacionCombustiblePctDefault?: number;
 }
 
 export async function obtenerEmpresaConfig() {
@@ -27,6 +28,7 @@ export async function obtenerEmpresaConfig() {
       firmaAtiendeNombre: null,
       firmaAutorizaNombre: null,
       umbralExcedentePctDefault: 20,
+      umbralDesviacionCombustiblePctDefault: 20,
     }
   );
 }
@@ -35,6 +37,12 @@ export async function obtenerEmpresaConfig() {
 export async function obtenerUmbralExcedenteDefault(): Promise<number> {
   const config = await obtenerEmpresaConfig();
   return Number(config.umbralExcedentePctDefault ?? 20);
+}
+
+/** % de desviación contra el promedio histórico propio de un Equipo que dispara la alerta de consumo anómalo (V1 P3, 26-sep-2026, 9.13f) — reemplaza el UMBRAL_DESVIACION fijo. */
+export async function obtenerUmbralDesviacionCombustible(): Promise<number> {
+  const config = await obtenerEmpresaConfig();
+  return Number(config.umbralDesviacionCombustiblePctDefault ?? 20) / 100;
 }
 
 export async function actualizarEmpresaConfig(input: EmpresaConfigInput) {

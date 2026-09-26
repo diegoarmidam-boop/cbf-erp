@@ -6,11 +6,14 @@ import { mensajeErrorCaptura, mensajeErrorValidacion, unoSolo } from "../../core
 import {
   confirmarEntregaFertirriego,
   editarFertirriegoProgramada,
+  equiposMotobombaParaFertirriego,
   liberarFertirriegoVencido,
   listarFertirriego,
   obtenerFertirriego,
+  productosCombustibleParaFertirriego,
   productosParaFertirriego,
   programarFertirriego,
+  registrarGasolinaMotobomba,
   RolNoPuedeAjustarRecetaFertirriegoError,
   YaHayAvanceRegistradoFertirriegoError,
 } from "./fertirriego.js";
@@ -146,6 +149,43 @@ fertirriegoRouter.get("/", requirePermission("fertilizantes", "ver"), async (req
 // interprete "productos" como un id de programación.
 fertirriegoRouter.get("/productos", requirePermission("fertilizantes", "ver"), async (_req, res) => {
   res.json(await productosParaFertirriego());
+});
+
+fertirriegoRouter.get("/productos-combustible", requirePermission("fertilizantes", "ver"), async (_req, res) => {
+  res.json(await productosCombustibleParaFertirriego());
+});
+
+fertirriegoRouter.get("/equipos-motobomba", requirePermission("fertilizantes", "ver"), async (_req, res) => {
+  res.json(await equiposMotobombaParaFertirriego());
+});
+
+// Gasolina de la motobomba (V1 P3, 26-sep-2026, 9.13d) — registrado ANTES de
+// "/:id" por el mismo motivo que "/productos".
+const motobombaSchema = z.object({
+  equipoId: z.string().min(1),
+  huertaId: z.string().min(1),
+  fecha: z.string(),
+  litros: z.number().positive(),
+  productoId: z.string().min(1),
+  fotoUrl: z.string().min(1),
+});
+
+fertirriegoRouter.post("/motobomba", requirePermission("fertilizantes", "capturar"), async (req, res) => {
+  const parsed = motobombaSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
+    return;
+  }
+  if (!verificarAlcance(req, res, parsed.data.huertaId)) return;
+  try {
+    res.status(201).json(await registrarGasolinaMotobomba(parsed.data, req.usuario!.usuarioId));
+  } catch (err) {
+    if (err instanceof Error) {
+      res.status(400).json({ error: mensajeErrorCaptura(err) });
+      return;
+    }
+    throw err;
+  }
 });
 
 fertirriegoRouter.get("/:id", requirePermission("fertilizantes", "ver"), async (req, res) => {

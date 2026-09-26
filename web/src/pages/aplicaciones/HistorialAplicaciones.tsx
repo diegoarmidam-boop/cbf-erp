@@ -6,7 +6,7 @@ import FechaInput from "../../components/FechaInput";
 import { formatearFecha } from "../../lib/fecha";
 import { formatearNumero } from "../../lib/numero";
 
-const ETIQUETAS_MODALIDAD: Record<ModalidadAplicacion, string> = { mochila: "Mochila", turbina: "Turbina", aguilon: "Aguilón" };
+const ETIQUETAS_MODALIDAD: Record<ModalidadAplicacion, string> = { mochila: "Mochila", turbina: "Turbina", aguilon: "Aguilón", drone: "Drone" };
 
 interface Entrada {
   clave: string;

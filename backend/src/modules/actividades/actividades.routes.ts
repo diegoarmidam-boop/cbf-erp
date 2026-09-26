@@ -15,6 +15,7 @@ import {
   equiposTractorParaActividad,
   listarActividadesProgramadas,
   obtenerActividadProgramada,
+  productosCombustibleParaActividad,
   programarActividad,
   registrarAvanceActividad,
 } from "./actividades.js";
@@ -65,6 +66,10 @@ actividadesRouter.get("/equipos-tractor", requirePermission("actividades", "ver"
 
 actividadesRouter.get("/equipos-implemento", requirePermission("actividades", "ver"), async (_req, res) => {
   res.json(await equiposImplementoParaActividad());
+});
+
+actividadesRouter.get("/productos-combustible", requirePermission("actividades", "ver"), async (_req, res) => {
+  res.json(await productosCombustibleParaActividad());
 });
 
 actividadesRouter.get("/:id", requirePermission("actividades", "ver"), async (req, res) => {
@@ -124,6 +129,9 @@ const lineaActividadSchema = z
     operadorHoras: z.number().positive().optional(),
     implementoId: z.string().optional(),
     personas: z.array(personaLineaSchema).default([]),
+    combustibleProductoId: z.string().optional(),
+    combustibleLitros: z.number().positive().optional(),
+    combustibleFotoUrl: z.string().optional(),
   })
   .refine((l) => new Set(l.personas.map((p) => p.personalId)).size === l.personas.length, {
     message: "No se puede repetir la misma persona dos veces en la misma línea.",

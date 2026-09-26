@@ -13,9 +13,11 @@ import {
   DiaCerradoRequiereCasoExtraordinarioError,
   editarAplicacionProgramada,
   editarRealizada,
+  equiposDroneParaAplicacion,
   equiposImplementoParaAplicacion,
   equiposTractorParaAplicacion,
   liberarAplicacionVencida,
+  productosCombustibleParaAplicacion,
   listarAplicaciones,
   listarCancelacionesPendientesConfirmar,
   NoSePuedeCancelarError,
@@ -91,6 +93,14 @@ aplicacionesRouter.get("/equipos-implemento", requirePermission("aplicaciones", 
 
 aplicacionesRouter.get("/equipos-tractor", requirePermission("aplicaciones", "ver"), async (_req, res) => {
   res.json(await equiposTractorParaAplicacion());
+});
+
+aplicacionesRouter.get("/equipos-drone", requirePermission("aplicaciones", "ver"), async (_req, res) => {
+  res.json(await equiposDroneParaAplicacion());
+});
+
+aplicacionesRouter.get("/productos-combustible", requirePermission("aplicaciones", "ver"), async (_req, res) => {
+  res.json(await productosCombustibleParaAplicacion());
 });
 
 // Bodega no tiene permiso sobre "aplicaciones" (9.7) — se expone bajo el
@@ -187,7 +197,7 @@ const programarSchema = z.object({
   huertaId: z.string().min(1),
   modo: z.enum(["por_cuadro", "por_variedad"]),
   grupos: z.array(grupoAplicacionSchema).min(1),
-  recursoSugerido: z.enum(["mochila", "turbina", "aguilon"]),
+  recursoSugerido: z.enum(["mochila", "turbina", "aguilon", "drone"]),
   fechaInicio: z.string(),
   fechaFin: z.string(),
   comentario: z.string().optional(),
@@ -290,12 +300,15 @@ aplicacionesRouter.post("/:id/entregar", requirePermissionAny(["almacen", "captu
 });
 
 const lineaRealizadaSchema = z.object({
-  modalidad: z.enum(["mochila", "turbina", "aguilon"]),
+  modalidad: z.enum(["mochila", "turbina", "aguilon", "drone"]),
   tractorId: z.string().optional(),
   operadorId: z.string().optional(),
   implementoId: z.string().optional(),
   horas: z.number().positive(),
   personalIds: z.array(z.string().min(1)).default([]),
+  combustibleProductoId: z.string().optional(),
+  combustibleLitros: z.number().positive().optional(),
+  combustibleFotoUrl: z.string().optional(),
 });
 
 const realizadaSchema = z.object({

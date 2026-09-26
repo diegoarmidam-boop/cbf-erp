@@ -22,6 +22,9 @@ import { ProductoNoAutorizadoFertilizanteError, StockNoComprometidoError, Transi
 import { actualizarDosisProductoEnRecetaFertirriego, obtenerRecetaFertirriego, ROLES_RECETAS_FERTIRRIEGO } from "./recetario-fertirriego.js";
 import { cancelarOrdenesDeReferencia } from "../compras/ordenes.js";
 import { ingredientesAutorizados, resolverProductoPreferidoPorNombre } from "../almacen/preferencias.js";
+import { productosAutorizados } from "../almacen/productos.js";
+import { registrarCargaTx } from "../equipos/combustible.js";
+import { listarEquipos } from "../equipos/equipos.js";
 
 const DIAS_VENCIMIENTO = 15;
 
@@ -504,5 +507,96 @@ export async function liberarFertirriegoVencido(id: string, capturadoPorId: stri
     // que todavía no haya llegado a Almacén se cancela junto.
     await cancelarOrdenesDeReferencia(tx, id);
     return tx.fertirriegoProgramacion.update({ where: { id }, data: { estado: "vencida" } });
+  });
+}
+
+/** Productos de Almacén categoría Combustible, para el relleno de la motobomba (V1 P3, 26-sep-2026). */
+export function productosCombustibleParaFertirriego() {
+  return productosAutorizados("Combustible");
+}
+
+/** Motobombas elegibles al reportar su gasolina (V1 P3, 26-sep-2026) — "fija por rancho" en la práctica, pero el catálogo no lo restringe por Huerta. */
+export function equiposMotobombaParaFertirriego() {
+  return listarEquipos("motobomba");
+}
+
+export interface RegistrarGasolinaMotobombaInput {
+  equipoId: string; // Equipo tipo "motobomba"
+  huertaId: string;
+  fecha: string;
+  litros: number;
+  productoId: string;
+  fotoUrl: string;
+}
+
+/**
+ * Gasolina de la motobomba, ligada al día de Fertirriego (V1 P3, 26-sep-2026,
+ * 9.13d) — "una fija por rancho": se reparte entre las Secciones de ESA
+ * Huerta que tuvieron fertirriego confirmado ese día, por hectáreas, y de
+ * ahí a sus Cuadros — igual que Aplicaciones/Granular/Actividades, se
+ * calcula y GUARDA al capturar, nunca se recalcula después.
+ */
+export async function registrarGasolinaMotobomba(input: RegistrarGasolinaMotobombaInput, capturadoPorId: string) {
+  const fecha = new Date(input.fecha);
+  const registros = await prisma.riegoRegistroDiario.findMany({
+    where: { fecha, fertirriegoConfirmado: true, seccion: { huertaId: input.huertaId } },
+    include: { seccion: { include: { cuadros: true } } },
+  });
+  if (registros.length === 0) {
+    throw new Error("Ninguna Sección de esta Huerta tiene fertirriego confirmado ese día — no hay a quién repartir la gasolina.");
+  }
+
+  const hectareasPorSeccion = new Map<string, number>();
+  const cuadrosPorSeccion = new Map<string, { cuadroId: string; hectareas: number }[]>();
+  for (const r of registros) {
+    const cuadros: { cuadroId: string; hectareas: number }[] = [];
+    for (const sc of r.seccion.cuadros) {
+      const version = await obtenerVersionVigente(sc.cuadroId, fecha);
+      if (version) cuadros.push({ cuadroId: sc.cuadroId, hectareas: Number(version.hectareas) });
+    }
+    cuadrosPorSeccion.set(r.seccionId, cuadros);
+    hectareasPorSeccion.set(
+      r.seccionId,
+      cuadros.reduce((s, c) => s + c.hectareas, 0)
+    );
+  }
+  const hectareasTotales = [...hectareasPorSeccion.values()].reduce((s, h) => s + h, 0);
+  if (hectareasTotales <= 0) {
+    throw new Error("Las Secciones fertirrigadas ese día no tienen Cuadros con una configuración vigente para esta fecha.");
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const carga = await registrarCargaTx(
+      tx,
+      input.equipoId,
+      {
+        fecha: input.fecha,
+        tipo: "gasolina_garrafa",
+        litros: input.litros,
+        productoId: input.productoId,
+        huertaId: input.huertaId,
+        fotoUrl: input.fotoUrl,
+        origen: "automatico_fertirriego",
+      },
+      capturadoPorId
+    );
+
+    for (const [seccionId, hectareasSeccion] of hectareasPorSeccion) {
+      const litrosSeccion = (hectareasSeccion / hectareasTotales) * input.litros;
+      const cargaSeccion = await tx.combustibleCargaSeccion.create({
+        data: { cargaId: carga.id, seccionId, hectareasAtribuidas: hectareasSeccion, litrosAtribuidos: litrosSeccion },
+      });
+      for (const c of cuadrosPorSeccion.get(seccionId) ?? []) {
+        const litrosCuadro = (c.hectareas / hectareasSeccion) * litrosSeccion;
+        await tx.combustibleCargaCuadro.create({
+          data: { cargaSeccionId: cargaSeccion.id, cuadroId: c.cuadroId, litrosAtribuidos: litrosCuadro },
+        });
+      }
+    }
+
+    return tx.combustibleCarga.findUniqueOrThrow({
+      where: { id: carga.id },
+      include: { secciones: { include: { seccion: true, cuadros: { include: { cuadro: true } } } } },
+    });
   });
 }

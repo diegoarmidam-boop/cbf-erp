@@ -889,7 +889,7 @@ export interface HistoricoProveedor {
   cotizaciones: HistoricoProveedorCotizacion[];
 }
 
-export type TipoEquipo = "tractor" | "camioneta" | "remolque" | "implemento";
+export type TipoEquipo = "tractor" | "camioneta" | "remolque" | "implemento" | "drone" | "motobomba";
 
 export interface Equipo {
   id: string;
@@ -900,10 +900,24 @@ export interface Equipo {
   anio: number | null;
   placas: string | null;
   operadorDesignadoId: string | null;
+  ranchoActualId: string | null;
   activo: boolean;
 }
 
-export type TipoCombustible = "diesel_garrafa" | "gasolina_externa" | "diesel_externo";
+export interface EquipoTraslado {
+  id: string;
+  equipoId: string;
+  fecha: string;
+  huertaOrigenId: string | null;
+  huertaOrigen: Huerta | null;
+  huertaDestinoId: string;
+  huertaDestino: Huerta;
+  litros: string;
+  fotoUrl: string;
+  fechaRegistro: string;
+}
+
+export type TipoCombustible = "diesel_garrafa" | "gasolina_garrafa" | "gasolina_externa" | "diesel_externo";
 
 export interface CombustibleCarga {
   id: string;
@@ -914,12 +928,15 @@ export interface CombustibleCarga {
   horometro: string | null;
   litros: string;
   precioUnitario: string | null;
+  huertaId: string | null;
+  productoId: string | null;
+  fotoUrl: string | null;
 }
 
 export interface AlertaRendimiento {
   tasaActual: number;
   promedioHistorico: number;
-  unidad: "L/hora" | "km/L";
+  unidad: "L/hora" | "km/L" | "L/ha";
   desviacionPorcentual: number;
   anomalo: boolean;
 }
@@ -1046,7 +1063,7 @@ export type EstadoAplicacion = "programada" | "entregada" | "realizada" | "venci
 
 // Modalidad real de ejecución de una Aplicación (9.7, 8-ago-2026) — exclusivo
 // de Aplicaciones, Fertilización Granular conserva RecursoTipo sin cambios.
-export type ModalidadAplicacion = "mochila" | "turbina" | "aguilon";
+export type ModalidadAplicacion = "mochila" | "turbina" | "aguilon" | "drone";
 
 export interface RealizadaCuadro {
   id: string;

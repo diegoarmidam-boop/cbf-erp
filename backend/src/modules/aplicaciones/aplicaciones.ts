@@ -14,7 +14,7 @@ import type { Prisma, Rol } from "@prisma/client";
 import { prisma } from "../../core/db.js";
 import type { TransactionClient } from "../../core/db.js";
 import { ingredientesAutorizados, resolverProductoPreferidoPorNombre } from "../almacen/preferencias.js";
-import { categoriaRequiereIngredienteActivo, nombresCategoriasConIngredienteActivo } from "../almacen/productos.js";
+import { categoriaRequiereIngredienteActivo, nombresCategoriasConIngredienteActivo, productosAutorizados } from "../almacen/productos.js";
 import { actualizarDosisProductoEnReceta, obtenerReceta, ROLES_RECETAS } from "../recetario/recetario.js";
 import {
   ajustarCantidadProducto,
@@ -28,6 +28,8 @@ import {
 } from "../almacen/movimientos.js";
 import { listarEquipos } from "../equipos/equipos.js";
 import { registrarUsoDiarioAutomaticoTx, borrarUsoDiarioDeLineasTx } from "../equipos/uso-diario.js";
+import { registrarCargaTx, revertirCargaGarrafaTx } from "../equipos/combustible.js";
+import { verificarRanchoDelTractor } from "../equipos/traslados.js";
 import { obtenerVersionVigente } from "../unidades-produccion/cuadros.js";
 import { obtenerConfigNomina } from "../nomina/config.js";
 import { aActividadCalc } from "../nomina/util.js";
@@ -78,7 +80,7 @@ export class NoSePuedeCancelarError extends Error {
   }
 }
 
-export type ModalidadAplicacion = "mochila" | "turbina" | "aguilon";
+export type ModalidadAplicacion = "mochila" | "turbina" | "aguilon" | "drone";
 
 // Ingrediente Activo, nunca marca (Prioridad 1, 3-sep-2026) — Programar ya
 // no captura productoId directamente, solo el Ingrediente Activo; se
@@ -823,6 +825,11 @@ export interface LineaRealizadaInput {
   implementoId?: string;
   horas: number;
   personalIds: string[];
+  // Relleno del tractor de ESTA línea (V1 P3, 26-sep-2026, 9.13b) —
+  // obligatorio para Turbina/Aguilón; Drone no lleva combustible.
+  combustibleProductoId?: string;
+  combustibleLitros?: number;
+  combustibleFotoUrl?: string;
 }
 
 export interface RegistrarRealizadaInput {
@@ -836,15 +843,18 @@ export interface RegistrarRealizadaInput {
 }
 
 /**
- * Captura de maquinaria y personas por reporte (9.7, confirmado 8-ago-2026):
- * cada línea es una de las 3 modalidades fijas. Turbina/Aguilón exigen
- * Tractor+Operador+Implemento; Aguilón además necesita su propia gente
- * detrás; Mochila solo lleva gente, sin tractor/implemento; Turbina no
- * lleva gente extra (el operador ya está contado aparte).
+ * Captura de maquinaria y personas por reporte (9.7, confirmado 8-ago-2026;
+ * V1 P3 25/26-sep-2026 agrega Drone): cada línea es una de las 4 modalidades
+ * fijas. Turbina/Aguilón exigen Tractor+Operador+Implemento, y el relleno de
+ * diésel de ese tractor (litros+foto); Aguilón además necesita su propia
+ * gente detrás; Mochila solo lleva gente, sin tractor/implemento/combustible;
+ * Turbina no lleva gente extra (el operador ya está contado aparte); Drone
+ * lleva el Equipo (drone) + piloto (operador), sin implemento ni gente
+ * extra, y SIN combustible (funciona a batería).
  */
 function validarLineas(lineas: LineaRealizadaInput[]) {
   if (!lineas || lineas.length === 0) {
-    throw new Error("Falta capturar al menos una línea de recurso (Mochila, Turbina o Aguilón) en este reporte.");
+    throw new Error("Falta capturar al menos una línea de recurso (Mochila, Turbina, Aguilón o Drone) en este reporte.");
   }
   for (const l of lineas) {
     if (l.modalidad === "mochila") {
@@ -854,6 +864,13 @@ function validarLineas(lineas: LineaRealizadaInput[]) {
       if (!l.personalIds || l.personalIds.length === 0) {
         throw new Error("Una línea de Mochila necesita al menos una persona.");
       }
+    } else if (l.modalidad === "drone") {
+      if (!l.tractorId || !l.operadorId) {
+        throw new Error("Una línea de Drone necesita el equipo (Drone) y su piloto.");
+      }
+      if (l.implementoId) throw new Error("Una línea de Drone no lleva implemento.");
+      if (l.personalIds && l.personalIds.length > 0) throw new Error("Una línea de Drone no lleva gente extra — solo el piloto.");
+      if (l.combustibleLitros || l.combustibleFotoUrl) throw new Error("Una línea de Drone no lleva combustible — funciona a batería.");
     } else {
       if (!l.tractorId || !l.operadorId || !l.implementoId) {
         throw new Error(`Una línea de ${l.modalidad === "turbina" ? "Turbina" : "Aguilón"} necesita Tractor, Operador e Implemento.`);
@@ -863,6 +880,9 @@ function validarLineas(lineas: LineaRealizadaInput[]) {
       }
       if (l.modalidad === "aguilon" && (!l.personalIds || l.personalIds.length === 0)) {
         throw new Error("Una línea de Aguilón necesita al menos una persona detrás del tractor.");
+      }
+      if (!l.combustibleProductoId || !l.combustibleLitros || !l.combustibleFotoUrl) {
+        throw new Error("Falta el relleno de diésel de esta línea (producto, litros y foto).");
       }
     }
   }
@@ -1017,6 +1037,10 @@ async function crearLineasYNomina(
   const fecha = new Date(fechaReal);
 
   for (const linea of lineas) {
+    if (linea.modalidad === "turbina" || linea.modalidad === "aguilon") {
+      await verificarRanchoDelTractor(linea.tractorId!, huertaId);
+    }
+
     const lineaCreada = await tx.aplicacionRealizadaLinea.create({
       data: {
         realizadaId,
@@ -1028,6 +1052,25 @@ async function crearLineasYNomina(
         personas: { create: linea.personalIds.map((personalId) => ({ personalId })) },
       },
     });
+
+    if (linea.modalidad === "turbina" || linea.modalidad === "aguilon") {
+      const carga = await registrarCargaTx(
+        tx,
+        linea.tractorId!,
+        {
+          fecha: fechaReal,
+          tipo: "diesel_garrafa",
+          litros: linea.combustibleLitros!,
+          productoId: linea.combustibleProductoId,
+          huertaId,
+          fotoUrl: linea.combustibleFotoUrl,
+          origen: "automatico_aplicacion",
+          referenciaLineaId: lineaCreada.id,
+        },
+        registradoPorId
+      );
+      await tx.aplicacionRealizadaLinea.update({ where: { id: lineaCreada.id }, data: { combustibleCargaId: carga.id } });
+    }
 
     const horasPorMiembro = repartirMontoPorHectareas(reparto.porMiembro, hectareasReporte, linea.horas);
     for (const personalId of personasAPagarDeLinea(linea)) {
@@ -1118,8 +1161,10 @@ export async function editarRealizada(realizadaId: string, input: EditarRealizad
 
     await borrarUsoDiarioDeLineasTx(tx, lineaIdsAnteriores);
     await tx.registroNomina.deleteMany({ where: { origen: "automatico_aplicacion", referenciaOrigenId: realizadaId } });
+    const cargaIdsAnteriores = realizada.lineas.map((l) => l.combustibleCargaId).filter((id): id is string => id != null);
     await tx.aplicacionRealizadaLineaPersona.deleteMany({ where: { lineaId: { in: lineaIdsAnteriores } } });
     await tx.aplicacionRealizadaLinea.deleteMany({ where: { realizadaId } });
+    for (const cargaId of cargaIdsAnteriores) await revertirCargaGarrafaTx(tx, cargaId, editadoPorId);
 
     await crearLineasYNomina(tx, realizadaId, aplicacion.huertaId, fechaISO, input.hectareas, input.lineas, repartoDespues, actividad.id, tarifaAplicada, editadoPorId);
 
@@ -1372,4 +1417,14 @@ export function equiposImplementoParaAplicacion() {
 /** Tractores elegibles en una línea de Turbina/Aguilón (9.7/9.13). */
 export function equiposTractorParaAplicacion() {
   return listarEquipos("tractor");
+}
+
+/** Drones elegibles en una línea de Drone (V1 P3, 26-sep-2026). */
+export function equiposDroneParaAplicacion() {
+  return listarEquipos("drone");
+}
+
+/** Productos de Almacén categoría Combustible, para el relleno de una línea de Turbina/Aguilón (V1 P3, 26-sep-2026, corrige el selector que no filtraba por categoría). */
+export function productosCombustibleParaAplicacion() {
+  return productosAutorizados("Combustible");
 }

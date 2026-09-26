@@ -3,11 +3,13 @@ import { useOutletContext } from "react-router-dom";
 import { api, ApiError } from "../../lib/api";
 import { useEquipos } from "../../lib/useEquipos";
 import { usePersonal } from "../../lib/usePersonal";
+import { useHuertas } from "../../lib/useHuertas";
 import type { Equipo, TipoEquipo } from "../../lib/types";
 
 export default function Catalogo() {
   const { equipos, cargando, refetch } = useEquipos(undefined, true);
   const { personal } = usePersonal();
+  const { huertas } = useHuertas();
   const { refetchEquipos } = useOutletContext<{ refetchEquipos: () => void }>();
   const [error, setError] = useState<string | null>(null);
   const [mostrarForm, setMostrarForm] = useState(false);
@@ -117,6 +119,8 @@ export default function Catalogo() {
               <option value="camioneta">Camioneta</option>
               <option value="remolque">Remolque</option>
               <option value="implemento">Implemento</option>
+              <option value="drone">Drone</option>
+              <option value="motobomba">Motobomba</option>
             </select>
           </label>
           <label className="field">
@@ -174,6 +178,7 @@ export default function Catalogo() {
               <th>Año</th>
               <th>Placas</th>
               <th>Operador designado</th>
+              <th>Rancho actual</th>
               <th>Estado</th>
               <th></th>
             </tr>
@@ -189,6 +194,7 @@ export default function Catalogo() {
                 <td>{e.anio ?? "—"}</td>
                 <td>{e.placas ?? "—"}</td>
                 <td>{personal.find((p) => p.id === e.operadorDesignadoId)?.nombreCompleto ?? "—"}</td>
+                <td>{e.tipo === "tractor" ? huertas.find((h) => h.id === e.ranchoActualId)?.nombre ?? "Sin asignar" : "—"}</td>
                 <td>
                   <span className={`tag ${e.activo ? "tag-success" : "tag-danger"}`}>{e.activo ? "Activo" : "Inactivo"}</span>
                 </td>

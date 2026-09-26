@@ -3,12 +3,15 @@ import type { Prisma, TipoRecursoActividad } from "@prisma/client";
 import { prisma } from "../../core/db.js";
 import type { TransactionClient } from "../../core/db.js";
 import { obtenerVersionVigente } from "../unidades-produccion/cuadros.js";
+import { productosAutorizados } from "../almacen/productos.js";
 import { actualizarLineasCintillaTx } from "../unidades-produccion/secciones-riego.js";
 import { obtenerConfigNomina } from "../nomina/config.js";
 import { aActividadCalc } from "../nomina/util.js";
 import { diaEstaCerrado } from "../nomina/captura.js";
 import { registrarUsoDiarioAutomaticoTx, borrarUsoDiarioDeLineasTx } from "../equipos/uso-diario.js";
 import { listarEquipos } from "../equipos/equipos.js";
+import { registrarCargaTx, revertirCargaGarrafaTx } from "../equipos/combustible.js";
+import { verificarRanchoDelTractor } from "../equipos/traslados.js";
 import { comunicacionActiva } from "../../core/moduloComunicacion.js";
 
 /**
@@ -56,6 +59,11 @@ export function equiposImplementoParaActividad() {
 /** Tractores elegibles en una línea de Tractor/Mixta (9.4/9.13, 15-ago-2026). */
 export function equiposTractorParaActividad() {
   return listarEquipos("tractor");
+}
+
+/** Productos de Almacén categoría Combustible, para el relleno de una línea de Tractor/Mixta (V1 P3, 26-sep-2026). */
+export function productosCombustibleParaActividad() {
+  return productosAutorizados("Combustible");
 }
 
 /** Catálogo de actividades elegibles al programar (9.4) — todo el catálogo activo, salvo lo reservado por otros módulos. */
@@ -300,6 +308,10 @@ export interface LineaActividadInput {
   operadorHoras?: number;
   implementoId?: string;
   personas: PersonaLineaActividadInput[];
+  // Relleno del tractor de ESTA línea (V1 P3, 26-sep-2026, 9.13b) — obligatorio para Tractor/Mixta.
+  combustibleProductoId?: string;
+  combustibleLitros?: number;
+  combustibleFotoUrl?: string;
 }
 
 export interface RegistrarAvanceActividadInput {
@@ -330,6 +342,9 @@ function validarLineasActividad(lineas: LineaActividadInput[], tipoRecursoActivi
       if (!l.operadorHoras || l.operadorHoras <= 0) throw new Error("Falta capturar las horas del operador de una línea.");
       if (l.tipo === "tractor" && l.personas && l.personas.length > 0) throw new Error("Una línea de Tractor no lleva gente extra.");
       if (l.tipo === "mixta" && (!l.personas || l.personas.length === 0)) throw new Error("Una línea de Mixta necesita al menos una persona además del operador.");
+      if (!l.combustibleProductoId || !l.combustibleLitros || !l.combustibleFotoUrl) {
+        throw new Error("Falta el relleno de diésel de esta línea (producto, litros y foto).");
+      }
     }
     for (const p of l.personas ?? []) {
       if (!p.horas || p.horas <= 0) throw new Error("Falta capturar las horas de una persona.");
@@ -381,6 +396,10 @@ async function crearLineasYNomina(
   }
 
   for (const l of lineas) {
+    if (l.tipo === "tractor" || l.tipo === "mixta") {
+      await verificarRanchoDelTractor(l.tractorId!, huertaId);
+    }
+
     const lineaCreada = await tx.actividadRealizadaLinea.create({
       data: {
         realizadaId,
@@ -392,6 +411,25 @@ async function crearLineasYNomina(
         personas: { create: l.personas.map((p) => ({ personalId: p.personalId, horas: p.horas })) },
       },
     });
+
+    if (l.tipo === "tractor" || l.tipo === "mixta") {
+      const carga = await registrarCargaTx(
+        tx,
+        l.tractorId!,
+        {
+          fecha: fecha.toISOString().slice(0, 10),
+          tipo: "diesel_garrafa",
+          litros: l.combustibleLitros!,
+          productoId: l.combustibleProductoId,
+          huertaId,
+          fotoUrl: l.combustibleFotoUrl,
+          origen: "automatico_actividad",
+          referenciaLineaId: lineaCreada.id,
+        },
+        registradoPorId
+      );
+      await tx.actividadRealizadaLinea.update({ where: { id: lineaCreada.id }, data: { combustibleCargaId: carga.id } });
+    }
 
     if (l.tipo !== "gente" && l.operadorId && l.operadorHoras) {
       await pagar(l.operadorId, l.operadorHoras);
@@ -535,8 +573,10 @@ export async function editarAvanceActividad(realizadaId: string, input: EditarAv
 
     await borrarUsoDiarioDeLineasTx(tx, lineaIdsAnteriores);
     await tx.registroNomina.deleteMany({ where: { origen: "automatico_actividad", referenciaOrigenId: realizadaId } });
+    const cargaIdsAnteriores = realizada.lineas.map((l) => l.combustibleCargaId).filter((id): id is string => id != null);
     await tx.actividadRealizadaLineaPersona.deleteMany({ where: { lineaId: { in: lineaIdsAnteriores } } });
     await tx.actividadRealizadaLinea.deleteMany({ where: { realizadaId } });
+    for (const cargaId of cargaIdsAnteriores) await revertirCargaGarrafaTx(tx, cargaId, editadoPorId);
 
     await crearLineasYNomina(tx, realizadaId, programada.huertaId, programada.actividadId, realizada.fechaReal, input.hectareas, input.lineas, reparto, tarifaAplicada, editadoPorId);
 

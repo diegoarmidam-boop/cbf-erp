@@ -10,6 +10,7 @@ import { candadosDeHuerta } from "../modules/almacen/almacen-local.js";
 import { listarAjustesPendientesConfirmar } from "../modules/almacen/movimientos.js";
 import { diasPendientesDeCierre } from "../modules/nomina/cierre.js";
 import { estadoRiegoTodasUPs } from "../modules/riego/riego.js";
+import { calcularAlertaLitrosPorHectarea, calcularAlertaRendimiento } from "../modules/equipos/combustible.js";
 import type { Rol } from "@prisma/client";
 
 // Firma digital de recepción de cancelaciones (9.7): el documento dice
@@ -273,6 +274,36 @@ async function calcularNotificaciones(rol: Rol, huertaIdAlcance: string | null):
           urgente: true,
           fecha: f.fechaCreacion.toISOString(),
           enlace: `/fertilizantes/granular?huertaId=${f.huertaId}&id=${f.id}`,
+        });
+      }
+    }
+  }
+
+  // 4.5) Consumo de combustible anómalo (V1 P3, 26-sep-2026, 9.13f) — a
+  // Dirección General, Gerente Técnico de Producción, y al Supervisor de la
+  // Huerta donde está asignado el equipo (su "Rancho actual") — por
+  // instrucción explícita del prompt, no gobernado por la matriz de
+  // permisos de "equipos" como los demás bloques de esta función.
+  const puedeVerAlertaCombustible =
+    rol === "director_general" ||
+    rol === "encargado_sistemas" ||
+    rol === "gerente_tecnico_produccion" ||
+    (rol === "supervisor_huerta" && huertaIdAlcance != null);
+  if (puedeVerAlertaCombustible) {
+    const equipos = await prisma.equipo.findMany({ where: { activo: true, tipo: { in: ["tractor", "camioneta", "motobomba"] } } });
+    for (const equipo of equipos) {
+      if (rol === "supervisor_huerta" && equipo.ranchoActualId !== huertaIdAlcance) continue;
+      const alertas = [await calcularAlertaRendimiento(equipo.id), await calcularAlertaLitrosPorHectarea(equipo.id)];
+      for (const alerta of alertas) {
+        if (!alerta?.anomalo) continue;
+        notificaciones.push({
+          id: `combustible-anomalo-${equipo.id}-${alerta.unidad}`,
+          tipo: "combustible_anomalo",
+          titulo: `Consumo de combustible fuera de lo normal — ${equipo.folio}`,
+          detalle: `${alerta.unidad}: ${alerta.tasaActual.toFixed(2)} vs. promedio histórico ${alerta.promedioHistorico.toFixed(2)} (${(alerta.desviacionPorcentual * 100).toFixed(0)}%)`,
+          urgente: true,
+          fecha: new Date().toISOString(),
+          enlace: `/equipos/combustible?equipoId=${equipo.id}`,
         });
       }
     }

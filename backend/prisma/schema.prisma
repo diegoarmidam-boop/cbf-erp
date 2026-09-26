@@ -184,6 +184,11 @@ model Huerta {
   ciclos                  Ciclo[]
   ordenesCompraDestino    OrdenCompra[]             @relation("OrdenCompraHuertaDestino")
   viveroTraspasos         ViveroTraspaso[]
+  // Combustible y Traslados de tractor (V1 P3, 26-sep-2026):
+  equiposConRanchoActual  Equipo[]                  @relation("EquipoRanchoActual")
+  trasladosOrigen         EquipoTraslado[]          @relation("EquipoTrasladoOrigen")
+  trasladosDestino        EquipoTraslado[]          @relation("EquipoTrasladoDestino")
+  combustibleCargas       CombustibleCarga[]
 }
 
 enum EstatusCuadro {
@@ -214,6 +219,7 @@ model Cuadro {
   fertilizacionGranularGrupoVariedades       FertilizacionGranularGrupoVariedad[]
   fertilizacionGranularRealizadaGrupoCuadros FertilizacionGranularRealizadaGrupoCuadro[]
   viveroTraspasos                        ViveroTraspaso[]
+  combustibleCargaCuadros                CombustibleCargaCuadro[]
 
   @@unique([huertaId, nombre])
 }
@@ -309,6 +315,7 @@ model SeccionRiego {
   fertirriegoSecciones FertirriegoSeccion[]
   registrosRiego       RiegoRegistroDiario[]
   lineasCintilla       SeccionRiegoLineasCintilla[]
+  combustibleCargas    CombustibleCargaSeccion[]
 
   @@unique([huertaId, nombre])
 }
@@ -542,6 +549,10 @@ model EmpresaConfig {
   // hechas si se ajusta este valor después) -- este campo solo alimenta el
   // default con el que se crea cada Comparación nueva.
   umbralExcedentePctDefault Decimal @default(20) @db.Decimal(5, 2)
+  // Consumo y alerta de Equipos (V1 P3, 26-sep-2026, 9.13f): reemplaza la
+  // constante fija UMBRAL_DESVIACION = 0.3 del código — % de desviación
+  // contra el promedio histórico PROPIO de un equipo que dispara la alerta.
+  umbralDesviacionCombustiblePctDefault Decimal @default(20) @db.Decimal(5, 2)
 }
 
 // Contador atómico genérico (2-sep-2026, primer uso: folio de Orden de
@@ -847,6 +858,8 @@ enum TipoEquipo {
   camioneta
   remolque
   implemento
+  drone // V1 P3, 26-sep-2026: 4ta modalidad de Aplicaciones — a batería, sin combustible.
+  motobomba // V1 P3, 26-sep-2026: fija por rancho, para el fertirriego inyectado.
 }
 
 model Equipo {
@@ -867,7 +880,18 @@ model Equipo {
   operadorDesignadoId String?
   operadorDesignado   Personal? @relation("EquipoOperadorDesignado", fields: [operadorDesignadoId], references: [id])
 
+  // "Rancho actual" (V1 P3, 26-sep-2026) — solo tiene sentido para
+  // Tractores (y Motobomba, fija por rancho desde que se da de alta); se
+  // deja disponible para cualquier tipo, sin candado a nivel de esquema,
+  // porque no cuesta nada dejarlo abierto y evita un caso especial más.
+  // Null mientras nadie lo haya asignado (equipo recién dado de alta, o
+  // histórico previo a este campo) — el candado de Traslado no bloquea en
+  // ese caso, solo a partir de la primera asignación conocida.
+  ranchoActualId String?
+  ranchoActual   Huerta? @relation("EquipoRanchoActual", fields: [ranchoActualId], references: [id])
+
   cargasCombustible          CombustibleCarga[]
+  traslados                  EquipoTraslado[]
   mantenimientoConceptos     MantenimientoConcepto[]
   mantenimientoEventos       MantenimientoEvento[]
   usoDiario                  EquipoUsoDiario[]
@@ -878,10 +902,46 @@ model Equipo {
   actividadLineasImplemento  ActividadRealizadaLinea[]  @relation("ActividadLineaImplemento")
 }
 
+// Traslado de tractor entre ranchos (V1 P3, 26-sep-2026, 9.13e): el
+// combustible del traslado es gasto INDIRECTO de la empresa — no se liga a
+// ninguna Huerta ni al consumo por hora del tractor, a propósito no lleva
+// huertaId en CombustibleCarga. Lo registra el Supervisor del rancho
+// DESTINO. huertaOrigenId es el ranchoActual del tractor ANTES de este
+// registro (puede ser null si nunca se le había asignado uno).
+model EquipoTraslado {
+  id              String   @id @default(uuid())
+  equipoId        String
+  equipo          Equipo   @relation(fields: [equipoId], references: [id])
+  fecha           DateTime @db.Date
+  huertaOrigenId  String?
+  huertaOrigen    Huerta?  @relation("EquipoTrasladoOrigen", fields: [huertaOrigenId], references: [id])
+  huertaDestinoId String
+  huertaDestino   Huerta   @relation("EquipoTrasladoDestino", fields: [huertaDestinoId], references: [id])
+  litros          Decimal  @db.Decimal(10, 2)
+  fotoUrl         String
+  registradoPorId String
+  fechaRegistro   DateTime @default(now())
+
+  @@index([equipoId, fecha])
+}
+
 enum TipoCombustible {
-  diesel_garrafa // tractores — sale del Almacén como insumo
+  diesel_garrafa // tractores — sale del Almacén Local del rancho, como cualquier producto
+  gasolina_garrafa // motobomba de Fertirriego — mismo criterio que diesel_garrafa
   gasolina_externa // camionetas — gasolinera externa, no consume Almacén
   diesel_externo // camionetas a diésel que cargan directo en gasolinera
+}
+
+// Origen de una carga (V1 P3, 26-sep-2026) — mismo patrón que
+// OrigenRegistroNomina/OrigenUsoDiario: "manual" es la captura libre en la
+// pantalla de Equipos > Combustible (camionetas, o un relleno suelto);
+// las automáticas nacen de una línea de avance con tractor, o del reporte
+// de gasolina de motobomba ligado a Fertirriego/Riego.
+enum OrigenCombustibleCarga {
+  manual
+  automatico_aplicacion
+  automatico_actividad
+  automatico_fertirriego
 }
 
 model CombustibleCarga {
@@ -894,9 +954,63 @@ model CombustibleCarga {
   horometro      Decimal?        @db.Decimal(10, 1) // tractores
   litros         Decimal         @db.Decimal(10, 2)
   precioUnitario Decimal?        @db.Decimal(10, 2) // camionetas
+  // Huerta cuyo Almacén Local (garrafa) se descontó (V1 P3, 26-sep-2026) —
+  // solo para diesel_garrafa/gasolina_garrafa; null en los tipos externos
+  // (no hay garrafa/Huerta de por medio). El Traslado de tractor NUNCA
+  // llena este campo aunque lleve litros — es indirecto a propósito.
+  huertaId       String?
+  huerta         Huerta?         @relation(fields: [huertaId], references: [id])
+  // Producto de Almacén del que salió (V1 P3, 26-sep-2026) — mismo alcance
+  // que huertaId: solo diesel_garrafa/gasolina_garrafa. Necesario para poder
+  // revertir el descuento de Almacén Local si el reporte se edita/borra.
+  productoId     String?
+  producto       Producto?       @relation(fields: [productoId], references: [id])
+  // Foto del relleno (V1 P3, 26-sep-2026) — obligatoria a nivel de
+  // aplicación para diesel_garrafa/gasolina_garrafa; null en capturas
+  // manuales de camioneta anteriores a este campo.
+  fotoUrl        String?
+  origen         OrigenCombustibleCarga @default(manual)
+  // AplicacionRealizadaLinea.id / ActividadRealizadaLinea.id que generó esta
+  // carga automáticamente — idempotencia y trazabilidad, mismo criterio que
+  // EquipoUsoDiario.referenciaLineaId.
+  referenciaLineaId String?
   capturadoPorId String
 
+  secciones        CombustibleCargaSeccion[]
+  aplicacionLinea  AplicacionRealizadaLinea?
+  actividadLinea   ActividadRealizadaLinea?
+
   @@index([equipoId, fecha])
+  @@index([huertaId, fecha])
+  @@index([referenciaLineaId])
+}
+
+// Reparto de la gasolina de motobomba a las Secciones fertirrigadas ese día
+// (V1 P3, 26-sep-2026, 9.13d) — igual que Aplicaciones/Granular/Actividades:
+// se calcula y GUARDA al capturar, nunca se recalcula después.
+model CombustibleCargaSeccion {
+  id                  String                    @id @default(uuid())
+  cargaId             String
+  carga               CombustibleCarga          @relation(fields: [cargaId], references: [id])
+  seccionId           String
+  seccion             SeccionRiego              @relation(fields: [seccionId], references: [id])
+  hectareasAtribuidas Decimal                   @db.Decimal(10, 4)
+  litrosAtribuidos    Decimal                   @db.Decimal(10, 4)
+
+  cuadros CombustibleCargaCuadro[]
+
+  @@unique([cargaId, seccionId])
+}
+
+model CombustibleCargaCuadro {
+  id               String                  @id @default(uuid())
+  cargaSeccionId   String
+  cargaSeccion     CombustibleCargaSeccion @relation(fields: [cargaSeccionId], references: [id])
+  cuadroId         String
+  cuadro           Cuadro                  @relation(fields: [cuadroId], references: [id])
+  litrosAtribuidos Decimal                 @db.Decimal(10, 4)
+
+  @@index([cuadroId])
 }
 
 model MantenimientoConcepto {
@@ -1077,6 +1191,7 @@ model Producto {
   recetaFertirriegoProductos        RecetaFertirriegoProducto[]
   recepcionesComoRecibido           OrdenCompraRecepcion[]            @relation("ProductoRecibidoEnRecepcion")
   viveroPresupuestoSemilla          ViveroPresupuestoSemilla[]
+  combustibleCargas                 CombustibleCarga[]
 
   @@index([categoria])
 }
@@ -1604,6 +1719,10 @@ model ActividadRealizadaLinea {
   operadorHoras Decimal?             @db.Decimal(6, 2) // solo si tipo=tractor/mixta
   implementoId  String?
   implemento    Equipo?              @relation("ActividadLineaImplemento", fields: [implementoId], references: [id])
+  // Relleno de diésel de ESTE tractor en ESTE reporte (V1 P3, 26-sep-2026,
+  // 9.13b) — obligatorio (litros + foto) cuando tipo=tractor/mixta.
+  combustibleCargaId String?           @unique
+  combustibleCarga   CombustibleCarga? @relation(fields: [combustibleCargaId], references: [id])
 
   personas ActividadRealizadaLineaPersona[]
 
@@ -1666,6 +1785,7 @@ enum ModalidadAplicacion {
   mochila
   turbina
   aguilon
+  drone // V1 P3, 26-sep-2026 — a batería, sin combustible; sí lleva piloto (operador).
 }
 
 enum ConcentracionUnidad {
@@ -1928,13 +2048,22 @@ model AplicacionRealizadaLinea {
   realizadaId  String
   realizada    AplicacionRealizada @relation(fields: [realizadaId], references: [id])
   modalidad    ModalidadAplicacion
+  // Turbina/Aguilón: el tractor. Drone (V1 P3, 26-sep-2026): el Equipo tipo
+  // "drone" — mismo campo, reutilizado a propósito (es "el equipo principal
+  // de esta línea" en cualquiera de los dos casos).
   tractorId    String?
   tractor      Equipo?             @relation("AplicacionLineaTractor", fields: [tractorId], references: [id])
+  // Turbina/Aguilón: el operador del tractor. Drone: el piloto.
   operadorId   String?
   operador     Personal?           @relation("AplicacionLineaOperador", fields: [operadorId], references: [id])
   implementoId String?
   implemento   Equipo?             @relation("AplicacionLineaImplemento", fields: [implementoId], references: [id])
   horas        Decimal             @db.Decimal(6, 2)
+  // Relleno de diésel de ESTE tractor en ESTE reporte (V1 P3, 26-sep-2026,
+  // 9.13b) — obligatorio (litros + foto) para Turbina/Aguilón. Drone no
+  // lleva combustible (funciona a batería) — este campo se queda null ahí.
+  combustibleCargaId String?           @unique
+  combustibleCarga   CombustibleCarga? @relation(fields: [combustibleCargaId], references: [id])
 
   personas AplicacionRealizadaLineaPersona[]
 

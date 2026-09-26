@@ -1,14 +1,15 @@
 import { Router } from "express";
 import { z } from "zod";
-import { requireAuth, requirePermission } from "../../middleware/auth.js";
+import { requireAuth, requirePermission, huertaIdDeAlcance } from "../../middleware/auth.js";
 import { prisma } from "../../core/db.js";
 import { mensajeErrorCaptura, mensajeErrorValidacion, unoSolo } from "../../core/http.js";
 import { crearEquipo, editarEquipo, listarEquipos, sugerirFolio } from "./equipos.js";
+import { registrarTraslado, historialTraslados, TrasladoSoloParaTractoresError } from "./traslados.js";
 
 export const equiposRouter = Router();
 equiposRouter.use(requireAuth);
 
-const tipoEnum = z.enum(["tractor", "camioneta", "remolque", "implemento"]);
+const tipoEnum = z.enum(["tractor", "camioneta", "remolque", "implemento", "drone", "motobomba"]);
 
 // `todas=true` para la pantalla de catálogo (para poder reactivar); el
 // resto de selectores del sistema solo debe ofrecer equipos activos.
@@ -86,4 +87,44 @@ equiposRouter.patch("/:id/activo", requirePermission("equipos", "editar"), async
   }
   const equipo = await prisma.equipo.update({ where: { id: unoSolo(req.params.id) }, data: { activo: parsed.data.activo } });
   res.json(equipo);
+});
+
+// Traslado de tractor entre ranchos (V1 P3, 26-sep-2026, 9.13e) — la única
+// forma de cambiar el "Rancho actual" de un tractor, siempre con bitácora.
+const trasladoSchema = z.object({
+  fecha: z.string(),
+  huertaDestinoId: z.string().min(1),
+  litros: z.number().positive(),
+  fotoUrl: z.string().min(1),
+});
+
+equiposRouter.get("/:id/traslados", requirePermission("equipos", "ver"), async (req, res) => {
+  res.json(await historialTraslados(unoSolo(req.params.id)));
+});
+
+equiposRouter.post("/:id/traslados", requirePermission("equipos", "capturar"), async (req, res) => {
+  const parsed = trasladoSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
+    return;
+  }
+  // Lo registra el Supervisor del rancho DESTINO (9.13e) — un usuario con
+  // alcance de Huerta (Supervisor) solo puede registrar Traslados HACIA su
+  // propia Huerta; roles sin alcance (Dirección General, etc.) no tienen
+  // esta restricción.
+  const alcance = huertaIdDeAlcance(req);
+  if (alcance && alcance !== parsed.data.huertaDestinoId) {
+    res.status(403).json({ error: "Solo puedes registrar Traslados hacia tu propia Huerta." });
+    return;
+  }
+  try {
+    const traslado = await registrarTraslado({ equipoId: unoSolo(req.params.id), ...parsed.data }, req.usuario!.usuarioId);
+    res.status(201).json(traslado);
+  } catch (err) {
+    if (err instanceof TrasladoSoloParaTractoresError) {
+      res.status(400).json({ error: err.message });
+      return;
+    }
+    res.status(400).json({ error: mensajeErrorCaptura(err) });
+  }
 });

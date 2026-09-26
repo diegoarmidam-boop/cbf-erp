@@ -6,7 +6,8 @@ import { useHuertas } from "../../lib/useHuertas";
 import { usePersonal } from "../../lib/usePersonal";
 import { useRecetas } from "../../lib/useRecetas";
 import { useCatalogoAbierto } from "../../lib/useCatalogoAbierto";
-import type { Aplicacion, AplicacionRealizadaLinea, ConcentracionUnidad, Cuadro, Equipo, IngredienteAutorizado, ModalidadAplicacion, OrdenAplicacion, TanquePendienteProducto } from "../../lib/types";
+import type { Aplicacion, AplicacionRealizadaLinea, ConcentracionUnidad, Cuadro, Equipo, IngredienteAutorizado, ModalidadAplicacion, OrdenAplicacion, Producto, TanquePendienteProducto } from "../../lib/types";
+import { subirEvidencia } from "../../lib/subirEvidencia";
 import FechaInput from "../../components/FechaInput";
 import { formatearFecha, formatearInstante } from "../../lib/fecha";
 import { formatearNumero } from "../../lib/numero";
@@ -35,6 +36,7 @@ const ETIQUETAS_MODALIDAD: Record<ModalidadAplicacion, string> = {
   mochila: "Mochila",
   turbina: "Turbina",
   aguilon: "Aguilón",
+  drone: "Drone",
 };
 
 function tagEstado(estado: string) {
@@ -74,10 +76,25 @@ interface LineaForm {
   implementoId: string;
   horas: string;
   personalIds: string[];
+  // Relleno de diésel de esta línea (V1 P3, 26-sep-2026) — Turbina/Aguilón.
+  combustibleProductoId: string;
+  combustibleLitros: string;
+  combustibleArchivo: File | null;
 }
 
 function lineaVacia(): LineaForm {
-  return { key: nuevaKey(), modalidad: "mochila", tractorId: "", operadorId: "", implementoId: "", horas: "", personalIds: [] };
+  return {
+    key: nuevaKey(),
+    modalidad: "mochila",
+    tractorId: "",
+    operadorId: "",
+    implementoId: "",
+    horas: "",
+    personalIds: [],
+    combustibleProductoId: "",
+    combustibleLitros: "",
+    combustibleArchivo: null,
+  };
 }
 
 function lineasDesdeExistentes(lineas: AplicacionRealizadaLinea[]): LineaForm[] {
@@ -89,21 +106,29 @@ function lineasDesdeExistentes(lineas: AplicacionRealizadaLinea[]): LineaForm[] 
     implementoId: l.implementoId ?? "",
     horas: l.horas,
     personalIds: l.personas.map((p) => p.personalId),
+    combustibleProductoId: "",
+    combustibleLitros: "",
+    combustibleArchivo: null,
   }));
 }
 
 /** Validación de espejo del backend (9.7) — evita un viaje al servidor solo para descubrir un error de forma. */
 function validarLineasForm(lineas: LineaForm[]): string | null {
-  if (lineas.length === 0) return "Falta capturar al menos una línea de recurso (Mochila, Turbina o Aguilón).";
+  if (lineas.length === 0) return "Falta capturar al menos una línea de recurso (Mochila, Turbina, Aguilón o Drone).";
   for (const l of lineas) {
     if (l.modalidad === "mochila") {
       if (l.personalIds.length === 0) return "Una línea de Mochila necesita al menos una persona.";
+    } else if (l.modalidad === "drone") {
+      if (!l.tractorId || !l.operadorId) return "Una línea de Drone necesita el equipo (Drone) y su piloto.";
     } else {
       if (!l.tractorId || !l.operadorId || !l.implementoId) {
         return `Una línea de ${ETIQUETAS_MODALIDAD[l.modalidad]} necesita Tractor, Operador e Implemento.`;
       }
       if (l.modalidad === "turbina" && l.personalIds.length > 0) return "Una línea de Turbina no lleva gente extra detrás.";
       if (l.modalidad === "aguilon" && l.personalIds.length === 0) return "Una línea de Aguilón necesita al menos una persona detrás del tractor.";
+      if (!l.combustibleProductoId || !l.combustibleLitros || !l.combustibleArchivo) {
+        return "Falta el relleno de diésel de esta línea (producto, litros y foto).";
+      }
     }
     if (!l.horas || Number(l.horas) <= 0) return "Falta capturar las horas de una línea.";
   }
@@ -217,9 +242,11 @@ export default function Aplicaciones() {
   const [verOrdenId, setVerOrdenId] = useState<string | null>(null);
   const [ordenData, setOrdenData] = useState<OrdenAplicacion | null>(null);
 
-  // ---- Equipos para líneas de Turbina/Aguilón ----
+  // ---- Equipos para líneas de Turbina/Aguilón/Drone ----
   const [tractores, setTractores] = useState<Equipo[]>([]);
   const [implementos, setImplementos] = useState<Equipo[]>([]);
+  const [drones, setDrones] = useState<Equipo[]>([]);
+  const [productosCombustible, setProductosCombustible] = useState<Producto[]>([]);
 
   // ---- Registrar realizada ----
   const [registrando, setRegistrando] = useState<string | null>(null);
@@ -259,6 +286,8 @@ export default function Aplicaciones() {
     api.get<IngredienteAutorizado[]>("/aplicaciones/productos").then(setIngredientes);
     api.get<Equipo[]>("/aplicaciones/equipos-tractor").then(setTractores);
     api.get<Equipo[]>("/aplicaciones/equipos-implemento").then(setImplementos);
+    api.get<Equipo[]>("/aplicaciones/equipos-drone").then(setDrones);
+    api.get<Producto[]>("/aplicaciones/productos-combustible").then(setProductosCombustible);
   }, []);
 
   useEffect(() => {
@@ -511,15 +540,23 @@ export default function Aplicaciones() {
     setLineas(ultimo ? lineasDesdeExistentes(ultimo.lineas) : [lineaVacia()]);
   }
 
-  function lineasParaEnviar(form: LineaForm[]) {
-    return form.map((l) => ({
-      modalidad: l.modalidad,
-      tractorId: l.modalidad !== "mochila" ? l.tractorId : undefined,
-      operadorId: l.modalidad !== "mochila" ? l.operadorId : undefined,
-      implementoId: l.modalidad !== "mochila" ? l.implementoId : undefined,
-      horas: Number(l.horas),
-      personalIds: l.personalIds,
-    }));
+  async function lineasParaEnviar(form: LineaForm[]) {
+    return Promise.all(
+      form.map(async (l) => {
+        const llevaCombustible = l.modalidad === "turbina" || l.modalidad === "aguilon";
+        return {
+          modalidad: l.modalidad,
+          tractorId: l.modalidad !== "mochila" ? l.tractorId : undefined,
+          operadorId: l.modalidad !== "mochila" ? l.operadorId : undefined,
+          implementoId: l.modalidad === "turbina" || l.modalidad === "aguilon" ? l.implementoId : undefined,
+          horas: Number(l.horas),
+          personalIds: l.personalIds,
+          combustibleProductoId: llevaCombustible ? l.combustibleProductoId : undefined,
+          combustibleLitros: llevaCombustible ? Number(l.combustibleLitros) : undefined,
+          combustibleFotoUrl: llevaCombustible && l.combustibleArchivo ? await subirEvidencia(l.combustibleArchivo) : undefined,
+        };
+      })
+    );
   }
 
   async function confirmarRegistrar(a: Aplicacion) {
@@ -538,7 +575,7 @@ export default function Aplicaciones() {
       await api.post(`/aplicaciones/${a.id}/realizada`, {
         fechaReal,
         hectareas: Number(avanceHectareas),
-        lineas: lineasParaEnviar(lineas),
+        lineas: await lineasParaEnviar(lineas),
         comentario: comentario.trim() || undefined,
       });
       setRegistrando(null);
@@ -570,7 +607,7 @@ export default function Aplicaciones() {
     try {
       await api.patch(`/aplicaciones/realizada/${realizadaId}`, {
         hectareas: Number(editAvanceHectareas),
-        lineas: lineasParaEnviar(editLineas),
+        lineas: await lineasParaEnviar(editLineas),
         comentario: editComentario.trim() || undefined,
       });
       setEditando(null);
@@ -715,6 +752,7 @@ export default function Aplicaciones() {
                 <option value="mochila">Mochila</option>
                 <option value="turbina">Turbina</option>
                 <option value="aguilon">Aguilón</option>
+                <option value="drone">Drone</option>
               </select>
             </label>
             <span style={{ fontSize: 11, color: "var(--ink-soft)", maxWidth: 260 }}>
@@ -1029,7 +1067,15 @@ export default function Aplicaciones() {
                     sistema reparte solo entre los Cuadros/Grupos, en proporción a lo programado.
                   </div>
 
-                  <LineasEditor lineas={lineas} setLineas={setLineas} tractores={tractores} implementos={implementos} personal={personal} />
+                  <LineasEditor
+                    lineas={lineas}
+                    setLineas={setLineas}
+                    tractores={tractores}
+                    implementos={implementos}
+                    drones={drones}
+                    productosCombustible={productosCombustible}
+                    personal={personal}
+                  />
 
                   <label className="field" style={{ marginTop: 10 }}>
                     Comentario (opcional)
@@ -1111,7 +1157,15 @@ export default function Aplicaciones() {
                                   />
                                 </label>
 
-                                <LineasEditor lineas={editLineas} setLineas={setEditLineas} tractores={tractores} implementos={implementos} personal={personal} />
+                                <LineasEditor
+                                  lineas={editLineas}
+                                  setLineas={setEditLineas}
+                                  tractores={tractores}
+                                  implementos={implementos}
+                                  drones={drones}
+                                  productosCombustible={productosCombustible}
+                                  personal={personal}
+                                />
 
                                 <label className="field" style={{ marginTop: 10 }}>
                                   Comentario (opcional)
@@ -1288,12 +1342,16 @@ function LineasEditor({
   setLineas,
   tractores,
   implementos,
+  drones,
+  productosCombustible,
   personal,
 }: {
   lineas: LineaForm[];
   setLineas: (updater: (prev: LineaForm[]) => LineaForm[]) => void;
   tractores: Equipo[];
   implementos: Equipo[];
+  drones: Equipo[];
+  productosCombustible: Producto[];
   personal: { id: string; nombreCompleto: string }[];
 }) {
   function actualizar(key: string, cambios: Partial<LineaForm>) {
@@ -1309,10 +1367,10 @@ function LineasEditor({
     setLineas((prev) => prev.map((l) => (l.key !== key ? l : { ...l, personalIds: l.personalIds.filter((id) => id !== personalId) })));
   }
 
-  function elegirTractor(key: string, tractorId: string) {
+  function elegirTractor(key: string, tractorId: string, lista: Equipo[] = tractores) {
     // Precarga del operador designado (9.13, 15-ago-2026) — solo sugiere,
     // editable libremente sin afectar el default guardado en la ficha.
-    const designado = tractores.find((t) => t.id === tractorId)?.operadorDesignadoId ?? "";
+    const designado = lista.find((t) => t.id === tractorId)?.operadorDesignadoId ?? "";
     actualizar(key, { tractorId, operadorId: designado });
   }
 
@@ -1335,10 +1393,22 @@ function LineasEditor({
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 8 }}>
               <label className="field">
                 Modalidad
-                <select value={l.modalidad} onChange={(e) => actualizar(l.key, { modalidad: e.target.value as ModalidadAplicacion, personalIds: [] })}>
+                <select
+                  value={l.modalidad}
+                  onChange={(e) =>
+                    actualizar(l.key, {
+                      modalidad: e.target.value as ModalidadAplicacion,
+                      personalIds: [],
+                      tractorId: "",
+                      operadorId: "",
+                      implementoId: "",
+                    })
+                  }
+                >
                   <option value="mochila">Mochila</option>
                   <option value="turbina">Turbina</option>
                   <option value="aguilon">Aguilón</option>
+                  <option value="drone">Drone</option>
                 </select>
               </label>
               <label className="field">
@@ -1352,7 +1422,34 @@ function LineasEditor({
               )}
             </div>
 
-            {l.modalidad !== "mochila" && (
+            {l.modalidad === "drone" && (
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 8 }}>
+                <label className="field">
+                  Drone
+                  <select value={l.tractorId} onChange={(e) => elegirTractor(l.key, e.target.value, drones)}>
+                    <option value="">Selecciona…</option>
+                    {drones.map((eq) => (
+                      <option key={eq.id} value={eq.id}>
+                        {eq.folio} {eq.marca ?? ""}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field">
+                  Piloto
+                  <select value={l.operadorId} onChange={(e) => actualizar(l.key, { operadorId: e.target.value })}>
+                    <option value="">Selecciona…</option>
+                    {personal.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.nombreCompleto}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            )}
+
+            {(l.modalidad === "turbina" || l.modalidad === "aguilon") && (
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 8 }}>
                 <label className="field">
                   Tractor
@@ -1390,7 +1487,37 @@ function LineasEditor({
               </div>
             )}
 
-            {l.modalidad !== "turbina" && (
+            {(l.modalidad === "turbina" || l.modalidad === "aguilon") && (
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 8 }}>
+                <label className="field">
+                  Diésel — producto
+                  <select value={l.combustibleProductoId} onChange={(e) => actualizar(l.key, { combustibleProductoId: e.target.value })}>
+                    <option value="">Selecciona…</option>
+                    {productosCombustible.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.nombreComercial}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field">
+                  Litros del relleno
+                  <input
+                    type="number"
+                    step="0.01"
+                    style={{ width: 100 }}
+                    value={l.combustibleLitros}
+                    onChange={(e) => actualizar(l.key, { combustibleLitros: e.target.value })}
+                  />
+                </label>
+                <label className="field">
+                  Foto del relleno
+                  <input type="file" accept="image/*" onChange={(e) => actualizar(l.key, { combustibleArchivo: e.target.files?.[0] ?? null })} />
+                </label>
+              </div>
+            )}
+
+            {l.modalidad !== "turbina" && l.modalidad !== "drone" && (
               <div>
                 <div style={{ fontSize: 11, color: "var(--ink-soft)", marginBottom: 4 }}>
                   {l.modalidad === "mochila" ? "Personas de esta línea" : "Personas detrás del tractor"}
