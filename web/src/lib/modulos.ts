@@ -41,6 +41,7 @@ export const MODULOS_CONSTRUIDOS: ModuloInfo[] = [
   { slug: "aplicaciones", nombre: "Aplicaciones", bgVar: "--mod-aplicaciones-bg", fgVar: "--mod-aplicaciones-fg", icono: "🧪" },
   { slug: "fertilizantes", nombre: "Fertilizantes", bgVar: "--mod-fertilizacion-bg", fgVar: "--mod-fertilizacion-fg", icono: "🌾" },
   { slug: "riego", nombre: "Riego", bgVar: "--mod-riego-bg", fgVar: "--mod-riego-fg", icono: "💧" },
+  { slug: "indicadores", nombre: "Indicadores", bgVar: "--mod-indicadores-bg", fgVar: "--mod-indicadores-fg", icono: "📊" },
 ];
 
 export function moduloInfo(slug: string): ModuloInfo {

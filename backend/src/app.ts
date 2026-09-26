@@ -21,6 +21,7 @@ import { riegoRouter } from "./modules/riego/index.js";
 import { configuracionRouter } from "./modules/configuracion/configuracion.routes.js";
 import { recetarioRouter, tiposAplicacionRouter } from "./modules/recetario/recetario.routes.js";
 import { viveroRouter } from "./modules/vivero/index.js";
+import { indicadoresRouter } from "./modules/indicadores/indicadores.routes.js";
 
 export function createApp() {
   const app = express();
@@ -56,6 +57,7 @@ export function createApp() {
   apiRouter.use("/recetario", recetarioRouter);
   apiRouter.use("/tipos-aplicacion", tiposAplicacionRouter);
   apiRouter.use("/vivero", viveroRouter);
+  apiRouter.use("/indicadores", indicadoresRouter);
   // Cierre de la API (16-ago-2026): sin esto, una ruta de /api mal escrita o
   // renombrada (ej. un frontend viejo llamando un endpoint que ya se movió)
   // caía en el catch-all del SPA de abajo y devolvía el index.html completo

@@ -51,6 +51,7 @@ import RiegoLayout from "./pages/riego/RiegoLayout";
 import Riego from "./pages/riego/Riego";
 import HistorialSemanal from "./pages/riego/HistorialSemanal";
 import Vivero from "./pages/vivero/Vivero";
+import Indicadores from "./pages/indicadores/Indicadores";
 
 function RutaProtegida({ children }: { children: React.ReactNode }) {
   const { autenticado } = useAuth();
@@ -150,6 +151,8 @@ export default function App() {
             </Route>
 
             <Route path="/vivero" element={<Vivero />} />
+
+            <Route path="/indicadores" element={<Indicadores />} />
           </Route>
         </Routes>
       </AuthProvider>

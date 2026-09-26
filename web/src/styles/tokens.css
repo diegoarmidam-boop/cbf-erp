@@ -61,6 +61,10 @@
      nuevo, distinto de Nómina (verde) y Fertilización (verde-azulado). */
   --mod-vivero-bg: #f1f8e2;
   --mod-vivero-fg: #65a30d;
+  /* Indicadores (V1 P2, 25-sep-2026) — mismo criterio que Riego/Vivero:
+     pastel nuevo, sin repetir ninguno de arriba. */
+  --mod-indicadores-bg: #fef3e2;
+  --mod-indicadores-fg: #d97706;
 }
 
 * {
