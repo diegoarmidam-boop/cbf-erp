@@ -217,14 +217,18 @@ async function hectareasDelReporteLigado(carga: { origen: OrigenCombustibleCarga
 }
 
 /**
- * L/ha de tractor (por avance) y L/ha fertirrigada de motobomba (V1 P3,
- * 26-sep-2026, 9.13f) — mismo criterio que calcularAlertaRendimiento: contra
- * el histórico PROPIO del equipo. Null para equipos donde no aplica (Drone
- * no lleva combustible; camioneta usa km/L, no L/ha).
+ * L/ha de tractor (por avance), L/ha de planta de luz del Drone (V1 P7
+ * addendum, 27-sep-2026, Parte B — misma lógica que tractor: cada carga
+ * automática ya trae su `referenciaLineaId` a la línea de Drone, de ahí sale
+ * `hectareasDelReporteLigado` sin ningún cambio) y L/ha fertirrigada de
+ * motobomba (V1 P3, 26-sep-2026, 9.13f) — mismo criterio que
+ * calcularAlertaRendimiento: contra el histórico PROPIO del equipo. Null
+ * para equipos donde no aplica (Drone mismo no lleva combustible; camioneta
+ * usa km/L, no L/ha).
  */
 export async function calcularAlertaLitrosPorHectarea(equipoId: string): Promise<AlertaRendimiento | null> {
   const equipo = await prisma.equipo.findUniqueOrThrow({ where: { id: equipoId } });
-  if (equipo.tipo !== "tractor" && equipo.tipo !== "motobomba") return null;
+  if (equipo.tipo !== "tractor" && equipo.tipo !== "motobomba" && equipo.tipo !== "planta_luz") return null;
 
   const cargas = await prisma.combustibleCarga.findMany({
     where: equipo.tipo === "motobomba" ? { equipoId } : { equipoId, referenciaLineaId: { not: null } },

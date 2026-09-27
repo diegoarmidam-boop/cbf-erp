@@ -1,6 +1,6 @@
 import { prisma } from "../../core/db.js";
 
-export type TipoEquipo = "tractor" | "camioneta" | "remolque" | "implemento" | "drone" | "motobomba";
+export type TipoEquipo = "tractor" | "camioneta" | "remolque" | "implemento" | "drone" | "motobomba" | "planta_luz";
 
 /** AF (Activo Fijo) para tractores/camionetas/remolques, IA (Implemento Agrícola) para implementos (9.13). */
 export function prefijoFolio(tipo: TipoEquipo): "AF" | "IA" {

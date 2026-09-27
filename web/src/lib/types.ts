@@ -898,7 +898,7 @@ export interface HistoricoProveedor {
   cotizaciones: HistoricoProveedorCotizacion[];
 }
 
-export type TipoEquipo = "tractor" | "camioneta" | "remolque" | "implemento" | "drone" | "motobomba";
+export type TipoEquipo = "tractor" | "camioneta" | "remolque" | "implemento" | "drone" | "motobomba" | "planta_luz";
 
 export interface Equipo {
   id: string;
@@ -1180,6 +1180,21 @@ export interface LineaRealizadaPersona {
   personal: Personal;
 }
 
+// Plantas de luz del Drone (V1 P7 addendum, 27-sep-2026, Parte B, 9.7/9.13).
+export interface AplicacionRealizadaLineaPlantaCuadro {
+  id: string;
+  cuadroId: string;
+  litrosAtribuidos: string;
+}
+
+export interface AplicacionRealizadaLineaPlanta {
+  id: string;
+  plantaId: string;
+  planta: Equipo;
+  combustibleCargaId: string;
+  cuadros: AplicacionRealizadaLineaPlantaCuadro[];
+}
+
 export interface AplicacionRealizadaLinea {
   id: string;
   realizadaId: string;
@@ -1192,6 +1207,7 @@ export interface AplicacionRealizadaLinea {
   implemento: Equipo | null;
   horas: string;
   personas: LineaRealizadaPersona[];
+  plantas: AplicacionRealizadaLineaPlanta[];
 }
 
 export interface AplicacionRealizada {

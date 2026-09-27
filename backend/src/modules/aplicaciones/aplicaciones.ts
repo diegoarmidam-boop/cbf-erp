@@ -540,7 +540,16 @@ export async function editarAplicacionProgramada(aplicacionId: string, input: Om
  * comprometida; se descubrió probando la pantalla real con datos que
  * seguían en "programada" al momento de revisar la lista.
  */
-const INCLUDE_LINEA = { tractor: true, operador: true, implemento: true, personas: { include: { personal: true } } };
+const INCLUDE_LINEA = {
+  tractor: true,
+  operador: true,
+  implemento: true,
+  personas: { include: { personal: true } },
+  // Plantas de luz de Drone (V1 P7 addendum, 27-sep-2026, Parte B) — se
+  // regresan para que el frontend pueda mostrar/precargar cuáles plantas
+  // se usaron (el combustible/litros/foto sí se vuelven a capturar cada día).
+  plantas: { include: { planta: true, cuadros: true } },
+};
 
 const INCLUDE_GRUPO = {
   cuadros: { include: { cuadro: true } },
@@ -828,6 +837,15 @@ export async function opcionesLoteParaEntrega(aplicacionId: string) {
   return resultado;
 }
 
+// Una planta de luz usada en una línea de Drone (V1 P7 addendum, 27-sep-2026,
+// Parte B, 9.7/9.13) — 1 o más por línea, cada una con su propio combustible.
+export interface PlantaLuzRealizadaInput {
+  plantaId: string;
+  combustibleProductoId: string;
+  combustibleLitros: number;
+  combustibleFotoUrl: string;
+}
+
 export interface LineaRealizadaInput {
   modalidad: ModalidadAplicacion;
   tractorId?: string;
@@ -836,10 +854,14 @@ export interface LineaRealizadaInput {
   horas: number;
   personalIds: string[];
   // Relleno del tractor de ESTA línea (V1 P3, 26-sep-2026, 9.13b) —
-  // obligatorio para Turbina/Aguilón; Drone no lleva combustible.
+  // obligatorio para Turbina/Aguilón.
   combustibleProductoId?: string;
   combustibleLitros?: number;
   combustibleFotoUrl?: string;
+  // Plantas de luz (V1 P7 addendum, 27-sep-2026, Parte B) — exclusivo de
+  // modalidad=drone: el drone corre a batería, pero la batería se carga con
+  // gasolina de 1 o más plantas de luz, cada una con su propio relleno.
+  plantas?: PlantaLuzRealizadaInput[];
 }
 
 export interface RegistrarRealizadaInput {
@@ -854,13 +876,16 @@ export interface RegistrarRealizadaInput {
 
 /**
  * Captura de maquinaria y personas por reporte (9.7, confirmado 8-ago-2026;
- * V1 P3 25/26-sep-2026 agrega Drone): cada línea es una de las 4 modalidades
- * fijas. Turbina/Aguilón exigen Tractor+Operador+Implemento, y el relleno de
- * diésel de ese tractor (litros+foto); Aguilón además necesita su propia
- * gente detrás; Mochila solo lleva gente, sin tractor/implemento/combustible;
+ * V1 P3 25/26-sep-2026 agrega Drone; V1 P7 addendum 27-sep-2026 agrega las
+ * plantas de luz del Drone): cada línea es una de las 4 modalidades fijas.
+ * Turbina/Aguilón exigen Tractor+Operador+Implemento, y el relleno de diésel
+ * de ese tractor (litros+foto); Aguilón además necesita su propia gente
+ * detrás; Mochila solo lleva gente, sin tractor/implemento/combustible;
  * Turbina no lleva gente extra (el operador ya está contado aparte); Drone
  * lleva el Equipo (drone) + piloto (operador), sin implemento ni gente
- * extra, y SIN combustible (funciona a batería).
+ * extra — el drone mismo no lleva combustible (funciona a batería), pero sí
+ * lleva 1 o más plantas de luz que cargan esa batería, cada una con su
+ * propio relleno de gasolina.
  */
 function validarLineas(lineas: LineaRealizadaInput[]) {
   if (!lineas || lineas.length === 0) {
@@ -880,7 +905,17 @@ function validarLineas(lineas: LineaRealizadaInput[]) {
       }
       if (l.implementoId) throw new Error("Una línea de Drone no lleva implemento.");
       if (l.personalIds && l.personalIds.length > 0) throw new Error("Una línea de Drone no lleva gente extra — solo el piloto.");
-      if (l.combustibleLitros || l.combustibleFotoUrl) throw new Error("Una línea de Drone no lleva combustible — funciona a batería.");
+      if (l.combustibleProductoId || l.combustibleLitros || l.combustibleFotoUrl) {
+        throw new Error("El drone mismo no lleva combustible — captura el relleno en sus plantas de luz.");
+      }
+      if (!l.plantas || l.plantas.length === 0) {
+        throw new Error("Una línea de Drone necesita al menos una planta de luz (con su combustible).");
+      }
+      for (const p of l.plantas) {
+        if (!p.plantaId || !p.combustibleProductoId || !p.combustibleLitros || !p.combustibleFotoUrl) {
+          throw new Error("Falta el relleno de gasolina de alguna planta de luz (planta, producto, litros y foto).");
+        }
+      }
     } else {
       if (!l.tractorId || !l.operadorId || !l.implementoId) {
         throw new Error(`Una línea de ${l.modalidad === "turbina" ? "Turbina" : "Aguilón"} necesita Tractor, Operador e Implemento.`);
@@ -1082,6 +1117,44 @@ async function crearLineasYNomina(
       await tx.aplicacionRealizadaLinea.update({ where: { id: lineaCreada.id }, data: { combustibleCargaId: carga.id } });
     }
 
+    // Plantas de luz del Drone (V1 P7 addendum, 27-sep-2026, Parte B,
+    // 9.7/9.13): 1+ por línea, cada una con su propia carga de garrafa
+    // (mismo mecanismo que el diésel del tractor) y su propio reparto de
+    // litros a Cuadros, con la misma fórmula de reparto que la mano de obra
+    // (repartirMontoPorHectareas) — es la misma proporción que ya calcula
+    // `reparto.porMiembro` para ESTE reporte, aplicada a los litros de cada
+    // planta en vez de a las horas.
+    if (linea.modalidad === "drone" && linea.plantas) {
+      for (const p of linea.plantas) {
+        const carga = await registrarCargaTx(
+          tx,
+          p.plantaId,
+          {
+            fecha: fechaReal,
+            tipo: "gasolina_garrafa",
+            litros: p.combustibleLitros,
+            productoId: p.combustibleProductoId,
+            huertaId,
+            fotoUrl: p.combustibleFotoUrl,
+            origen: "automatico_aplicacion",
+            referenciaLineaId: lineaCreada.id,
+          },
+          registradoPorId
+        );
+        const lineaPlanta = await tx.aplicacionRealizadaLineaPlanta.create({
+          data: { lineaId: lineaCreada.id, plantaId: p.plantaId, combustibleCargaId: carga.id },
+        });
+        const litrosPorMiembro = repartirMontoPorHectareas(reparto.porMiembro, hectareasReporte, p.combustibleLitros);
+        for (const lm of litrosPorMiembro) {
+          if (lm.monto <= 0.0001) continue;
+          const { cuadroId } = parseClaveMiembro(lm.clave);
+          await tx.aplicacionRealizadaLineaPlantaCuadro.create({
+            data: { lineaPlantaId: lineaPlanta.id, cuadroId, litrosAtribuidos: lm.monto },
+          });
+        }
+      }
+    }
+
     const horasPorMiembro = repartirMontoPorHectareas(reparto.porMiembro, hectareasReporte, linea.horas);
     for (const personalId of personasAPagarDeLinea(linea)) {
       for (const hm of horasPorMiembro) {
@@ -1172,9 +1245,19 @@ export async function editarRealizada(realizadaId: string, input: EditarRealizad
     await borrarUsoDiarioDeLineasTx(tx, lineaIdsAnteriores);
     await tx.registroNomina.deleteMany({ where: { origen: "automatico_aplicacion", referenciaOrigenId: realizadaId } });
     const cargaIdsAnteriores = realizada.lineas.map((l) => l.combustibleCargaId).filter((id): id is string => id != null);
+    // Plantas de luz de las líneas de Drone anteriores (V1 P7 addendum,
+    // 27-sep-2026, Parte B) — mismo criterio que el combustibleCargaId del
+    // tractor: se revierten y se recrean desde cero con `crearLineasYNomina`.
+    const lineasPlantaAnteriores = await tx.aplicacionRealizadaLineaPlanta.findMany({
+      where: { lineaId: { in: lineaIdsAnteriores } },
+      select: { id: true, combustibleCargaId: true },
+    });
+    await tx.aplicacionRealizadaLineaPlantaCuadro.deleteMany({ where: { lineaPlantaId: { in: lineasPlantaAnteriores.map((p) => p.id) } } });
+    await tx.aplicacionRealizadaLineaPlanta.deleteMany({ where: { id: { in: lineasPlantaAnteriores.map((p) => p.id) } } });
     await tx.aplicacionRealizadaLineaPersona.deleteMany({ where: { lineaId: { in: lineaIdsAnteriores } } });
     await tx.aplicacionRealizadaLinea.deleteMany({ where: { realizadaId } });
     for (const cargaId of cargaIdsAnteriores) await revertirCargaGarrafaTx(tx, cargaId, editadoPorId);
+    for (const p of lineasPlantaAnteriores) await revertirCargaGarrafaTx(tx, p.combustibleCargaId, editadoPorId);
 
     await crearLineasYNomina(tx, realizadaId, aplicacion.huertaId, fechaISO, input.hectareas, input.lineas, repartoDespues, actividad.id, tarifaAplicada, editadoPorId);
 
@@ -1432,6 +1515,11 @@ export function equiposTractorParaAplicacion() {
 /** Drones elegibles en una línea de Drone (V1 P3, 26-sep-2026). */
 export function equiposDroneParaAplicacion() {
   return listarEquipos("drone");
+}
+
+/** Plantas de luz elegibles en las líneas de Drone (V1 P7 addendum, 27-sep-2026, Parte B). */
+export function equiposPlantaLuzParaAplicacion() {
+  return listarEquipos("planta_luz");
 }
 
 /** Productos de Almacén categoría Combustible, para el relleno de una línea de Turbina/Aguilón (V1 P3, 26-sep-2026, corrige el selector que no filtraba por categoría). */

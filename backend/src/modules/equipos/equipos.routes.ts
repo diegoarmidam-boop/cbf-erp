@@ -9,7 +9,7 @@ import { registrarTraslado, historialTraslados, TrasladoSoloParaTractoresError }
 export const equiposRouter = Router();
 equiposRouter.use(requireAuth);
 
-const tipoEnum = z.enum(["tractor", "camioneta", "remolque", "implemento", "drone", "motobomba"]);
+const tipoEnum = z.enum(["tractor", "camioneta", "remolque", "implemento", "drone", "motobomba", "planta_luz"]);
 
 // `todas=true` para la pantalla de catálogo (para poder reactivar); el
 // resto de selectores del sistema solo debe ofrecer equipos activos.

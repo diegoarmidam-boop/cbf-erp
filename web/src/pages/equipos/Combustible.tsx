@@ -91,6 +91,13 @@ export default function Combustible() {
   if (equipoActual?.tipo === "motobomba") {
     return <p style={{ color: "var(--ink-soft)" }}>La gasolina de la Motobomba se captura desde Fertilizantes &gt; Fertirriego, ligada al día del fertirriego.</p>;
   }
+  if (equipoActual?.tipo === "planta_luz") {
+    return (
+      <p style={{ color: "var(--ink-soft)" }}>
+        La gasolina de una Planta de luz se captura desde Aplicaciones, en la línea de Drone del avance donde se usó.
+      </p>
+    );
+  }
 
   return (
     <div>

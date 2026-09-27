@@ -26,7 +26,11 @@ actividadesRouter.use(requireAuth);
 // Mismo caso que Aplicaciones/Fertilizantes (9.4/9.7/9.5): la matriz booleana
 // de PermisoModulo no distingue "Capturar (programar)" de "Capturar
 // (avance)" — se verifica aquí por rol explícito, además del permiso de módulo.
-const ROLES_PROGRAMAR: Rol[] = ["gerente_tecnico_produccion"];
+// V1 P7 addendum, 27-sep-2026 (A4e): el documento vivo (8, 9.4) dice que
+// Supervisor de Huerta SÍ programa Actividades (a diferencia de Aplicaciones
+// y Fertilizantes, donde no) — faltaba en esta lista; corregido. Scoped a su
+// propia Huerta, ver verificarAlcance más abajo.
+const ROLES_PROGRAMAR: Rol[] = ["gerente_tecnico_produccion", "supervisor_huerta"];
 const ROLES_AVANCE: Rol[] = ["supervisor_huerta", "capturista_informacion"];
 const ROLES_ACCESO_UNIVERSAL: Rol[] = ["director_general", "encargado_sistemas"];
 
@@ -99,6 +103,10 @@ actividadesRouter.post("/", requirePermission("actividades", "capturar"), async 
     res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
     return;
   }
+  // Scoping por Huerta (V1 P7 addendum, 27-sep-2026, A4e): al agregar a
+  // Supervisor de Huerta a ROLES_PROGRAMAR hacía falta este candado, que
+  // esta ruta no tenía todavía (GET /:id sí lo tenía) — "su UP" (Bloque 8).
+  if (!verificarAlcance(req, res, parsed.data.huertaId)) return;
   try {
     const programada = await programarActividad(parsed.data, req.usuario!.usuarioId);
     res.status(201).json(programada);

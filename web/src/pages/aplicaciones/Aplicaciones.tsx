@@ -68,6 +68,19 @@ function productoFormVacio(): ProductoForm {
   return { ingredienteActivoNombre: "", concentracionValor: "", concentracionUnidad: "ml_l" };
 }
 
+// Planta de luz de una línea de Drone (V1 P7 addendum, 27-sep-2026, Parte B, 9.7/9.13).
+interface PlantaForm {
+  key: string;
+  plantaId: string;
+  combustibleProductoId: string;
+  combustibleLitros: string;
+  combustibleArchivo: File | null;
+}
+
+function plantaVacia(): PlantaForm {
+  return { key: nuevaKey(), plantaId: "", combustibleProductoId: "", combustibleLitros: "", combustibleArchivo: null };
+}
+
 interface LineaForm {
   key: string;
   modalidad: ModalidadAplicacion;
@@ -80,6 +93,8 @@ interface LineaForm {
   combustibleProductoId: string;
   combustibleLitros: string;
   combustibleArchivo: File | null;
+  // Plantas de luz (V1 P7 addendum, 27-sep-2026, Parte B) — Drone: 1 o más.
+  plantas: PlantaForm[];
 }
 
 function lineaVacia(): LineaForm {
@@ -94,6 +109,7 @@ function lineaVacia(): LineaForm {
     combustibleProductoId: "",
     combustibleLitros: "",
     combustibleArchivo: null,
+    plantas: [],
   };
 }
 
@@ -109,6 +125,10 @@ function lineasDesdeExistentes(lineas: AplicacionRealizadaLinea[]): LineaForm[] 
     combustibleProductoId: "",
     combustibleLitros: "",
     combustibleArchivo: null,
+    // Precarga las MISMAS plantas del reporte anterior (9.7/9.13c) — el
+    // combustible (producto/litros/foto) se vuelve a capturar cada día,
+    // mismo criterio que el diésel del tractor arriba.
+    plantas: l.plantas.map((p) => ({ key: nuevaKey(), plantaId: p.plantaId, combustibleProductoId: "", combustibleLitros: "", combustibleArchivo: null })),
   }));
 }
 
@@ -120,6 +140,12 @@ function validarLineasForm(lineas: LineaForm[]): string | null {
       if (l.personalIds.length === 0) return "Una línea de Mochila necesita al menos una persona.";
     } else if (l.modalidad === "drone") {
       if (!l.tractorId || !l.operadorId) return "Una línea de Drone necesita el equipo (Drone) y su piloto.";
+      if (l.plantas.length === 0) return "Una línea de Drone necesita al menos una planta de luz (con su combustible).";
+      for (const p of l.plantas) {
+        if (!p.plantaId || !p.combustibleProductoId || !p.combustibleLitros || !p.combustibleArchivo) {
+          return "Falta el relleno de gasolina de alguna planta de luz (planta, producto, litros y foto).";
+        }
+      }
     } else {
       if (!l.tractorId || !l.operadorId || !l.implementoId) {
         return `Una línea de ${ETIQUETAS_MODALIDAD[l.modalidad]} necesita Tractor, Operador e Implemento.`;
@@ -246,6 +272,8 @@ export default function Aplicaciones() {
   const [tractores, setTractores] = useState<Equipo[]>([]);
   const [implementos, setImplementos] = useState<Equipo[]>([]);
   const [drones, setDrones] = useState<Equipo[]>([]);
+  // Plantas de luz (V1 P7 addendum, 27-sep-2026, Parte B, 9.7/9.13).
+  const [plantasLuz, setPlantasLuz] = useState<Equipo[]>([]);
   const [productosCombustible, setProductosCombustible] = useState<Producto[]>([]);
 
   // ---- Registrar realizada ----
@@ -287,6 +315,7 @@ export default function Aplicaciones() {
     api.get<Equipo[]>("/aplicaciones/equipos-tractor").then(setTractores);
     api.get<Equipo[]>("/aplicaciones/equipos-implemento").then(setImplementos);
     api.get<Equipo[]>("/aplicaciones/equipos-drone").then(setDrones);
+    api.get<Equipo[]>("/aplicaciones/equipos-planta-luz").then(setPlantasLuz);
     api.get<Producto[]>("/aplicaciones/productos-combustible").then(setProductosCombustible);
   }, []);
 
@@ -554,6 +583,17 @@ export default function Aplicaciones() {
           combustibleProductoId: llevaCombustible ? l.combustibleProductoId : undefined,
           combustibleLitros: llevaCombustible ? Number(l.combustibleLitros) : undefined,
           combustibleFotoUrl: llevaCombustible && l.combustibleArchivo ? await subirEvidencia(l.combustibleArchivo) : undefined,
+          plantas:
+            l.modalidad === "drone"
+              ? await Promise.all(
+                  l.plantas.map(async (p) => ({
+                    plantaId: p.plantaId,
+                    combustibleProductoId: p.combustibleProductoId,
+                    combustibleLitros: Number(p.combustibleLitros),
+                    combustibleFotoUrl: p.combustibleArchivo ? await subirEvidencia(p.combustibleArchivo) : "",
+                  }))
+                )
+              : undefined,
         };
       })
     );
@@ -1073,6 +1113,7 @@ export default function Aplicaciones() {
                     tractores={tractores}
                     implementos={implementos}
                     drones={drones}
+                    plantasLuz={plantasLuz}
                     productosCombustible={productosCombustible}
                     personal={personal}
                   />
@@ -1163,6 +1204,7 @@ export default function Aplicaciones() {
                                   tractores={tractores}
                                   implementos={implementos}
                                   drones={drones}
+                                  plantasLuz={plantasLuz}
                                   productosCombustible={productosCombustible}
                                   personal={personal}
                                 />
@@ -1343,6 +1385,7 @@ function LineasEditor({
   tractores,
   implementos,
   drones,
+  plantasLuz,
   productosCombustible,
   personal,
 }: {
@@ -1351,11 +1394,30 @@ function LineasEditor({
   tractores: Equipo[];
   implementos: Equipo[];
   drones: Equipo[];
+  plantasLuz: Equipo[];
   productosCombustible: Producto[];
   personal: { id: string; nombreCompleto: string }[];
 }) {
   function actualizar(key: string, cambios: Partial<LineaForm>) {
     setLineas((prev) => prev.map((l) => (l.key !== key ? l : { ...l, ...cambios })));
+  }
+
+  // Plantas de luz de una línea de Drone (V1 P7 addendum, 27-sep-2026, Parte
+  // B, 9.7/9.13c) — mínimo 1, "+ Otra planta" agrega, "Quitar" respeta el mínimo.
+  function agregarPlanta(lineaKey: string) {
+    setLineas((prev) => prev.map((l) => (l.key !== lineaKey ? l : { ...l, plantas: [...l.plantas, plantaVacia()] })));
+  }
+
+  function quitarPlanta(lineaKey: string, plantaKey: string) {
+    setLineas((prev) =>
+      prev.map((l) => (l.key !== lineaKey || l.plantas.length <= 1 ? l : { ...l, plantas: l.plantas.filter((p) => p.key !== plantaKey) }))
+    );
+  }
+
+  function actualizarPlanta(lineaKey: string, plantaKey: string, cambios: Partial<PlantaForm>) {
+    setLineas((prev) =>
+      prev.map((l) => (l.key !== lineaKey ? l : { ...l, plantas: l.plantas.map((p) => (p.key !== plantaKey ? p : { ...p, ...cambios })) }))
+    );
   }
 
   function agregarPersona(key: string, personalId: string) {
@@ -1395,15 +1457,19 @@ function LineasEditor({
                 Modalidad
                 <select
                   value={l.modalidad}
-                  onChange={(e) =>
+                  onChange={(e) => {
+                    const modalidad = e.target.value as ModalidadAplicacion;
                     actualizar(l.key, {
-                      modalidad: e.target.value as ModalidadAplicacion,
+                      modalidad,
                       personalIds: [],
                       tractorId: "",
                       operadorId: "",
                       implementoId: "",
-                    })
-                  }
+                      // La primera vez que se elige Drone en esta línea, trae 2
+                      // renglones de planta de luz para llenar (9.7/9.13c).
+                      plantas: modalidad === "drone" && l.plantas.length === 0 ? [plantaVacia(), plantaVacia()] : l.plantas,
+                    });
+                  }}
                 >
                   <option value="mochila">Mochila</option>
                   <option value="turbina">Turbina</option>
@@ -1446,6 +1512,66 @@ function LineasEditor({
                     ))}
                   </select>
                 </label>
+              </div>
+            )}
+
+            {l.modalidad === "drone" && (
+              <div style={{ marginBottom: 8 }}>
+                <div style={{ fontSize: 11, color: "var(--ink-soft)", marginBottom: 4 }}>
+                  Plantas de luz — gasolina que se le echó a cada una al final del avance
+                </div>
+                {l.plantas.map((p) => (
+                  <div key={p.key} style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 6 }}>
+                    <label className="field">
+                      Planta
+                      <select value={p.plantaId} onChange={(e) => actualizarPlanta(l.key, p.key, { plantaId: e.target.value })}>
+                        <option value="">Selecciona…</option>
+                        {plantasLuz.map((eq) => (
+                          <option key={eq.id} value={eq.id}>
+                            {eq.folio} {eq.marca ?? ""}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="field">
+                      Gasolina — producto
+                      <select value={p.combustibleProductoId} onChange={(e) => actualizarPlanta(l.key, p.key, { combustibleProductoId: e.target.value })}>
+                        <option value="">Selecciona…</option>
+                        {productosCombustible.map((prod) => (
+                          <option key={prod.id} value={prod.id}>
+                            {prod.nombreComercial}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="field">
+                      Litros
+                      <input
+                        type="number"
+                        step="0.01"
+                        style={{ width: 100 }}
+                        value={p.combustibleLitros}
+                        onChange={(e) => actualizarPlanta(l.key, p.key, { combustibleLitros: e.target.value })}
+                      />
+                    </label>
+                    <label className="field">
+                      Foto
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={(e) => actualizarPlanta(l.key, p.key, { combustibleArchivo: e.target.files?.[0] ?? null })}
+                      />
+                    </label>
+                    {l.plantas.length > 1 && (
+                      <button className="btn-secondary" onClick={() => quitarPlanta(l.key, p.key)}>
+                        Quitar planta
+                      </button>
+                    )}
+                  </div>
+                ))}
+                <button className="btn-secondary" onClick={() => agregarPlanta(l.key)}>
+                  + Otra planta
+                </button>
               </div>
             )}
 

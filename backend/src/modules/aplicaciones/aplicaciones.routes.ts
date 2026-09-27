@@ -15,6 +15,7 @@ import {
   editarRealizada,
   equiposDroneParaAplicacion,
   equiposImplementoParaAplicacion,
+  equiposPlantaLuzParaAplicacion,
   equiposTractorParaAplicacion,
   liberarAplicacionVencida,
   productosCombustibleParaAplicacion,
@@ -97,6 +98,11 @@ aplicacionesRouter.get("/equipos-tractor", requirePermission("aplicaciones", "ve
 
 aplicacionesRouter.get("/equipos-drone", requirePermission("aplicaciones", "ver"), async (_req, res) => {
   res.json(await equiposDroneParaAplicacion());
+});
+
+// Plantas de luz (V1 P7 addendum, 27-sep-2026, Parte B).
+aplicacionesRouter.get("/equipos-planta-luz", requirePermission("aplicaciones", "ver"), async (_req, res) => {
+  res.json(await equiposPlantaLuzParaAplicacion());
 });
 
 aplicacionesRouter.get("/productos-combustible", requirePermission("aplicaciones", "ver"), async (_req, res) => {
@@ -299,6 +305,14 @@ aplicacionesRouter.post("/:id/entregar", requirePermissionAny(["almacen", "captu
   }
 });
 
+// Plantas de luz del Drone (V1 P7 addendum, 27-sep-2026, Parte B, 9.7/9.13).
+const plantaLuzRealizadaSchema = z.object({
+  plantaId: z.string().min(1),
+  combustibleProductoId: z.string().min(1),
+  combustibleLitros: z.number().positive(),
+  combustibleFotoUrl: z.string().min(1),
+});
+
 const lineaRealizadaSchema = z.object({
   modalidad: z.enum(["mochila", "turbina", "aguilon", "drone"]),
   tractorId: z.string().optional(),
@@ -309,6 +323,7 @@ const lineaRealizadaSchema = z.object({
   combustibleProductoId: z.string().optional(),
   combustibleLitros: z.number().positive().optional(),
   combustibleFotoUrl: z.string().optional(),
+  plantas: z.array(plantaLuzRealizadaSchema).optional(),
 });
 
 const realizadaSchema = z.object({

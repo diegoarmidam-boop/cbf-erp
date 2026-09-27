@@ -121,6 +121,7 @@ export default function Catalogo() {
               <option value="implemento">Implemento</option>
               <option value="drone">Drone</option>
               <option value="motobomba">Motobomba</option>
+              <option value="planta_luz">Planta de luz</option>
             </select>
           </label>
           <label className="field">

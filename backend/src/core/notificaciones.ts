@@ -312,7 +312,9 @@ async function calcularNotificaciones(rol: Rol, huertaIdAlcance: string | null):
     rol === "gerente_tecnico_produccion" ||
     (rol === "supervisor_huerta" && huertaIdAlcance != null);
   if (puedeVerAlertaCombustible) {
-    const equipos = await prisma.equipo.findMany({ where: { activo: true, tipo: { in: ["tractor", "camioneta", "motobomba"] } } });
+    // "planta_luz" agregado (V1 P7 addendum, 27-sep-2026, Parte B) — misma
+    // alerta L/ha que tractor/motobomba, contra su propio histórico.
+    const equipos = await prisma.equipo.findMany({ where: { activo: true, tipo: { in: ["tractor", "camioneta", "motobomba", "planta_luz"] } } });
     for (const equipo of equipos) {
       if (rol === "supervisor_huerta" && equipo.ranchoActualId !== huertaIdAlcance) continue;
       const alertas = [await calcularAlertaRendimiento(equipo.id), await calcularAlertaLitrosPorHectarea(equipo.id)];
