@@ -24,6 +24,10 @@ export interface FilaNominaSemanalResultado {
 export function calcularFilaNominaSemanal(input: FilaNominaSemanalInput): FilaNominaSemanalResultado {
   const sueldoDelPeriodo = input.tipo === "fijo" && input.debePagarseSueldoEstePeriodo ? (input.sueldo ?? 0) : 0;
   const bruto = sueldoDelPeriodo + input.gananciaDestajoPeriodo;
-  const neto = bruto + input.bonos - input.descuentoPrestamos;
+  // El sobre (V1 P6, 27-sep-2026, 9.11d): el neto SIEMPRE redondea hacia
+  // arriba al peso entero, y ese es el valor que queda registrado como
+  // pagado — nunca los decimales intermedios (bruto/bonos/descuentos sí
+  // conservan todos sus decimales, esto es solo el neto final del sobre).
+  const neto = Math.ceil(bruto + input.bonos - input.descuentoPrestamos);
   return { bruto, neto };
 }

@@ -59,45 +59,89 @@ export function calcularPeriodoNomina(fechaRef: FechaISO, diaCorteIndex: number)
   return { inicio: isoDate(inicioDate), fin: isoDate(finDate) };
 }
 
-/** Cuántos cortes de nómina caen en el mes del periodo, y cuál número es este. */
-export function semanaDelMesDePeriodo(periodoFin: FechaISO, diaCorteIndex: number): { semana: number; totalEnMes: number } {
-  const fin = toDate(periodoFin);
-  const mes = fin.getMonth();
-  const anio = fin.getFullYear();
-  let total = 0;
-  let numero = 0;
-  const cursor = new Date(anio, mes, 1);
-  while (cursor.getMonth() === mes) {
-    if (cursor.getDay() === diaCorteIndex) {
-      total++;
-      if (isoDate(cursor) === periodoFin) numero = total;
-    }
-    cursor.setDate(cursor.getDate() + 1);
+export type Periodicidad = "semanal" | "catorcenal" | "quincenal" | "mensual";
+export type DiaPagoMensual = "primer_viernes" | "ultimo_viernes";
+
+/** Sábado de pago de un periodo (jueves de cierre + 2) — mismo criterio "se paga el sábado" para todas las periodicidades fijas. */
+export function sabadoDePago(periodo: PeriodoNomina): FechaISO {
+  return sumarDias(periodo.fin, 2);
+}
+
+/**
+ * Sábado más cercano a una fecha — SIEMPRE hay un único más cercano (7 es
+ * impar, nunca hay empate exacto a 3.5 días).
+ */
+export function sabadoMasCercanoA(fechaISO: FechaISO): FechaISO {
+  const d = toDate(fechaISO);
+  const dow = d.getDay(); // 0=domingo..6=sábado
+  const diasDesdeSabadoAnterior = (dow + 1) % 7; // sábado=0, domingo=1, ... viernes=6
+  const diasHastaSabadoSiguiente = (6 - dow + 7) % 7;
+  return diasDesdeSabadoAnterior <= diasHastaSabadoSiguiente
+    ? sumarDias(fechaISO, -diasDesdeSabadoAnterior)
+    : sumarDias(fechaISO, diasHastaSabadoSiguiente);
+}
+
+function primerDiaMes(anio: number, mes0: number): FechaISO {
+  return isoDate(new Date(anio, mes0, 1));
+}
+function ultimoDiaMes(anio: number, mes0: number): FechaISO {
+  return isoDate(new Date(anio, mes0 + 1, 0));
+}
+
+/** Quincenal (9.11b): sábado más cercano al 15, y sábado más cercano al fin de mes — del mes al que pertenece el propio sábado de pago. */
+function esSabadoQuincenal(sabado: FechaISO): boolean {
+  const d = toDate(sabado);
+  const anio = d.getFullYear();
+  const mes0 = d.getMonth();
+  const objetivo15 = sabadoMasCercanoA(isoDate(new Date(anio, mes0, 15)));
+  const objetivoFin = sabadoMasCercanoA(ultimoDiaMes(anio, mes0));
+  return sabado === objetivo15 || sabado === objetivoFin;
+}
+
+// Catorcenal (9.11b, "cada segundo sábado", 26 pagos/año): paridad de
+// semanas desde un sábado de referencia fijo para toda la empresa (para que
+// TODO el personal catorcenal cobre el mismo sábado) — 3-ene-2026 es sábado.
+const REFERENCIA_CATORCENAL: FechaISO = "2026-01-03";
+function esSabadoCatorcenal(sabado: FechaISO): boolean {
+  const semanas = Math.round(diferenciaDias(sabado, REFERENCIA_CATORCENAL) / 7);
+  return semanas % 2 === 0;
+}
+
+/** Mensual (9.11b): el viernes de inicio del periodo es el primer o último viernes del mes, según lo que la persona tenga configurado. */
+function esPeriodoMensualDePersona(periodo: PeriodoNomina, diaPagoMensual: DiaPagoMensual | null | undefined): boolean {
+  if (!diaPagoMensual) return false;
+  const viernes = toDate(periodo.inicio); // el periodo empieza viernes (ver calcularPeriodoNomina)
+  if (diaPagoMensual === "primer_viernes") {
+    return periodo.inicio === sumarDias(primerDiaMes(viernes.getFullYear(), viernes.getMonth()), diaDelPrimerViernes(viernes.getFullYear(), viernes.getMonth()));
   }
-  return { semana: numero || 1, totalEnMes: total || 1 };
+  const siguienteViernes = toDate(sumarDias(periodo.inicio, 7));
+  return siguienteViernes.getMonth() !== viernes.getMonth();
 }
 
-/** El periodo mensual se paga por adelantado: el que contiene el día 1 del mes. */
-export function periodoContieneDia1(periodo: PeriodoNomina): boolean {
-  const inicioDate = toDate(periodo.inicio);
-  const finDate = toDate(periodo.fin);
-  const candidatos = [
-    isoDate(new Date(inicioDate.getFullYear(), inicioDate.getMonth(), 1)),
-    isoDate(new Date(finDate.getFullYear(), finDate.getMonth(), 1)),
-  ];
-  return candidatos.some((d) => d >= periodo.inicio && d <= periodo.fin);
+function diaDelPrimerViernes(anio: number, mes0: number): number {
+  const d = new Date(anio, mes0, 1);
+  const dow = d.getDay();
+  return (5 - dow + 7) % 7; // 5=viernes; offset en días desde el día 1
 }
 
-export type Periodicidad = "semanal" | "quincenal" | "mensual";
+/** Pagos al año de cada periodicidad (9.11b) — el sueldo de Personal.sueldo se entiende ANUAL; cada pago sale de sueldo ÷ este número, para que la persona gane lo mismo en cualquier esquema. */
+export function pagosPorAnio(periodicidad: Periodicidad): number {
+  if (periodicidad === "semanal") return 52;
+  if (periodicidad === "catorcenal") return 26;
+  if (periodicidad === "quincenal") return 24;
+  return 12; // mensual
+}
 
 export function fijoDebePagarseEnPeriodo(
   periodicidad: Periodicidad,
   periodo: PeriodoNomina,
-  semanaInfo: { semana: number }
+  opciones: { diaPagoMensual?: DiaPagoMensual | null } = {}
 ): boolean {
   if (periodicidad === "semanal") return true;
-  if (periodicidad === "quincenal") return [2, 4].includes(semanaInfo.semana);
-  if (periodicidad === "mensual") return periodoContieneDia1(periodo);
+  const sabado = sabadoDePago(periodo);
+  if (periodicidad === "catorcenal") return esSabadoCatorcenal(sabado);
+  if (periodicidad === "quincenal") return esSabadoQuincenal(sabado);
+  if (periodicidad === "mensual") return esPeriodoMensualDePersona(periodo, opciones.diaPagoMensual);
   return false;
 }
 

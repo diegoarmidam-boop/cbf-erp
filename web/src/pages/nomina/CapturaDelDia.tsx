@@ -261,6 +261,7 @@ export default function CapturaDelDia() {
       const nueva = await api.post<{ id: string }>("/personal", {
         nombreCompleto: nombre,
         tipo: "destajo",
+        pendienteAutorizacion: true,
         ...(!multiRancho && huertaUnica ? { huertaId: huertaUnica } : {}),
       });
       await refetchPersonal();
@@ -400,6 +401,11 @@ export default function CapturaDelDia() {
                     <div style={{ fontWeight: 600, fontSize: 13.5 }}>
                       {nombreDeTarjeta(t)}
                       {t.tipo === "grupal" && <span className="tag tag-neutral" style={{ marginLeft: 8 }}>Grupo</span>}
+                      {t.tipo === "individual" && personal.find((p) => p.id === t.personalId)?.pendienteAutorizacion && (
+                        <span className="tag tag-warning" style={{ marginLeft: 8 }}>
+                          Pendiente de autorizar
+                        </span>
+                      )}
                     </div>
                     {tarjetaEsRemovible(t) && (
                       <button className="btn-secondary" onClick={() => quitarTarjeta(t.key)}>
@@ -527,6 +533,7 @@ export default function CapturaDelDia() {
                 {(agregarTipo === "individual" ? personalDisponible : gruposDisponibles).map((x) => (
                   <option key={x.id} value={x.id}>
                     {"nombreCompleto" in x ? x.nombreCompleto : x.nombre ?? "(sin nombre)"}
+                    {"pendienteAutorizacion" in x && x.pendienteAutorizacion ? " (pendiente de autorizar)" : ""}
                   </option>
                 ))}
               </select>

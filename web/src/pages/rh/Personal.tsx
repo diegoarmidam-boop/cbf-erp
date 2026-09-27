@@ -25,6 +25,14 @@ export default function Personal() {
   const [sueldo, setSueldo] = useState("");
   const [rfc, setRfc] = useState("");
   const [huertaId, setHuertaId] = useState("");
+  const [diaPagoMensual, setDiaPagoMensual] = useState<"primer_viernes" | "ultimo_viernes" | "">("");
+  const [formaPago, setFormaPago] = useState<"efectivo" | "transferencia">("efectivo");
+  const [banco, setBanco] = useState("");
+  const [numeroCuentaOClabe, setNumeroCuentaOClabe] = useState("");
+  const [titularCuenta, setTitularCuenta] = useState("");
+
+  const puestoSeleccionado = puestos.find((p) => p.id === puestoId);
+  const esMensual = puestoSeleccionado?.periodicidad === "mensual";
 
   function cargar() {
     setCargando(true);
@@ -53,6 +61,11 @@ export default function Personal() {
         puestoId: tipo === "fijo" ? puestoId || undefined : undefined,
         sueldo: tipo === "fijo" && sueldo ? Number(sueldo) : undefined,
         rfc: tipo === "fijo" ? rfc || undefined : undefined,
+        diaPagoMensual: tipo === "fijo" && esMensual && diaPagoMensual ? diaPagoMensual : undefined,
+        formaPago: tipo === "fijo" ? formaPago : undefined,
+        banco: tipo === "fijo" && formaPago === "transferencia" ? banco || undefined : undefined,
+        numeroCuentaOClabe: tipo === "fijo" && formaPago === "transferencia" ? numeroCuentaOClabe || undefined : undefined,
+        titularCuenta: tipo === "fijo" && formaPago === "transferencia" ? titularCuenta || undefined : undefined,
       });
       setNombreCompleto("");
       setTelefono("");
@@ -62,6 +75,11 @@ export default function Personal() {
       setPuestoId("");
       setSueldo("");
       setRfc("");
+      setDiaPagoMensual("");
+      setFormaPago("efectivo");
+      setBanco("");
+      setNumeroCuentaOClabe("");
+      setTitularCuenta("");
       setMostrarForm(false);
       cargar();
     } catch (err) {
@@ -144,13 +162,46 @@ export default function Personal() {
                 </select>
               </label>
               <label className="field">
-                Sueldo
+                Sueldo anual
                 <input type="number" step="0.01" value={sueldo} onChange={(e) => setSueldo(e.target.value)} />
               </label>
               <label className="field">
                 RFC
                 <input value={rfc} onChange={(e) => setRfc(e.target.value)} />
               </label>
+              {esMensual && (
+                <label className="field">
+                  Día de pago (ya no se puede cambiar después)
+                  <select value={diaPagoMensual} onChange={(e) => setDiaPagoMensual(e.target.value as typeof diaPagoMensual)} required>
+                    <option value="">Selecciona…</option>
+                    <option value="primer_viernes">Primer viernes del mes (paga el mes que empieza)</option>
+                    <option value="ultimo_viernes">Último viernes del mes (paga el mes que termina)</option>
+                  </select>
+                </label>
+              )}
+              <label className="field">
+                Forma de pago
+                <select value={formaPago} onChange={(e) => setFormaPago(e.target.value as typeof formaPago)}>
+                  <option value="efectivo">Efectivo</option>
+                  {esMensual && <option value="transferencia">Transferencia</option>}
+                </select>
+              </label>
+              {formaPago === "transferencia" && (
+                <>
+                  <label className="field">
+                    Banco
+                    <input value={banco} onChange={(e) => setBanco(e.target.value)} required />
+                  </label>
+                  <label className="field">
+                    Cuenta o CLABE
+                    <input value={numeroCuentaOClabe} onChange={(e) => setNumeroCuentaOClabe(e.target.value)} required />
+                  </label>
+                  <label className="field">
+                    Titular
+                    <input value={titularCuenta} onChange={(e) => setTitularCuenta(e.target.value)} required />
+                  </label>
+                </>
+              )}
             </>
           )}
 
@@ -181,6 +232,11 @@ export default function Personal() {
                   <Link to={`/rh/personal/${p.id}`} style={{ color: "var(--ink)", fontWeight: 600, textDecoration: "none" }}>
                     {p.nombreCompleto}
                   </Link>
+                  {p.pendienteAutorizacion && (
+                    <span className="tag tag-warning" style={{ marginLeft: 6 }}>
+                      Pendiente de autorizar
+                    </span>
+                  )}
                 </td>
                 <td>{p.tipo}</td>
                 <td>{p.puesto?.nombre ?? "—"}</td>

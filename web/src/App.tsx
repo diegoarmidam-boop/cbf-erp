@@ -7,6 +7,7 @@ import CapturaDelDia from "./pages/nomina/CapturaDelDia";
 import CierreDelDia from "./pages/nomina/CierreDelDia";
 import Grupos from "./pages/nomina/Grupos";
 import Asistencia from "./pages/nomina/Asistencia";
+import MatrizAsistencia from "./pages/nomina/MatrizAsistencia";
 import Prestamos from "./pages/nomina/Prestamos";
 import Bonos from "./pages/nomina/Bonos";
 import ReporteSemanal from "./pages/nomina/ReporteSemanal";
@@ -21,7 +22,7 @@ import Personal from "./pages/rh/Personal";
 import PersonalDetalle from "./pages/rh/PersonalDetalle";
 import Puestos from "./pages/rh/Puestos";
 import DoNotHire from "./pages/rh/DoNotHire";
-import Accesos from "./pages/rh/Accesos";
+import AltasPendientes from "./pages/rh/AltasPendientes";
 import AlmacenLayout from "./pages/almacen/AlmacenLayout";
 import Inventario from "./pages/almacen/Inventario";
 import EnCamino from "./pages/almacen/EnCamino";
@@ -85,6 +86,7 @@ export default function App() {
               <Route path="cierre" element={<CierreDelDia />} />
               <Route path="grupos" element={<Grupos />} />
               <Route path="asistencia" element={<Asistencia />} />
+              <Route path="matriz-asistencia" element={<MatrizAsistencia />} />
               <Route path="prestamos" element={<Prestamos />} />
               <Route path="bonos" element={<Bonos />} />
               <Route path="liquidaciones" element={<Liquidaciones />} />
@@ -96,9 +98,9 @@ export default function App() {
               <Route index element={<Navigate to="personal" replace />} />
               <Route path="personal" element={<Personal />} />
               <Route path="personal/:id" element={<PersonalDetalle />} />
+              <Route path="altas-pendientes" element={<AltasPendientes />} />
               <Route path="puestos" element={<Puestos />} />
               <Route path="do-not-hire" element={<DoNotHire />} />
-              <Route path="accesos" element={<Accesos />} />
             </Route>
 
             <Route path="/unidades_produccion" element={<UPLayout />}>

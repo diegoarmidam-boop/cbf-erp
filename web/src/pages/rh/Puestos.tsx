@@ -10,7 +10,7 @@ export default function Puestos() {
   const [confirmandoId, setConfirmandoId] = useState<string | null>(null);
 
   const [nombre, setNombre] = useState("");
-  const [periodicidad, setPeriodicidad] = useState<"semanal" | "quincenal" | "mensual">("semanal");
+  const [periodicidad, setPeriodicidad] = useState<"semanal" | "catorcenal" | "quincenal" | "mensual">("semanal");
   const [metodoAsignacionCosto, setMetodoAsignacionCosto] = useState<"directo_huerta" | "prorrateo_hectareas">("directo_huerta");
   const [rangoMin, setRangoMin] = useState("");
   const [rangoMax, setRangoMax] = useState("");
@@ -64,6 +64,7 @@ export default function Puestos() {
             Periodicidad
             <select value={periodicidad} onChange={(e) => setPeriodicidad(e.target.value as typeof periodicidad)}>
               <option value="semanal">Semanal</option>
+              <option value="catorcenal">Catorcenal</option>
               <option value="quincenal">Quincenal</option>
               <option value="mensual">Mensual</option>
             </select>

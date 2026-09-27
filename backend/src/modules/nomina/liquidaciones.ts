@@ -1,7 +1,7 @@
 import { calcularPeriodoNomina, type FechaISO } from "@cbf/shared";
 import { prisma } from "../../core/db.js";
 import { obtenerConfigNomina } from "./config.js";
-import { gananciaDestajoEnRango } from "./captura.js";
+import { diaEstaCerrado, gananciaDestajoEnRango } from "./captura.js";
 import { calcularBonoParaPersona } from "./bonos.js";
 import { aplicarDescuento } from "./prestamos.js";
 import { detalleActividadesPersonaEnPeriodo } from "./detalle.js";
@@ -12,6 +12,32 @@ export class PersonaNoEsDestajoError extends Error {
   constructor() {
     super("Las liquidaciones fuera de ciclo solo aplican a personal eventual/destajo — la nómina fija sigue su ciclo semanal normal.");
   }
+}
+
+export class DiasPendientesLiquidacionError extends Error {
+  constructor(public dias: { huertaNombre: string; fecha: FechaISO }[]) {
+    super(
+      `Antes de liquidar hay que cerrar el día de Nómina de: ${dias.map((d) => `${d.huertaNombre} (${d.fecha})`).join(", ")}.`
+    );
+  }
+}
+
+/** Días de esta persona dentro del rango que todavía no tienen su Huerta cerrada (9.11e) — se exige cerrarlos antes de liquidar. */
+async function diasPendientesDeCerrar(personalId: string, fechaInicio: FechaISO, fechaFin: FechaISO): Promise<{ huertaNombre: string; fecha: FechaISO }[]> {
+  const registros = await prisma.registroNomina.findMany({
+    where: {
+      fecha: { gte: new Date(fechaInicio), lte: new Date(fechaFin) },
+      OR: [{ personalId }, { grupo: { miembros: { some: { personalId } } } }],
+    },
+    include: { huerta: true },
+    distinct: ["huertaId", "fecha"],
+  });
+  const pendientes: { huertaNombre: string; fecha: FechaISO }[] = [];
+  for (const r of registros) {
+    const fecha = r.fecha.toISOString().slice(0, 10);
+    if (!(await diaEstaCerrado(r.huertaId, fecha))) pendientes.push({ huertaNombre: r.huerta.nombre, fecha });
+  }
+  return pendientes;
 }
 
 export interface PrestamoPendienteLiquidacion {
@@ -72,7 +98,8 @@ export async function calcularLiquidacion(personalId: string, fechaInicio: Fecha
       montoSugerido: Math.min(Number(p.montoPorDescuento), Number(p.saldoPendiente)),
     }));
 
-  return { personalId, nombreCompleto: persona.nombreCompleto, bruto, bonos, neto: bruto + bonos, prestamosPendientes };
+  // El sobre (9.11d): neto siempre redondeado hacia arriba al peso entero.
+  return { personalId, nombreCompleto: persona.nombreCompleto, bruto, bonos, neto: Math.ceil(bruto + bonos), prestamosPendientes };
 }
 
 export interface CrearLiquidacionInput {
@@ -91,6 +118,12 @@ export interface CrearLiquidacionInput {
  * No afecta su Grupo de Pago — la liquidación es 100% individual.
  */
 export async function crearLiquidacion(input: CrearLiquidacionInput, liquidadoPorId: string) {
+  // El sistema obliga a cerrar los días pendientes de esa persona antes de
+  // liquidar (9.11e) — sin esto, se podría liquidar sobre un día cuya
+  // captura todavía puede cambiar.
+  const pendientes = await diasPendientesDeCerrar(input.personalId, input.fechaInicio, input.fechaFin);
+  if (pendientes.length > 0) throw new DiasPendientesLiquidacionError(pendientes);
+
   const calculo = await calcularLiquidacion(input.personalId, input.fechaInicio, input.fechaFin);
 
   let descuentoPrestamos = 0;
@@ -104,7 +137,8 @@ export async function crearLiquidacion(input: CrearLiquidacionInput, liquidadoPo
     descuentoPrestamos += info.montoSugerido;
   }
 
-  const neto = calculo.bruto + calculo.bonos - descuentoPrestamos;
+  // El sobre (9.11d): neto siempre redondeado hacia arriba al peso entero — es el valor que queda registrado como pagado.
+  const neto = Math.ceil(calculo.bruto + calculo.bonos - descuentoPrestamos);
   const diaSiguiente = new Date(input.fechaFin);
   diaSiguiente.setUTCDate(diaSiguiente.getUTCDate() + 1);
 
@@ -148,6 +182,7 @@ export async function generarPdfLiquidacion(liquidacionId: string): Promise<PDFK
   const fila: FilaReporteSemanal = {
     personalId: liquidacion.personalId,
     nombreCompleto: liquidacion.personal.nombreCompleto,
+    formaPago: "efectivo", // liquidaciones solo aplican a destajo, siempre efectivo
     tipo: "destajo",
     bruto: Number(liquidacion.bruto),
     bonos: Number(liquidacion.bonos),

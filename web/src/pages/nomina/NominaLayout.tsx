@@ -5,6 +5,7 @@ const TABS = [
   { to: "cierre", label: "Cierre del día" },
   { to: "grupos", label: "Grupos de Pago" },
   { to: "asistencia", label: "Asistencia" },
+  { to: "matriz-asistencia", label: "Matriz de Asistencia" },
   { to: "prestamos", label: "Préstamos" },
   { to: "bonos", label: "Bonos" },
   { to: "liquidaciones", label: "Liquidaciones" },

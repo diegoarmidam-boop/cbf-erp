@@ -1,10 +1,12 @@
 import { Router } from "express";
 import { desglosarMonto, hoyISO, sumarDesgloses } from "@cbf/shared";
 import { requireAuth, requirePermission, huertaIdDeAlcance } from "../../middleware/auth.js";
+import { unoSolo } from "../../core/http.js";
 import { confirmarNominaSemanal, generarReporteNominaSemanal } from "./reporte.js";
 import { detalleActividadesPersonaEnPeriodo } from "./detalle.js";
 import { generarPdfSobres } from "./sobre.js";
 import { SemanaConfirmadaError } from "./semana-confirmada.js";
+import { listarTransferenciasDelViernes } from "./transferencias.js";
 
 export const reporteRouter = Router();
 reporteRouter.use(requireAuth);
@@ -49,6 +51,14 @@ reporteRouter.post("/semanal/confirmar", requirePermission("nomina", "editar"), 
     }
     throw err;
   }
+});
+
+// Transferencias de personal mensual (V1 P6, 27-sep-2026, 9.11c) — la
+// lista de pagos del viernes junto a Proveedores. `viernes` debe ser la
+// fecha (YYYY-MM-DD) del propio viernes, requerida (a diferencia de
+// `hoy` arriba, aquí no hay un default razonable).
+reporteRouter.get("/transferencias-viernes/:viernes", requirePermission("nomina", "ver"), async (req, res) => {
+  res.json(await listarTransferenciasDelViernes(unoSolo(req.params.viernes)));
 });
 
 reporteRouter.get("/semanal/sobres.pdf", requirePermission("nomina", "ver"), async (req, res) => {

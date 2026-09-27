@@ -6,6 +6,7 @@ import { mensajeErrorValidacion, unoSolo } from "../../core/http.js";
 import {
   calcularLiquidacion,
   crearLiquidacion,
+  DiasPendientesLiquidacionError,
   generarPdfLiquidacion,
   listarLiquidaciones,
   PersonaNoEsDestajoError,
@@ -66,7 +67,7 @@ liquidacionesRouter.post("/", requirePermission("nomina", "capturar"), async (re
     const liquidacion = await crearLiquidacion(parsed.data, req.usuario!.usuarioId);
     res.status(201).json(liquidacion);
   } catch (err) {
-    if (err instanceof PersonaNoEsDestajoError) {
+    if (err instanceof PersonaNoEsDestajoError || err instanceof DiasPendientesLiquidacionError) {
       res.status(409).json({ error: err.message });
       return;
     }

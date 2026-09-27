@@ -101,6 +101,15 @@ export interface Personal {
   motivoBaja?: string | null;
   noDisponibleDesde?: string | null;
   documentos?: PersonalDocumento[];
+  // V1 P6, 27-sep-2026 (9.11a/b/c):
+  pendienteAutorizacion?: boolean;
+  autorizadoPorId?: string | null;
+  fechaAutorizacion?: string | null;
+  diaPagoMensual?: "primer_viernes" | "ultimo_viernes" | null;
+  formaPago?: "efectivo" | "transferencia";
+  banco?: string | null;
+  numeroCuentaOClabe?: string | null;
+  titularCuenta?: string | null;
 }
 
 export interface PersonalDocumento {
@@ -115,7 +124,7 @@ export interface PersonalDocumento {
 export interface Puesto {
   id: string;
   nombre: string;
-  periodicidad: "semanal" | "quincenal" | "mensual";
+  periodicidad: "semanal" | "catorcenal" | "quincenal" | "mensual";
   rangoSalarialMin: string | null;
   rangoSalarialMax: string | null;
   metodoAsignacionCosto: "directo_huerta" | "prorrateo_hectareas";
@@ -341,7 +350,7 @@ export interface ConfigNomina {
   tarifaGeneralHora: number | null;
 }
 
-export type EstadoAsistenciaDia = "cumplio" | "falta_injustificada" | "sin_registro";
+export type EstadoAsistenciaDia = "cumplio" | "falta_injustificada" | "falta_justificada" | "sin_registro";
 export interface DiaAsistencia {
   fecha: string;
   estado: EstadoAsistenciaDia;

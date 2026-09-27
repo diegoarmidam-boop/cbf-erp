@@ -438,8 +438,26 @@ model SegundaCintillaRealizadaCuadro {
 
 enum Periodicidad {
   semanal
+  catorcenal
   quincenal
   mensual
+}
+
+// Solo aplica a Periodicidad.mensual (V1 P6, 27-sep-2026, 9.11b) — se
+// define UNA vez al contratar y no se vuelve a editar (ver
+// actualizarPersonal en personal.ts). "Primer viernes" paga el mes que
+// EMPIEZA (por adelantado); "Último viernes" paga el mes que TERMINA.
+enum DiaPagoMensual {
+  primer_viernes
+  ultimo_viernes
+}
+
+// V1 P6, 27-sep-2026, 9.11c — transferencia solo para personal mensual por
+// ahora (validado en personal.ts, no a nivel de esquema para no atarlo si
+// algún día se abre a otras periodicidades).
+enum FormaPago {
+  efectivo
+  transferencia
 }
 
 enum MetodoAsignacionCosto {
@@ -496,6 +514,33 @@ model Personal {
   bonoAsistenciaNunca         Boolean @default(false)
   bonoAsistenciaMedioTiempo   Boolean @default(false)
   bonoAsistenciaMontoEspecial Boolean @default(false)
+
+  // Alta pendiente de autorización (V1 P6, 27-sep-2026, 9.11a): "+ Nueva
+  // persona" desde Captura del día la deja `activo` de inmediato (su costo
+  // cuenta para la Huerta desde ya), pero su PAGO no sale en el cierre de
+  // semana hasta que RH la autorice aquí — lo ganado mientras tanto se
+  // acumula a la siguiente semana ya autorizada (ver `nominaPagadaHasta`).
+  pendienteAutorizacion  Boolean   @default(false)
+  autorizadoPorId        String?
+  fechaAutorizacion      DateTime?
+  // Hasta qué `periodo.fin` (inclusive) ya se le pagó/confirmó en Nómina —
+  // null = nunca. Avanza en cada semana confirmada (reporte.ts); el
+  // siguiente reporte retoma desde el día después de este valor, no solo
+  // desde el inicio del periodo actual — así es como una alta pendiente
+  // "atrapa" lo que se le debía en cuanto se autoriza.
+  nominaPagadaHasta      DateTime? @db.Date
+
+  // Periodicidad mensual (V1 P6, 27-sep-2026, 9.11b) — cuál de los 2
+  // viernes le corresponde; se define al contratar y ya no se edita.
+  diaPagoMensual DiaPagoMensual?
+
+  // Forma de pago (V1 P6, 27-sep-2026, 9.11c) — transferencia solo para
+  // mensual por ahora (validado en personal.ts). Datos bancarios solo se
+  // usan/piden cuando formaPago = transferencia.
+  formaPago          FormaPago @default(efectivo)
+  banco              String?
+  numeroCuentaOClabe String?
+  titularCuenta      String?
 
   usuario                      Usuario?
   liquidaciones                Liquidacion[]

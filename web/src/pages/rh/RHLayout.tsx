@@ -2,16 +2,15 @@ import { NavLink, Navigate, Outlet } from "react-router-dom";
 import { useAuth } from "../../lib/auth";
 
 export default function RHLayout() {
-  const { usuario, modulosVisibles } = useAuth();
+  const { modulosVisibles } = useAuth();
   const verPersonal = modulosVisibles.includes("rh");
   const verDoNotHire = modulosVisibles.includes("do_not_hire");
-  const esDirectivo = usuario?.rol === "director_general" || usuario?.rol === "encargado_sistemas";
 
   const tabs = [
     verPersonal && { to: "personal", label: "Personal" },
+    verPersonal && { to: "altas-pendientes", label: "Altas pendientes" },
     verPersonal && { to: "puestos", label: "Puestos" },
     verDoNotHire && { to: "do-not-hire", label: "Do-not-hire" },
-    esDirectivo && { to: "accesos", label: "Accesos y usuarios" },
   ].filter(Boolean) as { to: string; label: string }[];
 
   if (tabs.length === 0) return <p>Tu rol no tiene acceso a ninguna vista de este módulo.</p>;
@@ -40,7 +39,7 @@ export default function RHLayout() {
         ))}
       </div>
       <Outlet />
-      {!verPersonal && !verDoNotHire && !esDirectivo && <Navigate to="/nomina" replace />}
+      {!verPersonal && !verDoNotHire && <Navigate to="/nomina" replace />}
     </div>
   );
 }

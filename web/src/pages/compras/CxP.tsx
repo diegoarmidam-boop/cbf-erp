@@ -3,9 +3,30 @@ import { useSearchParams } from "react-router-dom";
 import { api, ApiError } from "../../lib/api";
 import type { OrdenCxP } from "../../lib/types";
 import { formatearFecha, formatearInstante } from "../../lib/fecha";
+import { formatearDinero } from "../../lib/numero";
+
+interface TransferenciaNomina {
+  personalId: string;
+  nombreCompleto: string;
+  monto: number;
+  banco: string | null;
+  numeroCuentaOClabe: string | null;
+  titularCuenta: string | null;
+}
+
+/** El viernes de ESTA semana (calendario) — para pedir las transferencias de Nómina de esa fecha (V1 P6, 27-sep-2026, 9.11c). */
+function viernesDeEstaSemana(): string {
+  const d = new Date();
+  const dow = d.getDay(); // 0=domingo..6=sábado
+  const diff = (5 - dow + 7) % 7;
+  const viernes = new Date(d);
+  viernes.setDate(viernes.getDate() + diff);
+  return viernes.toISOString().slice(0, 10);
+}
 
 export default function CxP() {
   const [ordenes, setOrdenes] = useState<OrdenCxP[]>([]);
+  const [transferencias, setTransferencias] = useState<TransferenciaNomina[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [cargando, setCargando] = useState(true);
 
@@ -25,6 +46,10 @@ export default function CxP() {
   }
 
   useEffect(cargar, []);
+
+  useEffect(() => {
+    api.get<TransferenciaNomina[]>(`/nomina/reporte/transferencias-viernes/${viernesDeEstaSemana()}`).then(setTransferencias);
+  }, []);
 
   useEffect(() => {
     if (idResaltado) refResaltada.current?.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -49,6 +74,34 @@ export default function CxP() {
       </p>
 
       {error && <div className="tag tag-danger" style={{ display: "block", padding: "8px 12px", marginBottom: 12 }}>{error}</div>}
+
+      {transferencias.length > 0 && (
+        <div className="card" style={{ marginBottom: 18 }}>
+          <div style={{ fontWeight: 600, marginBottom: 8 }}>Transferencias de Nómina — este viernes ({viernesDeEstaSemana()})</div>
+          <table>
+            <thead>
+              <tr>
+                <th>Persona</th>
+                <th>Banco</th>
+                <th>Cuenta / CLABE</th>
+                <th>Titular</th>
+                <th>Monto</th>
+              </tr>
+            </thead>
+            <tbody>
+              {transferencias.map((t) => (
+                <tr key={t.personalId}>
+                  <td>{t.nombreCompleto}</td>
+                  <td>{t.banco ?? "—"}</td>
+                  <td>{t.numeroCuentaOClabe ?? "—"}</td>
+                  <td>{t.titularCuenta ?? "—"}</td>
+                  <td>{formatearDinero(t.monto)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {cargando ? (
         <p>Cargando…</p>

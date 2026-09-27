@@ -3,7 +3,17 @@ import { z } from "zod";
 import { requireAuth, requirePermission } from "../../middleware/auth.js";
 import { mensajeErrorValidacion, unoSolo } from "../../core/http.js";
 import { tienePermiso, type Accion } from "../../core/permissions.js";
-import { actualizarPersonal, crearPersonal, darDeBaja, listarPersonal, obtenerPersonal } from "./personal.js";
+import {
+  actualizarPersonal,
+  autorizarAlta,
+  crearPersonal,
+  darDeBaja,
+  DiaPagoMensualNoEditableError,
+  listarAltasPendientes,
+  listarPersonal,
+  obtenerPersonal,
+  TransferenciaSoloMensualError,
+} from "./personal.js";
 
 export const personalRouter = Router();
 personalRouter.use(requireAuth);
@@ -35,6 +45,11 @@ personalRouter.get("/", async (req, res) => {
   res.json(await listarPersonal({ tipo, incluirInactivos, soloDisponibles }));
 });
 
+// Registrada ANTES de "/:id" — si no, Express interpretaría "altas-pendientes" como un id.
+personalRouter.get("/altas-pendientes", requirePermission("rh", "ver"), async (_req, res) => {
+  res.json(await listarAltasPendientes());
+});
+
 personalRouter.get("/:id", requirePermission("rh", "ver"), async (req, res) => {
   const persona = await obtenerPersonal(unoSolo(req.params.id));
   if (!persona) {
@@ -58,6 +73,13 @@ const altaSchemaBase = z.object({
   sueldo: z.number().nonnegative().optional(),
   rfc: z.string().optional(),
   imssOSeguro: z.string().optional(),
+  // V1 P6, 27-sep-2026 (9.11a/b/c):
+  pendienteAutorizacion: z.boolean().optional(),
+  diaPagoMensual: z.enum(["primer_viernes", "ultimo_viernes"]).optional(),
+  formaPago: z.enum(["efectivo", "transferencia"]).optional(),
+  banco: z.string().optional(),
+  numeroCuentaOClabe: z.string().optional(),
+  titularCuenta: z.string().optional(),
 });
 
 personalRouter.post("/", requirePermission("rh", "capturar"), async (req, res) => {
@@ -66,8 +88,16 @@ personalRouter.post("/", requirePermission("rh", "capturar"), async (req, res) =
     res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
     return;
   }
-  const persona = await crearPersonal(parsed.data);
-  res.status(201).json(persona);
+  try {
+    const persona = await crearPersonal(parsed.data);
+    res.status(201).json(persona);
+  } catch (err) {
+    if (err instanceof TransferenciaSoloMensualError) {
+      res.status(400).json({ error: err.message });
+      return;
+    }
+    throw err;
+  }
 });
 
 personalRouter.patch("/:id", requirePermission("rh", "editar"), async (req, res) => {
@@ -76,7 +106,20 @@ personalRouter.patch("/:id", requirePermission("rh", "editar"), async (req, res)
     res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
     return;
   }
-  const persona = await actualizarPersonal(unoSolo(req.params.id), parsed.data);
+  try {
+    const persona = await actualizarPersonal(unoSolo(req.params.id), parsed.data);
+    res.json(persona);
+  } catch (err) {
+    if (err instanceof TransferenciaSoloMensualError || err instanceof DiaPagoMensualNoEditableError) {
+      res.status(400).json({ error: err.message });
+      return;
+    }
+    throw err;
+  }
+});
+
+personalRouter.post("/:id/autorizar", requirePermission("rh", "editar"), async (req, res) => {
+  const persona = await autorizarAlta(unoSolo(req.params.id), req.usuario!.usuarioId);
   res.json(persona);
 });
 

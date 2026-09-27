@@ -280,6 +280,16 @@ export async function programarAplicacion(input: ProgramarAplicacionInput, cread
   if (!input.grupos || input.grupos.length === 0) throw new Error("Falta al menos un Grupo (si no armas Grupos, se programa como uno solo con todo).");
   if (input.recetaId && input.grupos.length > 1) throw new Error("Una Receta solo se puede usar cuando la programación tiene un único Grupo.");
 
+  // Causa raíz corregida (V1 P6, 27-sep-2026, 9.11h): la Tarifa General se
+  // validaba hasta "Registrar realizada" — si faltaba Y además algún
+  // Cuadro no tenía configuración vigente, el usuario veía primero el
+  // error de Cuadro (irrelevante) y nunca se enteraba del problema real
+  // hasta mucho después. Ahora se valida aquí, antes de resolver Cuadros —
+  // mismo criterio que ya usa Actividades (programarActividad).
+  const actividadTarifa = await prisma.actividad.findFirstOrThrow({ where: { nombre: NOMBRE_ACTIVIDAD_APLICACION } });
+  const configTarifa = await obtenerConfigNomina();
+  tarifaEfectiva(aActividadCalc(actividadTarifa), configTarifa.tarifaGeneralHora);
+
   const fechaRef = new Date(input.fechaInicio);
   const gruposResueltos = await Promise.all(
     input.grupos.map(async (g) => {

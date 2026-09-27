@@ -17,9 +17,10 @@ function semanaCalendarioLS(fechaRef: string): { inicio: string; fin: string } {
 
 const NOMBRES_CORTOS = ["L", "M", "M", "J", "V", "S"];
 
-function colorDia(estado: DiaAsistencia["estado"]): string {
+export function colorDia(estado: DiaAsistencia["estado"]): string {
   if (estado === "cumplio") return "var(--success)";
   if (estado === "falta_injustificada") return "var(--danger)";
+  if (estado === "falta_justificada") return "var(--warning, #d98f1f)";
   return "var(--border)";
 }
 
@@ -83,7 +84,7 @@ export default function Asistencia() {
         </div>
       )}
       <p style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 10 }}>
-        🟢 Cumplió · 🔴 Falta injustificada · ⚪ Sin registro todavía
+        🟢 Cumplió · 🔴 Falta injustificada · 🟠 Falta justificada · ⚪ Sin registro todavía
       </p>
     </div>
   );

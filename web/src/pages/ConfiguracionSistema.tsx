@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { api, ApiError } from "../lib/api";
 import CatalogosTab from "./CatalogosTab";
+import Accesos from "./rh/Accesos";
 
-type Tab = "modulos" | "facturacion" | "compras" | "catalogos";
+type Tab = "modulos" | "facturacion" | "compras" | "catalogos" | "accesos";
 
 interface ModuloConfigItem {
   modulo: string;
@@ -121,6 +122,7 @@ export default function ConfiguracionSistema() {
             { value: "facturacion", label: "Facturación y firmas" },
             { value: "compras", label: "Compras" },
             { value: "catalogos", label: "Catálogos" },
+            { value: "accesos", label: "Accesos y usuarios" },
           ] as { value: Tab; label: string }[]
         ).map((t) => (
           <button
@@ -272,6 +274,7 @@ export default function ConfiguracionSistema() {
       )}
 
       {tab === "catalogos" && <CatalogosTab />}
+      {tab === "accesos" && <Accesos />}
     </div>
   );
 }

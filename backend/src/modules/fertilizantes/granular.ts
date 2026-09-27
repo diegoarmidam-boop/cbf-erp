@@ -239,6 +239,13 @@ export async function programarGranular(input: ProgramarGranularInput, creadoPor
   }
   if (!input.grupos || input.grupos.length === 0) throw new Error("Falta al menos un Grupo (si no armas Grupos, se programa como uno solo con todo).");
 
+  // Causa raíz corregida (V1 P6, 27-sep-2026, 9.11h) — mismo motivo que
+  // Aplicaciones: valida la Tarifa General ANTES de resolver Cuadros, para
+  // no mostrar primero un error de Cuadro irrelevante.
+  const actividadTarifa = await prisma.actividad.findFirstOrThrow({ where: { nombre: NOMBRE_ACTIVIDAD_GRANULAR } });
+  const configTarifa = await obtenerConfigNomina();
+  tarifaEfectiva(aActividadCalc(actividadTarifa), configTarifa.tarifaGeneralHora);
+
   const fechaRef = new Date(input.fechaInicio);
   const gruposResueltos = await Promise.all(
     input.grupos.map(async (g) => {
