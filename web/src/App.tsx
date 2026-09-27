@@ -52,6 +52,7 @@ import Fertirriego from "./pages/fertilizantes/Fertirriego";
 import RiegoLayout from "./pages/riego/RiegoLayout";
 import Riego from "./pages/riego/Riego";
 import HistorialSemanal from "./pages/riego/HistorialSemanal";
+import SegundaCintilla from "./pages/riego/SegundaCintilla";
 import Vivero from "./pages/vivero/Vivero";
 import Indicadores from "./pages/indicadores/Indicadores";
 
@@ -152,6 +153,7 @@ export default function App() {
               <Route index element={<Navigate to="captura" replace />} />
               <Route path="captura" element={<Riego />} />
               <Route path="historial" element={<HistorialSemanal />} />
+              <Route path="segunda-cintilla" element={<SegundaCintilla />} />
             </Route>
 
             <Route path="/vivero" element={<Vivero />} />

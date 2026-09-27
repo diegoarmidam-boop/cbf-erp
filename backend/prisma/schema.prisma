@@ -190,6 +190,7 @@ model Huerta {
   trasladosDestino        EquipoTraslado[]          @relation("EquipoTrasladoDestino")
   combustibleCargas       CombustibleCarga[]
   ajustesCostoFlete       AjusteCostoHuerta[]
+  segundaCintillaProgramaciones SegundaCintillaProgramacion[]
 }
 
 enum EstatusCuadro {
@@ -221,6 +222,7 @@ model Cuadro {
   fertilizacionGranularRealizadaGrupoCuadros FertilizacionGranularRealizadaGrupoCuadro[]
   viveroTraspasos                        ViveroTraspaso[]
   combustibleCargaCuadros                CombustibleCargaCuadro[]
+  segundaCintillaRealizadaCuadros         SegundaCintillaRealizadaCuadro[]
 
   @@unique([huertaId, nombre])
 }
@@ -317,6 +319,8 @@ model SeccionRiego {
   registrosRiego       RiegoRegistroDiario[]
   lineasCintilla       SeccionRiegoLineasCintilla[]
   combustibleCargas    CombustibleCargaSeccion[]
+  segundaCintillaProgramaciones SegundaCintillaProgramacionSeccion[]
+  segundaCintillaRealizadas     SegundaCintillaRealizada[]
 
   @@unique([huertaId, nombre])
 }
@@ -346,6 +350,86 @@ model SeccionRiegoLineasCintilla {
   vigenteHasta DateTime?    @db.Date // null = vigente actualmente
 
   @@index([seccionId, vigenteDesde])
+}
+
+// "Tirar 2da Cintilla" (V1 P5, 27-sep-2026, 9.6) — movida de Actividades:
+// se programa por Sección de Riego (no por Cuadro), con avance en
+// hectáreas por Sección. El reparto a Cuadro (para que el costo baje ahí,
+// mismo criterio que el resto del sistema) se calcula con los Cuadros de
+// CADA Sección, igual que Aplicaciones/Granular/Actividades: guardado el
+// día del reporte, nunca recalculado. Sigue usando el catálogo Actividad
+// "Tirar 2da Cintilla" solo para tarifa/costeo (ver
+// NOMBRE_ACTIVIDAD_SEGUNDA_CINTILLA en riego/segunda-cintilla.ts) — mismo
+// patrón que "Fumigación"/"Fertilización" en Aplicaciones/Granular.
+model SegundaCintillaProgramacion {
+  id            String   @id @default(uuid())
+  huertaId      String
+  huerta        Huerta   @relation(fields: [huertaId], references: [id])
+  fechaInicio   DateTime @db.Date
+  fechaFin      DateTime @db.Date
+  creadoPorId   String
+  fechaCreacion DateTime @default(now())
+
+  secciones  SegundaCintillaProgramacionSeccion[]
+  realizadas SegundaCintillaRealizada[]
+}
+
+model SegundaCintillaProgramacionSeccion {
+  id             String                      @id @default(uuid())
+  programacionId String
+  programacion   SegundaCintillaProgramacion @relation(fields: [programacionId], references: [id])
+  seccionId      String
+  seccion        SeccionRiego                @relation(fields: [seccionId], references: [id])
+  // Hectáreas de esta Sección al momento de programar (suma de sus Cuadros
+  // vigentes a fechaInicio) — el candado de superficie y el 100% para abrir
+  // "líneas de cintilla = 2" se miden contra este valor.
+  hectareas      Decimal                     @db.Decimal(10, 4)
+
+  @@unique([programacionId, seccionId])
+}
+
+model SegundaCintillaRealizada {
+  id              String                      @id @default(uuid())
+  programacionId  String
+  programacion    SegundaCintillaProgramacion @relation(fields: [programacionId], references: [id])
+  seccionId       String
+  seccion         SeccionRiego                @relation(fields: [seccionId], references: [id])
+  fechaReal       DateTime                    @db.Date
+  hectareas       Decimal                     @db.Decimal(10, 4)
+  registradoPorId String
+  comentario      String?                     @db.Text
+
+  personas SegundaCintillaRealizadaPersona[]
+  cuadros  SegundaCintillaRealizadaCuadro[]
+
+  @@index([programacionId])
+  @@index([seccionId])
+}
+
+model SegundaCintillaRealizadaPersona {
+  id          String                   @id @default(uuid())
+  realizadaId String
+  realizada   SegundaCintillaRealizada @relation(fields: [realizadaId], references: [id])
+  personalId  String
+  personal    Personal                 @relation(fields: [personalId], references: [id])
+  horas       Decimal                  @db.Decimal(6, 2)
+
+  @@unique([realizadaId, personalId])
+}
+
+// Reparto calculado (no capturado) a los Cuadros de la Sección de este
+// reporte, proporcional a sus hectáreas — mismo criterio que
+// ActividadRealizadaCuadro.
+model SegundaCintillaRealizadaCuadro {
+  id                  String                   @id @default(uuid())
+  realizadaId         String
+  realizada           SegundaCintillaRealizada @relation(fields: [realizadaId], references: [id])
+  cuadroId            String
+  cuadro              Cuadro                   @relation(fields: [cuadroId], references: [id])
+  hectareasAtribuidas Decimal                  @db.Decimal(10, 4)
+
+  @@index([realizadaId])
+  @@index([cuadroId])
 }
 
 // ============================================================
@@ -431,6 +515,7 @@ model Personal {
   equiposComoOperadorDesignado Equipo[]                          @relation("EquipoOperadorDesignado")
   actividadLineasOperador      ActividadRealizadaLinea[]         @relation("ActividadLineaOperador")
   actividadLineaPersonas       ActividadRealizadaLineaPersona[]  @relation("ActividadLineaPersona")
+  segundaCintillaPersonas      SegundaCintillaRealizadaPersona[]
 
   @@index([tipo, activo])
 }
@@ -625,6 +710,7 @@ enum OrigenRegistroNomina {
   automatico_actividad
   automatico_cosecha
   automatico_empaque
+  automatico_segunda_cintilla
 }
 
 // Registro fuente de mano de obra — cada fila es una persona (o grupo) +

@@ -17,7 +17,7 @@ import { comprasRouter } from "./modules/compras/index.js";
 import { equiposModuleRouter } from "./modules/equipos/index.js";
 import { aplicacionesRouter } from "./modules/aplicaciones/index.js";
 import { fertilizantesModuleRouter } from "./modules/fertilizantes/index.js";
-import { riegoRouter } from "./modules/riego/index.js";
+import { riegoRouter, segundaCintillaRouter } from "./modules/riego/index.js";
 import { configuracionRouter } from "./modules/configuracion/configuracion.routes.js";
 import { recetarioRouter, tiposAplicacionRouter } from "./modules/recetario/recetario.routes.js";
 import { viveroRouter } from "./modules/vivero/index.js";
@@ -52,6 +52,10 @@ export function createApp() {
   apiRouter.use("/equipos", equiposModuleRouter);
   apiRouter.use("/aplicaciones", aplicacionesRouter);
   apiRouter.use("/fertilizantes", fertilizantesModuleRouter);
+  // Registrada ANTES de "/riego" — si no, su patrón "/:seccionId/:fecha"
+  // interpretaría "/riego/segunda-cintilla/xxx" como una Sección literal
+  // "segunda-cintilla" con fecha "xxx" (V1 P5, 27-sep-2026).
+  apiRouter.use("/riego/segunda-cintilla", segundaCintillaRouter);
   apiRouter.use("/riego", riegoRouter);
   apiRouter.use("/configuracion", configuracionRouter);
   apiRouter.use("/recetario", recetarioRouter);

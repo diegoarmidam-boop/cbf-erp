@@ -15,11 +15,13 @@ import { verificarRanchoDelTractor } from "../equipos/traslados.js";
 import { comunicacionActiva } from "../../core/moduloComunicacion.js";
 
 /**
- * Corrección de fondo (9.4, 15-ago-2026): lista negra corta de lo que NO
- * debe programarse aquí — solo los dos nombres que otros módulos usan como
- * ancla fija para su propia mano de obra automática.
+ * Corrección de fondo (9.4, 15-ago-2026; V1 P5, 27-sep-2026 agrega "Tirar
+ * 2da Cintilla"): lista negra corta de lo que NO debe programarse aquí —
+ * solo los nombres que otros módulos usan como ancla fija para su propia
+ * mano de obra automática. "Tirar 2da Cintilla" se programa por Sección de
+ * Riego, no por Cuadro — ver riego/segunda-cintilla.ts.
  */
-export const ACTIVIDADES_RESERVADAS_OTROS_MODULOS = ["Fumigación", "Fertilización"];
+export const ACTIVIDADES_RESERVADAS_OTROS_MODULOS = ["Fumigación", "Fertilización", "Tirar 2da Cintilla"];
 
 export class ActividadFueraDeAlcanceError extends Error {
   constructor() {
@@ -488,39 +490,11 @@ export async function registrarAvanceActividad(actividadProgramadaId: string, in
 
     await crearLineasYNomina(tx, realizada.id, programada.huertaId, programada.actividadId, fecha, input.hectareas, input.lineas, reparto, tarifaAplicada, registradoPorId);
 
-    if (programada.actividad.nombre === NOMBRE_ACTIVIDAD_SEGUNDA_CINTILLA) {
-      const cuadroIdsTocados = [...new Set(reparto.porMiembro.filter((m) => m.hectareasAtribuidas > 0.0001).map((m) => parseClaveMiembro(m.clave).cuadroId))];
-      await aplicarSegundaCintillaTx(tx, cuadroIdsTocados, input.fechaReal);
-    }
-
     return tx.actividadRealizada.findUniqueOrThrow({
       where: { id: realizada.id },
       include: { cuadros: { include: { cuadro: true } }, lineas: { include: INCLUDE_LINEA_ACTIVIDAD } },
     });
   });
-}
-
-/**
- * "Tirar 2da Cintilla" (V1 P5, 21-sep-2026 — pendiente moverla a Riego en
- * otra prioridad; se mantiene funcionando aquí mientras tanto): al reportar
- * avance, cada Sección de Riego a la que pertenecen los Cuadros TOCADOS
- * (hectareasAtribuidas > 0 en el reparto) queda con "Líneas de cintilla" =
- * 2 a partir de la fecha del avance.
- */
-export const NOMBRE_ACTIVIDAD_SEGUNDA_CINTILLA = "Tirar 2da Cintilla";
-
-async function aplicarSegundaCintillaTx(tx: TransactionClient, cuadroIds: string[], fechaReal: string) {
-  const fecha = new Date(fechaReal);
-  const vinculos = await tx.seccionRiegoCuadro.findMany({ where: { cuadroId: { in: cuadroIds } }, select: { seccionId: true } });
-  for (const seccionId of new Set(vinculos.map((v) => v.seccionId))) {
-    const vigente = await tx.seccionRiegoLineasCintilla.findFirst({
-      where: { seccionId, vigenteDesde: { lte: fecha }, OR: [{ vigenteHasta: null }, { vigenteHasta: { gte: fecha } }] },
-    });
-    if (vigente?.lineas === 2) continue;
-    const posterior = await tx.seccionRiegoLineasCintilla.findFirst({ where: { seccionId, vigenteDesde: { gt: fecha } } });
-    if (posterior) continue;
-    await actualizarLineasCintillaTx(tx, seccionId, 2, fechaReal);
-  }
 }
 
 export interface EditarAvanceActividadInput {

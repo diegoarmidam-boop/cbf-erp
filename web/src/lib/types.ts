@@ -1057,6 +1057,57 @@ export interface ActividadProgramada {
   restantesPorMiembro?: Record<string, number>;
 }
 
+// "Tirar 2da Cintilla" (V1 P5, 27-sep-2026) — movida de Actividades a
+// Riego: se programa por Sección, no por Cuadro.
+export interface SegundaCintillaProgramacionSeccion {
+  id: string;
+  seccionId: string;
+  seccion: SeccionRiego;
+  hectareas: string;
+}
+
+export interface SegundaCintillaRealizadaPersona {
+  personalId: string;
+  personal: Personal;
+  horas: string;
+}
+
+export interface SegundaCintillaRealizadaCuadro {
+  id: string;
+  cuadroId: string;
+  cuadro: Cuadro;
+  hectareasAtribuidas: string;
+}
+
+export interface SegundaCintillaRealizada {
+  id: string;
+  programacionId: string;
+  seccionId: string;
+  seccion: SeccionRiego;
+  fechaReal: string;
+  hectareas: string;
+  registradoPorId: string;
+  comentario: string | null;
+  personas: SegundaCintillaRealizadaPersona[];
+  cuadros: SegundaCintillaRealizadaCuadro[];
+}
+
+export interface SegundaCintillaProgramacion {
+  id: string;
+  huertaId: string;
+  huerta: Huerta;
+  fechaInicio: string;
+  fechaFin: string;
+  creadoPorId: string;
+  fechaCreacion: string;
+  secciones: SegundaCintillaProgramacionSeccion[];
+  realizadas: SegundaCintillaRealizada[];
+  hectareasTotalesProgramadas?: number;
+  hectareasAvanzadas?: number;
+  porcentajeAvance?: number;
+  restantesPorSeccion?: Record<string, number>;
+}
+
 export type RecursoTipo = "gente" | "implemento";
 export type ConcentracionUnidad = "ml_l" | "g_l" | "kg_l";
 export type EstadoAplicacion = "programada" | "entregada" | "realizada" | "vencida" | "cancelada";

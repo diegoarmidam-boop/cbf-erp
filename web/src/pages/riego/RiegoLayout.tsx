@@ -3,6 +3,7 @@ import { NavLink, Outlet } from "react-router-dom";
 const TABS = [
   { to: "captura", label: "Captura diaria" },
   { to: "historial", label: "Historial semanal" },
+  { to: "segunda-cintilla", label: "Tirar 2da Cintilla" },
 ];
 
 export default function RiegoLayout() {
