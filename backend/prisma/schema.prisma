@@ -2421,11 +2421,11 @@ model FertilizacionGranularRealizadaGrupoCuadro {
   @@index([cuadroId])
 }
 
+// "cada_2_dias", "cada_3_dias" y "patron_2_1" ("2 sí, 1 no") se quitaron
+// (V1 P7, 27-sep-2026, 9.5) — 0 registros los usaban, confirmado antes de
+// la migración. Solo quedan diario y días fijos de la semana.
 enum FrecuenciaFertirriego {
   diario
-  cada_2_dias
-  cada_3_dias
-  patron_2_1
   dias_semana // Prioridad 5, 7-sep-2026 — ver FertirriegoProgramacion.diasSemana
 }
 

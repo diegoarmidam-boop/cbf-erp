@@ -3,6 +3,7 @@ import { api, ApiError } from "../../lib/api";
 import type { BonoConfig, BonoOtorgado, TipoBono } from "../../lib/types";
 import { formatearDinero } from "../../lib/numero";
 import BonoAsistenciaSemanal from "./BonoAsistenciaSemanal";
+import ConfirmModal from "../../components/ConfirmModal";
 
 export default function Bonos() {
   const [bonos, setBonos] = useState<BonoConfig[]>([]);
@@ -20,6 +21,8 @@ export default function Bonos() {
   const [editandoId, setEditandoId] = useState<string | null>(null);
   // V1 P7: Nómina → Bonos → Bono de Asistencia Semanal (Semana / Ajustes / Configuración).
   const [vista, setVista] = useState<"catalogo" | "asistencia">("asistencia");
+  // Confirmación en dos pasos (V1 P7, 27-sep-2026, 9.16) — rechazar un bono pendiente.
+  const [rechazandoId, setRechazandoId] = useState<string | null>(null);
 
   function cargar() {
     api.get<BonoConfig[]>("/nomina/bonos").then(setBonos);
@@ -97,6 +100,7 @@ export default function Bonos() {
     setError(null);
     try {
       await api.post(`/nomina/bonos/pendientes/${id}/${decision}`);
+      if (decision === "rechazar") setRechazandoId(null);
       cargar();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "No se pudo resolver.");
@@ -247,7 +251,7 @@ export default function Bonos() {
                 <button className="btn-primary" onClick={() => resolver(p.id, "autorizar")}>
                   Autorizar
                 </button>
-                <button className="btn-secondary" onClick={() => resolver(p.id, "rechazar")}>
+                <button className="btn-secondary" onClick={() => setRechazandoId(p.id)}>
                   Rechazar
                 </button>
               </td>
@@ -256,6 +260,16 @@ export default function Bonos() {
         </tbody>
       </table>
     </div>
+      )}
+      {rechazandoId && (
+        <ConfirmModal
+          titulo="Rechazar bono"
+          mensaje="Este bono pendiente se rechazará y no se pagará. ¿Confirmas?"
+          textoConfirmar="Sí, rechazar"
+          peligroso
+          onConfirmar={() => resolver(rechazandoId, "rechazar")}
+          onCancelar={() => setRechazandoId(null)}
+        />
       )}
     </div>
   );

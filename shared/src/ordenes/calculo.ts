@@ -4,7 +4,9 @@
 // nada del Recetario/mezcla por tanque, solo empaqueta y presenta esos
 // datos ya construidos con el vocabulario exacto que pide el documento.
 
-export type FrecuenciaFertirriego = "diario" | "cada_2_dias" | "cada_3_dias" | "patron_2_1" | "dias_semana";
+// "cada_2_dias", "cada_3_dias" y "patron_2_1" ("2 sí, 1 no") se quitaron
+// (V1 P7, 27-sep-2026, 9.5) — 0 registros los usaban.
+export type FrecuenciaFertirriego = "diario" | "dias_semana";
 
 /**
  * "Días específicos de la semana" (Prioridad 5, 7-sep-2026) — checkboxes
@@ -86,17 +88,10 @@ export function riegosEnVentana(frecuencia: FrecuenciaFertirriego, dias: number)
   return cuenta;
 }
 
-function diaAplicaFrecuencia(frecuencia: FrecuenciaFertirriego, offsetDesdeInicio: number): boolean {
+function diaAplicaFrecuencia(frecuencia: FrecuenciaFertirriego, _offsetDesdeInicio: number): boolean {
   switch (frecuencia) {
     case "diario":
       return true;
-    case "cada_2_dias":
-      return offsetDesdeInicio % 2 === 0;
-    case "cada_3_dias":
-      return offsetDesdeInicio % 3 === 0;
-    // "2 sí, 1 no": ciclo de 3 días, los primeros 2 riegan, el tercero no.
-    case "patron_2_1":
-      return offsetDesdeInicio % 3 !== 2;
     // No es un offset parejo — usa riegosEnRangoDiasSemana/diaMarcadoDiasSemana en vez de esta función.
     case "dias_semana":
       throw new Error("dias_semana no usa riegosEnVentana/riegosEnSemana — usa riegosEnRangoDiasSemana/riegosEnSemanaDiasSemana.");

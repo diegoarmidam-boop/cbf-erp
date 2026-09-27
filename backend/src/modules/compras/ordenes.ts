@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { calcularAhorroForaneo, calcularCotizacion } from "@cbf/shared";
+import type { Rol } from "@prisma/client";
 import { prisma } from "../../core/db.js";
 import type { TransactionClient } from "../../core/db.js";
 import { intentarComprometer, registrarEntradaTx } from "../almacen/movimientos.js";
@@ -22,6 +23,29 @@ export class TransicionInvalidaError extends Error {
   constructor(esperado: string) {
     super(`Esta orden no está en estado "${esperado}".`);
   }
+}
+
+// Alcance de autorización del Gerente Técnico de Producción (V1 P7,
+// 27-sep-2026, 9.14): solo autoriza "producto para la planta" — según
+// aclaró Diego, eso es CUALQUIER producto que se le echa a los cultivos, y
+// todos esos tienen ingrediente activo (agroquímico, fertilizante,
+// herbicida, fungicida, etc.). Piezas, guantes, refacciones, combustible,
+// etc. no tienen ingredienteActivo y quedan fuera de su alcance — las
+// sigue autorizando Dirección General/Gerente Administrativo, sin cambios
+// (quién autoriza esas exactamente queda pendiente de revisar después, tal
+// como pidió Diego — "ya luego vemos y actualizamos permisos si se ocupa").
+export class AutorizacionFueraDeAlcanceError extends Error {
+  constructor() {
+    super(
+      "El Gerente Técnico de Producción solo autoriza compras de productos con ingrediente activo (los que se aplican a los cultivos) — esta compra no aplica a cultivos, la debe autorizar Dirección General o Gerencia Administrativa."
+    );
+  }
+}
+
+async function verificarAlcanceAutorizacionGTP(id: string, rol: Rol): Promise<void> {
+  if (rol !== "gerente_tecnico_produccion") return;
+  const orden = await prisma.ordenCompra.findUnique({ where: { id }, include: { producto: true } });
+  if (orden && !orden.producto.ingredienteActivo) throw new AutorizacionFueraDeAlcanceError();
 }
 
 // Editar Solicitudes manuales (8, V35, 17-sep-2026).
@@ -706,7 +730,8 @@ export async function crearSolicitudManual(titulo: string, productosInput: Produ
 }
 
 /** "Primero en llegar gana" (bloque 4) — igual que el resto de autorizaciones del sistema. */
-export async function autorizarOrden(id: string, autorizadoPorId: string) {
+export async function autorizarOrden(id: string, autorizadoPorId: string, rol: Rol) {
+  await verificarAlcanceAutorizacionGTP(id, rol);
   const actualizadas = await prisma.ordenCompra.updateMany({
     where: { id, estado: "pendiente_autorizar" },
     data: { estado: "pendiente_cotizar", autorizadoPorId },
@@ -715,7 +740,8 @@ export async function autorizarOrden(id: string, autorizadoPorId: string) {
   return prisma.ordenCompra.findUniqueOrThrow({ where: { id } });
 }
 
-export async function rechazarOrden(id: string, autorizadoPorId: string, motivoRechazo?: string) {
+export async function rechazarOrden(id: string, autorizadoPorId: string, rol: Rol, motivoRechazo?: string) {
+  await verificarAlcanceAutorizacionGTP(id, rol);
   const actualizadas = await prisma.ordenCompra.updateMany({
     where: { id, estado: "pendiente_autorizar" },
     data: { estado: "rechazada", autorizadoPorId, motivoRechazo },

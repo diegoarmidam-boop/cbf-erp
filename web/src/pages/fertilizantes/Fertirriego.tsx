@@ -19,11 +19,9 @@ const ETIQUETAS_ESTADO: Record<string, string> = {
   cancelada: "Cancelada",
 };
 
+// "cada_2_dias", "cada_3_dias" y "patron_2_1" se quitaron (V1 P7, 27-sep-2026, 9.5).
 const ETIQUETAS_FRECUENCIA: Record<FrecuenciaFertirriego, string> = {
   diario: "Diario",
-  cada_2_dias: "Cada 2 días",
-  cada_3_dias: "Cada 3 días",
-  patron_2_1: "2 sí, 1 no",
   dias_semana: "Días específicos de la semana",
 };
 

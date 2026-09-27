@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { api, ApiError } from "../lib/api";
 import type { Notificacion, NotificacionVista, SolicitudPendiente } from "../lib/types";
 import { formatearFecha } from "../lib/fecha";
+import ConfirmModal from "../components/ConfirmModal";
 
 const ETIQUETAS_TIPO_SOLICITUD: Record<string, string> = {
   actividad_alta: "Nueva actividad",
@@ -26,6 +27,8 @@ export default function Notificaciones() {
   const [error, setError] = useState<string | null>(null);
   const [historial, setHistorial] = useState<NotificacionVista[] | null>(null);
   const [motivoRechazo, setMotivoRechazo] = useState<Record<string, string>>({});
+  // Confirmación en dos pasos (V1 P7, 27-sep-2026, 9.16) — rechazar una solicitud pendiente.
+  const [rechazandoId, setRechazandoId] = useState<string | null>(null);
 
   function cargar() {
     api
@@ -73,6 +76,7 @@ export default function Notificaciones() {
     setError(null);
     try {
       await api.post(`/solicitudes/${id}/rechazar`, { motivoRechazo: motivoRechazo[id] || undefined });
+      setRechazandoId(null);
       cargar();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "No se pudo rechazar.");
@@ -111,13 +115,24 @@ export default function Notificaciones() {
                   value={motivoRechazo[s.id] ?? ""}
                   onChange={(e) => setMotivoRechazo((prev) => ({ ...prev, [s.id]: e.target.value }))}
                 />
-                <button className="btn-secondary" onClick={() => rechazar(s.id)}>
+                <button className="btn-secondary" onClick={() => setRechazandoId(s.id)}>
                   Rechazar
                 </button>
               </div>
             </div>
           ))}
         </div>
+      )}
+
+      {rechazandoId && (
+        <ConfirmModal
+          titulo="Rechazar solicitud"
+          mensaje="Esta solicitud se rechazará y ya no podrá autorizarse después. ¿Confirmas?"
+          textoConfirmar="Sí, rechazar"
+          peligroso
+          onConfirmar={() => rechazar(rechazandoId)}
+          onCancelar={() => setRechazandoId(null)}
+        />
       )}
 
       <h3 style={{ marginBottom: 10, fontSize: 14 }}>Otras alertas</h3>

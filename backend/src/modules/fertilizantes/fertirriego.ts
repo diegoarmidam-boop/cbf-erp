@@ -63,7 +63,7 @@ export interface ProgramarFertirriegoInput {
   huertaId: string;
   seccionIds: string[];
   productos: ProductoFertirriegoInput[];
-  frecuencia: "diario" | "cada_2_dias" | "cada_3_dias" | "patron_2_1" | "dias_semana";
+  frecuencia: "diario" | "dias_semana";
   // Solo cuando frecuencia = "dias_semana" (Prioridad 5, 7-sep-2026):
   // 0=Domingo..6=Sábado, mínimo 1 día marcado.
   diasSemana?: number[];

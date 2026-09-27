@@ -1402,7 +1402,8 @@ export interface FertilizacionGranular {
   restantesPorMiembro?: Record<string, number>;
 }
 
-export type FrecuenciaFertirriego = "diario" | "cada_2_dias" | "cada_3_dias" | "patron_2_1" | "dias_semana";
+// "cada_2_dias", "cada_3_dias" y "patron_2_1" se quitaron (V1 P7, 27-sep-2026, 9.5).
+export type FrecuenciaFertirriego = "diario" | "dias_semana";
 
 export interface RiegoRegistroDiarioProducto {
   id: string;

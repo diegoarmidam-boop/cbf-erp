@@ -18,11 +18,9 @@ import { obtenerFertirriego } from "../fertilizantes/fertirriego.js";
 import { obtenerVersionVigente } from "../unidades-produccion/cuadros.js";
 
 const ETIQUETA_RECURSO: Record<string, string> = { mochila: "Mochila", turbina: "Turbina", aguilon: "Aguilón" };
+// "cada_2_dias", "cada_3_dias" y "patron_2_1" se quitaron (V1 P7, 27-sep-2026, 9.5).
 const ETIQUETA_FRECUENCIA: Record<string, string> = {
   diario: "Diario",
-  cada_2_dias: "Cada 2 días",
-  cada_3_dias: "Cada 3 días",
-  patron_2_1: "2 sí, 1 no",
 };
 // 0=Domingo..6=Sábado, mismo criterio que Date.getDay() (Prioridad 5, 7-sep-2026).
 const NOMBRES_DIA_SEMANA = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];

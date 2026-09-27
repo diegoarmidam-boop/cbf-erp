@@ -6,6 +6,7 @@ import { useCatalogoAbierto } from "../../lib/useCatalogoAbierto";
 import { useHuertas } from "../../lib/useHuertas";
 import type { EstadoLineaPendiente, GrupoPendienteProgramacion, LineaPendienteProgramacion, OrdenCompra, PendienteIngredienteActivo, Producto } from "../../lib/types";
 import FechaInput from "../../components/FechaInput";
+import ConfirmModal from "../../components/ConfirmModal";
 import { formatearFecha, formatearInstante } from "../../lib/fecha";
 import { formatearDinero, formatearNumero } from "../../lib/numero";
 import { nombreConMarca } from "../../lib/producto";
@@ -160,6 +161,8 @@ export default function Ordenes() {
   // Cancelar una Orden ya generada (7, V35, 17-sep-2026) — observaciones
   // opcionales (7.2), el rol exclusivo de Compras (7.3) lo valida el backend.
   const [cancelandoId, setCancelandoId] = useState<string | null>(null);
+  // Confirmación en dos pasos (V1 P7, 27-sep-2026, 9.16) — rechazar una orden pendiente de autorizar.
+  const [rechazandoId, setRechazandoId] = useState<string | null>(null);
   const [observacionesCancelar, setObservacionesCancelar] = useState("");
 
   // Editar Solicitud manual (8, V35, 17-sep-2026) — Título es de la
@@ -288,6 +291,7 @@ export default function Ordenes() {
     setError(null);
     try {
       await api.post(`/compras/ordenes/${id}/rechazar`);
+      setRechazandoId(null);
       cargarTodo();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "No se pudo rechazar.");
@@ -490,7 +494,7 @@ export default function Ordenes() {
                 <button className="btn-primary" onClick={() => autorizar(o.id)}>
                   Autorizar
                 </button>
-                <button className="btn-secondary" onClick={() => rechazar(o.id)}>
+                <button className="btn-secondary" onClick={() => setRechazandoId(o.id)}>
                   Rechazar
                 </button>
               </>
@@ -790,7 +794,7 @@ export default function Ordenes() {
                                       <button className="btn-primary" onClick={() => autorizar(l.ordenId)}>
                                         Autorizar
                                       </button>
-                                      <button className="btn-secondary" onClick={() => rechazar(l.ordenId)}>
+                                      <button className="btn-secondary" onClick={() => setRechazandoId(l.ordenId)}>
                                         Rechazar
                                       </button>
                                     </>
@@ -957,6 +961,17 @@ export default function Ordenes() {
             {ordenesRechazadasCanceladas.length === 0 && <p style={{ color: "var(--ink-soft)" }}>Sin órdenes rechazadas o canceladas.</p>}
           </div>
         </>
+      )}
+
+      {rechazandoId && (
+        <ConfirmModal
+          titulo="Rechazar orden"
+          mensaje="Esta orden se rechazará y ya no podrá autorizarse después. ¿Confirmas?"
+          textoConfirmar="Sí, rechazar"
+          peligroso
+          onConfirmar={() => rechazar(rechazandoId)}
+          onCancelar={() => setRechazandoId(null)}
+        />
       )}
     </div>
   );

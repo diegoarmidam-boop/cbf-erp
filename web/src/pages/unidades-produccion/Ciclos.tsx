@@ -6,6 +6,7 @@ import type { Ciclo, TipoCiclo, EtapaCiclo } from "../../lib/types";
 import { useHuertaSeleccionada } from "./HuertaSeleccionadaContext";
 import FechaInput from "../../components/FechaInput";
 import { formatearFecha } from "../../lib/fecha";
+import ConfirmModal from "../../components/ConfirmModal";
 
 function hoyISO(): string {
   const d = new Date();
@@ -46,6 +47,8 @@ export default function Ciclos() {
   const [avisoSobrante, setAvisoSobrante] = useState<DesajusteCuadro[] | null>(null);
   const [editandoId, setEditandoId] = useState<string | null>(null);
   const [gastoCintillaForm, setGastoCintillaForm] = useState("");
+  // Confirmación en dos pasos (V1 P7, 27-sep-2026, 9.16) — cerrar el ciclo activo es irreversible.
+  const [confirmandoCierre, setConfirmandoCierre] = useState(false);
 
   function hectareasVigentesCuadro(cuadroId: string): number | null {
     const cuadro = cuadros.find((c) => c.id === cuadroId);
@@ -175,6 +178,7 @@ export default function Ciclos() {
     setError(null);
     try {
       await api.post(`/ciclos/${cicloId}/cerrar`);
+      setConfirmandoCierre(false);
       cargar();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "No se pudo cerrar el ciclo.");
@@ -196,7 +200,7 @@ export default function Ciclos() {
               <button className="btn-secondary" onClick={() => iniciarEdicion(activo)}>
                 Editar
               </button>
-              <button className="btn-danger" onClick={() => cerrarCiclo(activo.id)}>
+              <button className="btn-danger" onClick={() => setConfirmandoCierre(true)}>
                 Cerrar ciclo
               </button>
             </div>
@@ -410,6 +414,17 @@ export default function Ciclos() {
           ))}
         </tbody>
       </table>
+
+      {confirmandoCierre && activo && (
+        <ConfirmModal
+          titulo="Cerrar ciclo"
+          mensaje="Esto cierra el ciclo activo de forma definitiva. ¿Confirmas?"
+          textoConfirmar="Sí, cerrar ciclo"
+          peligroso
+          onConfirmar={() => cerrarCiclo(activo.id)}
+          onCancelar={() => setConfirmandoCierre(false)}
+        />
+      )}
     </div>
   );
 }

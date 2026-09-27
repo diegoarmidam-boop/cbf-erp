@@ -6,6 +6,7 @@ import { mensajeErrorCaptura, mensajeErrorValidacion, unoSolo } from "../../core
 import { prisma } from "../../core/db.js";
 import { opcionesRecepcionDeProducto } from "../almacen/preferencias.js";
 import {
+  AutorizacionFueraDeAlcanceError,
   autorizarOrden,
   crearSolicitudManual,
   DestinoManualInvalidoError,
@@ -141,10 +142,14 @@ ordenesRouter.post("/:id/editar", requirePermission("compras", "capturar"), asyn
 
 ordenesRouter.post("/:id/autorizar", requirePermission("compras", "autoriza"), async (req, res) => {
   try {
-    res.json(await autorizarOrden(unoSolo(req.params.id), req.usuario!.usuarioId));
+    res.json(await autorizarOrden(unoSolo(req.params.id), req.usuario!.usuarioId, req.usuario!.rol));
   } catch (err) {
     if (err instanceof SolicitudYaResueltaOrdenError) {
       res.status(409).json({ error: err.message });
+      return;
+    }
+    if (err instanceof AutorizacionFueraDeAlcanceError) {
+      res.status(403).json({ error: err.message });
       return;
     }
     throw err;
@@ -156,10 +161,14 @@ const rechazarSchema = z.object({ motivoRechazo: z.string().optional() });
 ordenesRouter.post("/:id/rechazar", requirePermission("compras", "autoriza"), async (req, res) => {
   const parsed = rechazarSchema.safeParse(req.body);
   try {
-    res.json(await rechazarOrden(unoSolo(req.params.id), req.usuario!.usuarioId, parsed.success ? parsed.data.motivoRechazo : undefined));
+    res.json(await rechazarOrden(unoSolo(req.params.id), req.usuario!.usuarioId, req.usuario!.rol, parsed.success ? parsed.data.motivoRechazo : undefined));
   } catch (err) {
     if (err instanceof SolicitudYaResueltaOrdenError) {
       res.status(409).json({ error: err.message });
+      return;
+    }
+    if (err instanceof AutorizacionFueraDeAlcanceError) {
+      res.status(403).json({ error: err.message });
       return;
     }
     throw err;

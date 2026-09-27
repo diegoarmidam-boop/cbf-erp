@@ -5,6 +5,7 @@ import type { AjusteAsistencia, ConfigBonoAsistencia, ResumenBonoAsistencia } fr
 import FechaInput from "../../components/FechaInput";
 import { formatearFecha } from "../../lib/fecha";
 import { formatearDinero } from "../../lib/numero";
+import ConfirmModal from "../../components/ConfirmModal";
 
 type Seccion = "semana" | "ajustes" | "config";
 
@@ -144,6 +145,8 @@ function Ajustes() {
   const [diaCompleto, setDiaCompleto] = useState("no");
   const [justificado, setJustificado] = useState("si");
   const [nota, setNota] = useState("");
+  // Confirmación en dos pasos (V1 P7, 27-sep-2026, 9.16) — quitar un Ajuste de Asistencia.
+  const [borrandoId, setBorrandoId] = useState<string | null>(null);
 
   function cargar() {
     api
@@ -179,6 +182,7 @@ function Ajustes() {
     setError(null);
     try {
       await api.delete(`/nomina/bono-asistencia/ajustes/${id}`);
+      setBorrandoId(null);
       cargar();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "No se pudo borrar.");
@@ -256,7 +260,7 @@ function Ajustes() {
               <td>{a.justificado ? "Sí" : "No"}</td>
               <td>{a.nota ?? "—"}</td>
               <td>
-                <button className="btn-secondary" onClick={() => borrar(a.id)}>
+                <button className="btn-secondary" onClick={() => setBorrandoId(a.id)}>
                   Quitar
                 </button>
               </td>
@@ -271,6 +275,16 @@ function Ajustes() {
           )}
         </tbody>
       </table>
+      {borrandoId && (
+        <ConfirmModal
+          titulo="Quitar Ajuste de Asistencia"
+          mensaje="Este ajuste se quitará y ya no contará para el Bono de Asistencia de esta semana. ¿Confirmas?"
+          textoConfirmar="Sí, quitar"
+          peligroso
+          onConfirmar={() => borrar(borrandoId)}
+          onCancelar={() => setBorrandoId(null)}
+        />
+      )}
     </div>
   );
 }
