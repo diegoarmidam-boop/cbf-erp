@@ -31,6 +31,8 @@ export default function EnCamino() {
   const [lote, setLote] = useState("");
   const [fechaCaducidad, setFechaCaducidad] = useState("");
   const [productoRecibidoId, setProductoRecibidoId] = useState("");
+  // El flete viaja con el producto (V1 P4, 27-sep-2026, 9.14a).
+  const [vinoConFlete, setVinoConFlete] = useState(false);
   const [opcionesRecepcion, setOpcionesRecepcion] = useState<Producto[]>([]);
   // Número de Lote de Almacén asignado por el sistema (V1 P1, 25-sep-2026,
   // regla a) — consecutivo único de todo el Almacén Central, se muestra en
@@ -59,6 +61,7 @@ export default function EnCamino() {
     setLote("");
     setFechaCaducidad("");
     setProductoRecibidoId(orden.productoId);
+    setVinoConFlete(false);
     const opciones = await api.get<Producto[]>(`/compras/ordenes/${orden.id}/opciones-recepcion`);
     setOpcionesRecepcion(opciones);
   }
@@ -73,6 +76,7 @@ export default function EnCamino() {
         lote: lote || undefined,
         fechaCaducidad: fechaCaducidad || undefined,
         productoRecibidoId,
+        vinoConFlete,
       });
       setRecibiendo(null);
       if (resultado.numeroLoteAsignado != null) {
@@ -222,6 +226,10 @@ export default function EnCamino() {
                         </label>
                       </>
                     )}
+                    <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5 }}>
+                      <input type="checkbox" checked={vinoConFlete} onChange={(e) => setVinoConFlete(e.target.checked)} />
+                      ¿Esta orden vino con flete?
+                    </label>
                     <button className="btn-primary" onClick={() => confirmarRecibir(o.id, o.producto.nombreComercial)}>
                       Confirmar recepción
                     </button>

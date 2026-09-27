@@ -4,6 +4,7 @@ const TABS = [
   { to: "ordenes", label: "Órdenes" },
   { to: "proveedores", label: "Proveedores" },
   { to: "cxp", label: "Cuentas por Pagar" },
+  { to: "flete", label: "Flete" },
   { to: "comparador", label: "Comparador de Cotizaciones" },
 ];
 

@@ -34,6 +34,7 @@ import ComprasLayout from "./pages/compras/ComprasLayout";
 import Ordenes from "./pages/compras/Ordenes";
 import Proveedores from "./pages/compras/Proveedores";
 import CxP from "./pages/compras/CxP";
+import Flete from "./pages/compras/Flete";
 import Comparador from "./pages/compras/Comparador";
 import EquiposLayout from "./pages/equipos/EquiposLayout";
 import EquiposCatalogo from "./pages/equipos/Catalogo";
@@ -120,6 +121,7 @@ export default function App() {
               <Route path="ordenes" element={<Ordenes />} />
               <Route path="proveedores" element={<Proveedores />} />
               <Route path="cxp" element={<CxP />} />
+              <Route path="flete" element={<Flete />} />
               <Route path="comparador" element={<Comparador />} />
             </Route>
 

@@ -4,6 +4,7 @@ import { prisma } from "../../core/db.js";
 import type { TransactionClient } from "../../core/db.js";
 import { intentarComprometer, registrarEntradaTx } from "../almacen/movimientos.js";
 import { calcularRiegosEnCampania } from "../fertilizantes/fertirriego.js";
+import { marcarVinoConFleteTx } from "./flete.js";
 
 export class SolicitudYaResueltaOrdenError extends Error {
   constructor() {
@@ -851,7 +852,7 @@ export async function recibirOrden(
   id: string,
   presentacion: { contenedor: string; presentacionCantidad: number; numeroUnidades: number },
   recibidoPorId: string,
-  opciones: { lote?: string; fechaCaducidad?: string; productoRecibidoId?: string } = {}
+  opciones: { lote?: string; fechaCaducidad?: string; productoRecibidoId?: string; vinoConFlete?: boolean } = {}
 ) {
   const orden = await prisma.ordenCompra.findUniqueOrThrow({ where: { id } });
   if (orden.estado !== "generada") throw new TransicionInvalidaError("generada");
@@ -887,6 +888,13 @@ export async function recibirOrden(
       contenedor: presentacion.contenedor,
       presentacionCantidad: presentacion.presentacionCantidad,
     });
+
+    // El flete viaja con el producto (V1 P4, 27-sep-2026, 9.14a) — se
+    // pregunta al confirmar CUALQUIER recepción del folio; una vez marcado,
+    // no se desmarca aquí (queda pendiente hasta capturarse el monto real).
+    if (opciones.vinoConFlete) {
+      await marcarVinoConFleteTx(tx, orden.numero, recibidoPorId);
+    }
 
     // Si esta orden nació automática porque una Aplicación/Fertilización en
     // espera no alcanzaba stock (9.5/9.7/9.14), al recibirla se intenta

@@ -11,6 +11,7 @@ import { listarAjustesPendientesConfirmar } from "../modules/almacen/movimientos
 import { diasPendientesDeCierre } from "../modules/nomina/cierre.js";
 import { estadoRiegoTodasUPs } from "../modules/riego/riego.js";
 import { calcularAlertaLitrosPorHectarea, calcularAlertaRendimiento } from "../modules/equipos/combustible.js";
+import { listarFletesPendientes } from "../modules/compras/flete.js";
 import type { Rol } from "@prisma/client";
 
 // Firma digital de recepción de cancelaciones (9.7): el documento dice
@@ -217,6 +218,27 @@ async function calcularNotificaciones(rol: Rol, huertaIdAlcance: string | null):
         urgente: true,
         fecha: c.fechaLimitePago.toISOString(),
         enlace: `/compras/cxp?id=${c.id}`,
+      });
+    }
+  }
+
+  // 3.5) El flete viaja con el producto (V1 P4, 27-sep-2026, 9.14a) —
+  // órdenes marcadas "vino con flete" a las que todavía les falta capturar
+  // el monto real. Mismo permiso que CxP (director_general ya tiene acceso
+  // universal, cubre "y de Dirección General" del prompt sin lista propia).
+  if (await tienePermiso(rol, "compras", "ver")) {
+    const fletes = await listarFletesPendientes();
+    for (const f of fletes) {
+      if (!f.completo) continue; // todavía no se puede capturar — no molesta antes de tiempo
+      const productos = [...new Set(f.lineas.map((l) => l.producto.nombreComercial))].join(" + ");
+      notificaciones.push({
+        id: `flete-pendiente-${f.id}`,
+        tipo: "flete_pendiente",
+        titulo: "Falta capturar el flete real de una orden",
+        detalle: `Folio ${f.numero} — ${productos}`,
+        urgente: false,
+        fecha: (f.fechaMarcado ?? f.fechaCreacion).toISOString(),
+        enlace: `/compras/flete?numero=${f.numero}`,
       });
     }
   }

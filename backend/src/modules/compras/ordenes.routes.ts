@@ -25,6 +25,15 @@ import {
   TransicionInvalidaError,
 } from "./ordenes.js";
 import { generarPdfOrdenCompra, obtenerOrdenCompraParaPdf } from "./ordenCompraPdf.js";
+import {
+  capturarFleteOrden,
+  FleteNoPendienteError,
+  FleteYaCapturadoError,
+  FolioIncompletoError,
+  listarFletesPendientes,
+  OrdenSinFolioError,
+  SinPesoParaRepartirError,
+} from "./flete.js";
 
 // Editar Solicitud manual (8.1, V35, 17-sep-2026): "el Solicitante Y la
 // persona de Compras (Compras directo, sin pasar por el Solicitante)" --
@@ -183,6 +192,8 @@ const recibirSchema = z.object({
   lote: z.string().optional(),
   fechaCaducidad: z.string().optional(),
   productoRecibidoId: z.string().min(1),
+  // El flete viaja con el producto (V1 P4, 27-sep-2026, 9.14a).
+  vinoConFlete: z.boolean().optional(),
 });
 
 // Recibir es, físicamente, una acción de Almacén ("Almacén la recibe" —
@@ -200,11 +211,45 @@ ordenesRouter.post("/:id/recibir", requirePermission("almacen", "capturar"), asy
       unoSolo(req.params.id),
       { contenedor: parsed.data.contenedor, presentacionCantidad: parsed.data.presentacionCantidad, numeroUnidades: parsed.data.numeroUnidades },
       req.usuario!.usuarioId,
-      { lote: parsed.data.lote, fechaCaducidad: parsed.data.fechaCaducidad, productoRecibidoId: parsed.data.productoRecibidoId }
+      { lote: parsed.data.lote, fechaCaducidad: parsed.data.fechaCaducidad, productoRecibidoId: parsed.data.productoRecibidoId, vinoConFlete: parsed.data.vinoConFlete }
     );
     res.json(orden);
   } catch (err) {
     if (err instanceof TransicionInvalidaError) {
+      res.status(409).json({ error: err.message });
+      return;
+    }
+    if (err instanceof OrdenSinFolioError) {
+      res.status(400).json({ error: err.message });
+      return;
+    }
+    throw err;
+  }
+});
+
+// El flete viaja con el producto (V1 P4, 27-sep-2026, 9.14) — pendientes de
+// capturar el monto real, y la captura misma. Vive bajo /ordenes por
+// cercanía a la recepción, no bajo /cxp: el flete nunca toca CxP.
+ordenesRouter.get("/flete/pendientes", requirePermission("compras", "ver"), async (_req, res) => {
+  res.json(await listarFletesPendientes());
+});
+
+const capturarFleteSchema = z.object({
+  numero: z.number().int(),
+  montoTotal: z.number().positive(),
+});
+
+ordenesRouter.post("/flete/capturar", requirePermission("compras", "capturar"), async (req, res) => {
+  const parsed = capturarFleteSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: mensajeErrorValidacion(parsed.error) });
+    return;
+  }
+  try {
+    const resultado = await capturarFleteOrden(parsed.data.numero, parsed.data.montoTotal, req.usuario!.usuarioId);
+    res.status(201).json(resultado);
+  } catch (err) {
+    if (err instanceof FleteNoPendienteError || err instanceof FleteYaCapturadoError || err instanceof FolioIncompletoError || err instanceof SinPesoParaRepartirError) {
       res.status(409).json({ error: err.message });
       return;
     }

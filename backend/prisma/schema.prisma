@@ -189,6 +189,7 @@ model Huerta {
   trasladosOrigen         EquipoTraslado[]          @relation("EquipoTrasladoOrigen")
   trasladosDestino        EquipoTraslado[]          @relation("EquipoTrasladoDestino")
   combustibleCargas       CombustibleCarga[]
+  ajustesCostoFlete       AjusteCostoHuerta[]
 }
 
 enum EstatusCuadro {
@@ -1192,6 +1193,7 @@ model Producto {
   recepcionesComoRecibido           OrdenCompraRecepcion[]            @relation("ProductoRecibidoEnRecepcion")
   viveroPresupuestoSemilla          ViveroPresupuestoSemilla[]
   combustibleCargas                 CombustibleCarga[]
+  ajustesCostoHuerta                AjusteCostoHuerta[]
 
   @@index([categoria])
 }
@@ -1227,6 +1229,7 @@ model ProductoLote {
   presentacionCantidad Decimal?  @db.Decimal(10, 3)
 
   movimientos AlmacenCentralMovimiento[]
+  ajustesCostoHuerta AjusteCostoHuerta[]
 
   @@index([productoId])
 }
@@ -1451,6 +1454,58 @@ model OrdenCompra {
   @@index([estado])
   @@index([numero])
   @@index([solicitudManualId])
+}
+
+// El flete viaja con el producto (V1 P4, 27-sep-2026, 9.14): una fila por
+// folio (`OrdenCompra.numero`) — un folio puede agrupar varias líneas/
+// productos generados juntos. `vinoConFlete` se marca al confirmar CUALQUIER
+// recepción de ese folio ("¿esta orden vino con flete?"); `montoTotal` se
+// llena después, una sola vez, cuando YA se recibieron TODAS las líneas del
+// folio (candado de negocio, no solo de UI — ver capturarFleteOrden). El
+// flete NUNCA toca OrdenCompra.precioUnitario ni Cuentas por Pagar (lo cobra
+// un tercero, no el Proveedor del producto) — solo ajusta el precioUnitario
+// de los movimientos `entrada_compra` de los lotes de ese folio, y genera
+// AjusteCostoHuerta por lo que ya hubiera salido a una Huerta antes de
+// capturarlo.
+model OrdenCompraFlete {
+  id             String    @id @default(uuid())
+  numero         Int       @unique
+  vinoConFlete   Boolean   @default(false)
+  marcadoPorId   String?
+  fechaMarcado   DateTime?
+  montoTotal     Decimal?  @db.Decimal(12, 2)
+  capturadoPorId String?
+  fechaCaptura   DateTime?
+  fechaCreacion  DateTime  @default(now())
+
+  ajustes AjusteCostoHuerta[]
+}
+
+// Ajuste monetario a una Huerta (V1 P4, 27-sep-2026, 9.14c) cuando el flete
+// se captura DESPUÉS de que parte de un lote ya había salido a esa Huerta —
+// nunca cambia la cantidad (kg/L) que la Huerta ya tiene, solo lo que ese
+// tanto le costó. Hoy no existe cierre contable, así que el ajuste siempre
+// se aplica completo (motivo del campo `periodoCerrado`, pensado para
+// cuando exista uno: se guardaría el ajuste igual, pero podría dejar de
+// aplicarse automáticamente a un periodo ya cerrado).
+model AjusteCostoHuerta {
+  id                 String           @id @default(uuid())
+  huertaId           String
+  huerta             Huerta           @relation(fields: [huertaId], references: [id])
+  productoId         String
+  producto           Producto         @relation(fields: [productoId], references: [id])
+  ordenCompraFleteId String
+  ordenCompraFlete   OrdenCompraFlete @relation(fields: [ordenCompraFleteId], references: [id])
+  loteId             String
+  lote               ProductoLote     @relation(fields: [loteId], references: [id])
+  cantidadYaEnviada  Decimal          @db.Decimal(12, 3)
+  fletePorKg         Decimal          @db.Decimal(12, 4)
+  montoAjuste        Decimal          @db.Decimal(12, 2)
+  periodoCerrado     Boolean          @default(false)
+  fecha              DateTime         @default(now())
+  capturadoPorId     String
+
+  @@index([huertaId, productoId])
 }
 
 // Catálogo abierto de Centros de Costo (4.1, 2-sep-2026, Bloque 3 del
